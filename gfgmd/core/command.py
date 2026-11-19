@@ -1,0 +1,450 @@
+"""Build yt-dlp command lines. Pure functions: no I/O, so every flag is covered by unit tests.
+
+Every command:
+- loads no yt-dlp configuration, plugin, or remote component, so nothing outside the app can add
+  options such as --exec (the original script used --no-config-locations, which still loaded config.txt);
+- names ffmpeg and Deno by absolute path, so PATH never decides which program runs;
+- passes links after "--", so a link that begins with "-" can never be read as an option.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Sequence
+
+from gfgmd.core.options import DownloadOptions
+from gfgmd.core.sites import resolve_site, site_by_key
+from gfgmd.core.sources import CHANNEL_TABS, Source
+from gfgmd.core.tools import ToolSet
+
+MARKER = "@@gfgr:"
+# More links than this go through a batch file, which keeps the command line short.
+MAX_INLINE_URLS = 50
+# --match-filters entries beyond this are dropped; the skipped items then fail fast and are skipped again.
+MAX_SKIP_FILTERS = 200
+
+_ITEM_FIELDS = ("id,extractor_key,title,uploader,channel,duration,live_status,playlist_title,"
+                "playlist_index,n_entries,format_id,webpage_url,thumbnail,release_timestamp")
+_FILE_FIELDS = ("id,extractor_key,title,filepath,height,width,vcodec,acodec,webpage_url,duration,uploader,"
+                "channel,playlist_title,thumbnail,artist,creator,track,album")
+_ENTRY_FIELDS = ("id,url,title,duration,live_status,availability,release_timestamp,timestamp,"
+                 "playlist_index,ie_key,channel,uploader")
+_DOWNLOAD_PROGRESS = (
+    "download:" + MARKER + 'dl {"p":%(progress.{status,downloaded_bytes,total_bytes,total_bytes_estimate,'
+    'speed,eta,fragment_index,fragment_count,tmpfilename,filename,elapsed})j,'
+    '"i":%(info.{id,format_id,vcodec,acodec,playlist_index,is_live})j}'
+)
+_POSTPROCESS_PROGRESS = (
+    "postprocess:" + MARKER + 'pp {"p":%(progress.{status,postprocessor})j,"i":%(info.{id,filepath})j}'
+)
+_STAGES = {"video", "after_move", "playlist", "before_dl", "pre_process", "after_filter", "post_process"}
+# Each order ranks "lang" before any audio field, so the audio track in the video's original language
+# wins over dubbed ones. yt-dlp always ranks its own "ie_pref" first, which keeps watermarked TikTok
+# formats last.
+SORT_PROFILES = {
+    "balanced": "lang,res,proto:m3u8,vcodec:h264,acodec:aac",
+    "compatible": "vcodec:h264,lang,quality,res,fps,hdr:12,acodec:aac",
+    "best": "lang,res,fps,hdr:12",
+}
+# Audio-only downloads: the original language, then the highest bitrate and sample rate.
+AUDIO_SORT = "lang,abr,asr"
+_AUDIO_SELECTORS = {
+    "mp3": "ba[acodec^=mp3]/ba/b",
+    "m4a": "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b",
+    "opus": "ba[acodec^=opus]/ba/b",
+    "vorbis": "ba[acodec^=vorbis]/ba/b",
+    "flac": "ba/b",
+    "wav": "ba/b",
+    "best": "ba/b",
+}
+# A centre crop to a square, for covers. yt-dlp splits these arguments like a shell, so the single
+# quotes reach ffmpeg, which then reads the commas inside them as part of the expressions.
+SQUARE_COVER = ("ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -qmin 1 -qscale:v 1 "
+                "-vf crop=\"'if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'\"")
+# Channel names that aren't the artist: YouTube Music's "<Artist> - Topic" and "<Artist>VEVO".
+_ARTIST_SUFFIX = r"( - Topic|VEVO)$"
+# Facebook titles reels "9.9K views · 340 reactions | <caption>"; the counts don't belong in a file name.
+_FACEBOOK_COUNTS = r"^[\d.,]+[KMB]? (?:views|plays)(?: · [\d.,]+[KMB]? reactions)? \| "
+# When the site names no artist, an "Artist - Song | labels" title gives the tags their artist and
+# title (meta_ fields change only the tags, not the file name). "%(artist|)s" is empty then, so the
+# text starts with "@@" and the pattern can match only in that case.
+_TITLE_TAGS = ("%(artist|)s@@%(title)s:"
+               r"^@@(?P<meta_artist>[^|]+?) - (?P<meta_title>[^|]+?)(?:\s+\|.*)?$")
+_FILENAME_PREFIX = {
+    "title-quality": "",
+    "title": "",
+    "date-title": "%(upload_date>%Y-%m-%d&{} - |)s",
+    "index-title": "%(playlist_index&{:03d} - |)s",
+}
+
+
+@dataclass(frozen=True)
+class RunPaths:
+    """Where one download writes: its root folder, archive, scratch folder, and yt-dlp cache."""
+
+    root: Path
+    archive: Path
+    job_dir: Path
+    cache_dir: Path
+
+    @property
+    def journal(self) -> Path:
+        """yt-dlp's own record of each finished file, written as it moves the file into place."""
+        return self.job_dir / "files.jsonl"
+
+    @property
+    def incomplete(self) -> Path:
+        """Where partial files live until yt-dlp moves them into the download folder."""
+        return self.root / ".incomplete"
+
+
+@dataclass(frozen=True)
+class Auth:
+    """How a run signs in: a cookies file, or cookies read from a browser on each run."""
+
+    cookies_file: str = ""
+    browser: str = ""  # yt-dlp's --cookies-from-browser value, such as "firefox" or "firefox:Profile"
+
+
+def escape_template(text: str) -> str:
+    """A literal for a yt-dlp output template ("%" is its field marker)."""
+    return text.replace("%", "%%")
+
+
+def print_arg(stage: str, template: str) -> list[str]:
+    """A --print argument for an allowed stage (yt-dlp silently prints a mistyped stage as text)."""
+    if stage not in _STAGES:
+        raise ValueError(f"Unknown --print stage: {stage}")
+    return ["--print", f"{stage}:{template}"]
+
+
+def base_args(tools: ToolSet, cache_dir: Path) -> list[str]:
+    """The options every yt-dlp run starts with."""
+    return [
+        tools.ytdlp,
+        "--ignore-config",
+        "--no-plugin-dirs",
+        "--no-remote-components",
+        "--no-js-runtimes",
+        "--js-runtimes", f"deno:{tools.deno}",
+        "--ffmpeg-location", tools.ffmpeg_dir,
+        "--cache-dir", str(cache_dir),
+        "--color", "never",
+        "--encoding", "utf-8",
+        "--windows-filenames",
+        "--socket-timeout", "30",
+        "--no-quiet",
+        "--newline",
+    ]
+
+
+def retry_args() -> list[str]:
+    """yt-dlp's own retries inside one attempt (the original script's values)."""
+    return [
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--extractor-retries", "5",
+        "--file-access-retries", "5",
+        "--retry-sleep", "http:exp=1:30",
+        "--retry-sleep", "fragment:exp=1:30",
+        "--retry-sleep", "extractor:exp=1:30",
+        "--retry-sleep", "file_access:exp=1:30",
+    ]
+
+
+def auth_args(auth: Auth | None) -> list[str]:
+    """--cookies or --cookies-from-browser, when the run signs in."""
+    if auth is None:
+        return []
+    if auth.cookies_file:
+        return ["--cookies", auth.cookies_file]
+    if auth.browser:
+        return ["--cookies-from-browser", auth.browser]
+    return []
+
+
+def network_args(options: DownloadOptions) -> list[str]:
+    """Proxy, IPv4, and speed limit options."""
+    args: list[str] = []
+    if options.proxy:
+        args += ["--proxy", options.proxy]
+    if options.force_ipv4:
+        args.append("--force-ipv4")
+    if options.limit_rate > 0:
+        args += ["--limit-rate", str(options.limit_rate)]
+    return args
+
+
+def url_args(urls: Sequence[str], job_dir: Path) -> tuple[list[str], str]:
+    """The links after "--", or a batch file for many links; returns (args, batch file text or "")."""
+    if len(urls) > MAX_INLINE_URLS:
+        batch = job_dir / "urls.txt"
+        return ["--batch-file", str(batch)], "".join(f"{url}\n" for url in urls)
+    return ["--", *urls], ""
+
+
+def format_selector(options: DownloadOptions) -> str:
+    """The -f selector: the best format whose shorter side fits the limit (the original script's rule).
+
+    Portrait formats (aspect ratio below 1) are capped by width and landscape ones by height, so
+    one limit fits Shorts and regular videos alike. The last pair accepts formats a site reports
+    without a height. Audio selectors prefer a stream that needs no conversion.
+    """
+    if options.kind == "audio":
+        return _AUDIO_SELECTORS[options.audio_format]
+    height = options.max_height
+    if not height:
+        return _with_audio("bv*", "b", options)
+    portrait = _with_audio(f"bv[width<={height}][aspect_ratio<1]", f"b[width<={height}][aspect_ratio<1]", options)
+    landscape = _with_audio(f"bv[height<={height}]", f"b[height<={height}]", options)
+    unknown = _with_audio(f"bv[height<=?{height}]", f"b[height<=?{height}]", options)
+    return f"{portrait}/{landscape}/{unknown}"
+
+
+def _with_audio(video: str, combined: str, options: DownloadOptions) -> str:
+    """`video` with the best audio, or one file holding both; dubbed tracks added when asked for.
+
+    The original-language track comes from the "lang" sort; each chosen language adds its own best
+    track. When a video lacks one of them, the next alternative keeps just the original.
+    """
+    plain = f"{video}+ba/{combined}"
+    if not options.multi_audio:
+        return plain
+    extra = "".join(f"+ba[language^={code}]" for code in options.audio_langs)
+    return f"{video}+ba{extra}/{plain}"
+
+
+def format_sort(options: DownloadOptions) -> str:
+    """The -S order that breaks ties between formats the selector allows."""
+    if options.kind == "audio":
+        return AUDIO_SORT
+    if options.container == "webm":
+        return "lang,res,vcodec:vp9,acodec:opus"
+    return SORT_PROFILES[options.codec_profile]
+
+
+def folder_template(source: Source) -> str:
+    """The folder under the download root, by link type (the original script's names for YouTube)."""
+    if source.site != "youtube":
+        return _site_folder(source)
+    if source.kind == "playlist":
+        return "%(playlist).100B"
+    if source.kind == "video":
+        return "Single Videos"
+    if source.kind == "short":
+        return "Shorts"
+    if source.kind == "channel":
+        tab = CHANNEL_TABS.get(source.tab, "")
+        sub = escape_template(tab) if tab else "%(playlist_title|Videos).100B"
+        return f"%(channel,uploader,playlist_uploader|Channel).100B/{sub}"
+    return _site_folder(source)
+
+
+def _site_folder(source: Source) -> str:
+    """Another site's folder: "<Site>/Shorts", "<Site>/Single Videos", "<Site>/<user>", or by playlist."""
+    if source.kind in ("short", "post", "profile"):
+        site = site_by_key(source.site) or resolve_site(source.site)
+        label = escape_template(site.label)
+        if source.kind == "short":
+            return f"{label}/Shorts"
+        if source.kind == "post":
+            return f"{label}/Single Videos"
+        return f"{label}/%(uploader,channel,playlist_uploader,playlist_title|Profile).100B"
+    return "%(extractor_key|Site).60B/%(playlist_title,playlist|Single Videos).100B"
+
+
+def output_template(source: Source, options: DownloadOptions) -> str:
+    """The staged file name: title, ID, and requested profile, renamed to a clean name afterwards."""
+    prefix = _FILENAME_PREFIX[options.filename_style]
+    return f"{folder_template(source)}/{prefix}%(title).100B [%(id).64B] (requested-{options.profile}).%(ext)s"
+
+
+def media_args(source: Source, options: DownloadOptions) -> list[str]:
+    """Format, container, subtitle, lyrics, and embedding options."""
+    args = ["--format", format_selector(options), "--format-sort", format_sort(options)]
+    if options.kind == "audio":
+        args += _audio_args(source, options)
+    else:
+        if options.container == "webm":
+            args += ["--merge-output-format", "webm/mkv"]
+        else:
+            args += ["--merge-output-format", options.container, "--remux-video", options.container]
+        if options.multi_audio:
+            args.append("--audio-multistreams")
+        args += _subtitle_args(options)
+        if options.embed_thumbnail and options.container in ("mp4", "mkv"):
+            args += ["--embed-thumbnail", "--convert-thumbnails", "jpg"]
+    # Embedding details also writes each audio track's language, which players show to pick a dub, so
+    # several tracks always get it.
+    if options.embed_metadata or options.multi_audio:
+        args.append("--embed-metadata")
+    if options.embed_chapters:
+        args.append("--embed-chapters")
+    if source.site == "facebook":
+        args += ["--replace-in-metadata", "title", _FACEBOOK_COUNTS, ""]
+    if options.sponsorblock != "off" and source.site == "youtube":
+        flag = "--sponsorblock-mark" if options.sponsorblock == "mark" else "--sponsorblock-remove"
+        args += [flag, ",".join(options.sponsorblock_categories)]
+    return args
+
+
+def cuts_segments(source: Source, options: DownloadOptions) -> bool:
+    """True when SponsorBlock cuts parts out, which shifts every caption and lyric timing after them."""
+    return options.sponsorblock == "remove" and source.site == "youtube"
+
+
+def _audio_args(source: Source, options: DownloadOptions) -> list[str]:
+    """Extraction, bitrate, cover, metadata, and lyrics captions for an audio download."""
+    args = ["--extract-audio", "--audio-format", options.audio_format]
+    if not options.lossless_audio:
+        args += ["--audio-quality", f"{options.audio_quality}K"]
+    if options.embed_thumbnail:
+        # WAV can't hold a cover, so the cover is saved beside it as "<name>.jpg".
+        args += ["--write-thumbnail" if options.audio_format == "wav" else "--embed-thumbnail",
+                 "--convert-thumbnails", "jpg"]
+        if options.cover == "square":
+            args += ["--postprocessor-args", SQUARE_COVER]
+    if options.embed_metadata:
+        args += ["--replace-in-metadata", "uploader", _ARTIST_SUFFIX, "", "--parse-metadata", _TITLE_TAGS]
+    if options.lyrics and not cuts_segments(source, options):
+        # Captions become timed lyrics (.lrc) beside the audio; the lyrics step names and checks them.
+        # Cut segments would shift every line, so those downloads look lyrics up by length instead.
+        args.append("--write-subs")
+        if options.auto_subtitles:
+            args.append("--write-auto-subs")
+        args += ["--sub-langs", options.subtitle_langs, "--convert-subs", "lrc"]
+    return args
+
+
+def _subtitle_args(options: DownloadOptions) -> list[str]:
+    """A video's subtitles: embedded, separate files, or both."""
+    if options.subtitles == "none":
+        return []
+    args = ["--write-subs"]
+    if options.auto_subtitles:
+        args.append("--write-auto-subs")
+    args += ["--sub-langs", options.subtitle_langs]
+    if options.subtitles in ("sidecar", "both"):
+        args += ["--convert-subs", options.subtitle_format]
+    if options.subtitles in ("embed", "both"):
+        args.append("--embed-subs")
+    if options.subtitles == "embed":
+        args += ["--compat-options", "no-keep-subs"]
+    return args
+
+
+def structured_output_args(journal: Path) -> list[str]:
+    """Progress, item, and finished-file lines the app parses, plus yt-dlp's own file journal."""
+    file_line = f"%(.{{{_FILE_FIELDS}}})j"
+    return [
+        "--progress",
+        "--progress-delta", "0.5",
+        "--no-simulate",
+        "--progress-template", _DOWNLOAD_PROGRESS,
+        "--progress-template", _POSTPROCESS_PROGRESS,
+        *print_arg("video", f"{MARKER}item %(.{{{_ITEM_FIELDS}}})j"),
+        *print_arg("video", f"{MARKER}parts %(requested_formats.:.{{format_id,vcodec,acodec,filesize,filesize_approx}})j"),
+        *print_arg("after_move", f"{MARKER}file {file_line}"),
+        "--print-to-file", f"after_move:{file_line}", escape_template(str(journal)),
+    ]
+
+
+def skip_filter(skip_ids: Sequence[str]) -> list[str]:
+    """A --match-filters that leaves out items known to fail for good (private, removed)."""
+    ids = [item for item in dict.fromkeys(skip_ids) if item and all(ch.isalnum() or ch in "-_" for ch in item)]
+    if not ids:
+        return []
+    return ["--match-filters", " & ".join(f"id!={item}" for item in ids[:MAX_SKIP_FILTERS])]
+
+
+def download_command(url: str, source: Source, options: DownloadOptions, tools: ToolSet, paths: RunPaths,
+                     auth: Auth | None = None, skip_ids: Sequence[str] = ()) -> list[str]:
+    """One download attempt: resumable, archived, and reporting progress as JSON lines."""
+    root = paths.root
+    command = base_args(tools, paths.cache_dir) + retry_args() + [
+        "--yes-playlist" if source.is_collection else "--no-playlist",
+        "--no-abort-on-error",
+        "--abort-on-unavailable-fragments",
+        "--continue",
+        "--part",
+        "--no-overwrites",
+        "--download-archive", str(paths.archive),
+        "--paths", str(root),
+        "--paths", f"temp:{paths.incomplete}",
+        "--output", output_template(source, options),
+        "--http-chunk-size", "8M",
+        "--concurrent-fragments", str(options.fragments),
+    ]
+    command += media_args(source, options)
+    command += network_args(options)
+    command += auth_args(auth)
+    if options.items:
+        command += ["--playlist-items", options.items]
+    if options.live_from_start:
+        command.append("--live-from-start")
+    if options.wait_for_video:
+        command += ["--wait-for-video", "15-120"]
+    command += skip_filter(skip_ids)
+    command += structured_output_args(paths.journal)
+    command += ["--", url]
+    return command
+
+
+def analyze_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None = None,
+                    options: DownloadOptions | None = None, single: bool = False) -> list[str]:
+    """Read a link's details without downloading: one JSON document, playlists listed flat."""
+    command = base_args(tools, cache_dir) + [
+        "--dump-single-json",
+        "--flat-playlist",
+        "--no-playlist" if single else "--yes-playlist",
+        "--extractor-retries", "3",
+    ]
+    if options is not None:
+        command += network_args(options)
+    command += auth_args(auth)
+    return command + ["--", url]
+
+
+def check_command(urls: Sequence[str], tools: ToolSet, archive: Path, cache_dir: Path, job_dir: Path,
+                  auth: Auth | None = None, newest: int = 60,
+                  options: DownloadOptions | None = None) -> tuple[list[str], str]:
+    """List a subscription's newest uploads that aren't in its archive, without downloading.
+
+    Channel tabs are newest first, so the scan stops at the first archived item; yt-dlp then exits
+    with status 101, which means success here. Returns (command, batch file text or "").
+    """
+    command = base_args(tools, cache_dir) + [
+        "--flat-playlist",
+        "--lazy-playlist",
+        "--yes-playlist",
+        "--playlist-items", f"1:{max(newest, 1)}",
+        "--download-archive", str(archive),
+        "--break-on-existing",
+        "--break-per-input",
+        "--sleep-requests", "1",
+        *print_arg("video", f"{MARKER}entry %(.{{{_ENTRY_FIELDS}}})j"),
+        *print_arg("playlist", f"{MARKER}pl %(.{{id,title,uploader,channel,webpage_url,extractor_key}})j"),
+    ]
+    if options is not None:
+        command += network_args(options)
+    command += auth_args(auth)
+    links, batch = url_args(urls, job_dir)
+    return command + links, batch
+
+
+def account_check_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth) -> list[str]:
+    """Read the first entry of a list only a signed-in account can see (YouTube's Watch later).
+
+    Exit status 0 means the sign-in works; nothing is downloaded.
+    """
+    return base_args(tools, cache_dir) + [
+        "--flat-playlist",
+        "--playlist-items", "1",
+        "--skip-download",
+        "--extractor-retries", "2",
+    ] + auth_args(auth) + ["--", url]
+
+
+# yt-dlp's exit status when --break-on-existing stopped at an archived item.
+EXIT_BREAK_ON_EXISTING = 101

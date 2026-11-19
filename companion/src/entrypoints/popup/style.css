@@ -1,0 +1,65 @@
+body {
+  width: 340px;
+}
+
+#app {
+  padding: var(--space-3);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.header img {
+  width: 32px;
+  height: 32px;
+  flex: none;
+}
+
+.header .titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.header h1 {
+  margin: 0;
+  font: 650 15px/1.2 var(--font-display);
+}
+
+.header .site {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.status {
+  margin-bottom: var(--space-3);
+}
+
+.notice-ok {
+  color: var(--success);
+}
+
+.notice-error {
+  color: var(--danger);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.actions .btn {
+  justify-content: center;
+  width: 100%;
+}
+
+.actions .field-hint {
+  margin: var(--space-1) 0 0;
+}

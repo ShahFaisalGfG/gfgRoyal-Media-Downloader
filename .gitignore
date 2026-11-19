@@ -1,7 +1,35 @@
-__pycache__/
-.pytest_cache/
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+
+# ── Build & distribution ──────────────────────────────────────────────────────
 build/
 dist/
+*.spec
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
 *.egg-info/
+.pytest_cache/
+
+# ── Runtime output ────────────────────────────────────────────────────────────
+logs/
+*.log
 downloads/
+# Preferences and update state written when running from source (installed builds use %APPDATA%);
+# the defaults live in gfgmd/config/defaults.py.
+gfgmd/utils/settings.json
+gfgmd/utils/updates.json
+# Updater: a local staging build's test feed (scripts/bundle.ps1 -UpdateFeed)
+gfgmd/config/update_staging.py
+
+# ── Sign-in data: never commit cookies ────────────────────────────────────────
 cookies*.txt
+
+# ── IDE and agents ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+CLAUDE.md
+AGENTS.md
