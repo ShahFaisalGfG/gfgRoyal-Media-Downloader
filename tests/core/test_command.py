@@ -76,7 +76,8 @@ def test_every_command_is_hardened(tmp_path: Path) -> None:
                      "--windows-filenames"):
             assert flag in command
         assert value(command, "--js-runtimes") == r"deno:C:\deno\deno.exe"
-        assert value(command, "--ffmpeg-location") == r"C:\ff\bin"
+        # The folder ffmpeg is in, as this OS splits the path (the Windows-style test path has no "/").
+        assert value(command, "--ffmpeg-location") == TOOLS.ffmpeg_dir
         assert "--no-config-locations" not in command
         assert "-U" not in command and "--update" not in command and "--exec" not in command
         assert command[command.index("--") + 1] == VIDEO_URL
