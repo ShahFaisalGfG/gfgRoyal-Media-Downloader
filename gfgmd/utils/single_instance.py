@@ -197,7 +197,7 @@ class SingleInstance(QObject):
         if server.listen(self._pipe_name):
             self._server = server
         else:
-            write_log(f"Could not listen for later launch of the appes: {server.errorString()}", "critical")
+            write_log(f"Could not listen for later launches of the app: {server.errorString()}", "critical")
             server.deleteLater()
 
     def _accept(self) -> None:

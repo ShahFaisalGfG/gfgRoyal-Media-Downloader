@@ -58,19 +58,20 @@ _AUDIO_SELECTORS = {
     "wav": "ba/b",
     "best": "ba/b",
 }
-# A centre crop to a square, for covers. yt-dlp splits these arguments like a shell, so the single
-# quotes reach ffmpeg, which then reads the commas inside them as part of the expressions.
-SQUARE_COVER = ("ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -qmin 1 -qscale:v 1 "
-                "-vf crop=\"'if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'\"")
+# A centre crop to a square, for covers. The single quotes keep ffmpeg from reading the commas
+# inside the expressions as filter separators.
+SQUARE_CROP = "crop='if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'"
+# yt-dlp splits these arguments like a shell, so the single quotes reach ffmpeg.
+SQUARE_COVER = f'ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -qmin 1 -qscale:v 1 -vf "{SQUARE_CROP}"'
 # Channel names that aren't the artist: YouTube Music's "<Artist> - Topic" and "<Artist>VEVO".
-_ARTIST_SUFFIX = r"( - Topic|VEVO)$"
+ARTIST_SUFFIX = r"( - Topic|VEVO)$"
 # Facebook titles reels "9.9K views · 340 reactions | <caption>"; the counts don't belong in a file name.
 _FACEBOOK_COUNTS = r"^[\d.,]+[KMB]? (?:views|plays)(?: · [\d.,]+[KMB]? reactions)? \| "
 # When the site names no artist, an "Artist - Song | labels" title gives the tags their artist and
 # title (meta_ fields change only the tags, not the file name). "%(artist|)s" is empty then, so the
 # text starts with "@@" and the pattern can match only in that case.
-_TITLE_TAGS = ("%(artist|)s@@%(title)s:"
-               r"^@@(?P<meta_artist>[^|]+?) - (?P<meta_title>[^|]+?)(?:\s+\|.*)?$")
+ARTIST_TITLE = r"(?P<meta_artist>[^|]+?) - (?P<meta_title>[^|]+?)(?:\s+\|.*)?$"
+_TITLE_TAGS = "%(artist|)s@@%(title)s:^@@" + ARTIST_TITLE
 _FILENAME_PREFIX = {
     "title-quality": "",
     "title": "",
@@ -306,7 +307,7 @@ def _audio_args(source: Source, options: DownloadOptions) -> list[str]:
         if options.cover == "square":
             args += ["--postprocessor-args", SQUARE_COVER]
     if options.embed_metadata:
-        args += ["--replace-in-metadata", "uploader", _ARTIST_SUFFIX, "", "--parse-metadata", _TITLE_TAGS]
+        args += ["--replace-in-metadata", "uploader", ARTIST_SUFFIX, "", "--parse-metadata", _TITLE_TAGS]
     if options.lyrics and not cuts_segments(source, options):
         # Captions become timed lyrics (.lrc) beside the audio; the lyrics step names and checks them.
         # Cut segments would shift every line, so those downloads look lyrics up by length instead.

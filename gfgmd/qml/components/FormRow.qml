@@ -11,12 +11,16 @@ GridLayout {
     property string hint: ""
     property int labelWidth: 170
     // Narrow rows stack the label above the control. The 60 px gap between the two thresholds
-    // stops the row from flipping back and forth as its own width settles.
+    // stops the row from flipping back and forth as its own width settles. The choice waits until
+    // the layout pass is over (Qt.callLater): a grid passes its rows through small in-between widths
+    // while it lays them out, and stacking on those changed the layout, which passed through them
+    // again, forever (the Options panel froze in two columns).
     property bool stacked: false
-    onWidthChanged: {
-        if (!row.stacked && width > 0 && width < 420) row.stacked = true
-        else if (row.stacked && width > 480) row.stacked = false
+    function _restack() {
+        if (!row.stacked && row.width > 0 && row.width < 420) row.stacked = true
+        else if (row.stacked && row.width > 480) row.stacked = false
     }
+    onWidthChanged: Qt.callLater(row._restack)
     default property alias content: slot.data
 
     readonly property bool _holdsSwitch: Array.prototype.some.call(slot.children, item => item instanceof AppSwitch)

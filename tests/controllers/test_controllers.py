@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gfgmd.controllers import analyze_ctrl, library_ctrl, subscriptions_ctrl
+from gfgmd.controllers import analyze_ctrl, subscriptions_ctrl
 from gfgmd.controllers.analyze_ctrl import AnalyzeController
 from gfgmd.controllers.library_ctrl import LibraryController
 from gfgmd.controllers.prefs_ctrl import PrefsController
@@ -22,6 +22,7 @@ from gfgmd.core.runner import run_to_completion
 from gfgmd.core.sources import source_from_url
 from gfgmd.core.tools import ToolSet
 from gfgmd.services.context import AppContext
+from gfgmd.services import recycle as recycle_module
 from gfgmd.services.notifier import Notifier
 from gfgmd.services.tool_manager import ToolManager
 from gfgmd.utils.settings import get_default_settings, load_settings, save_settings
@@ -122,6 +123,10 @@ def test_analyze_reports_errors(qapp, context, paused_queue):
 def test_library_filters_and_recycle_bin(qapp, context, tmp_path):
     keep = tmp_path / "keep.mp4"
     keep.write_bytes(b"v")
+    # The file's captions go with it; another file's lyrics ("keep.Remix" is its own song) stay.
+    (tmp_path / "keep.en.srt").write_text("1", encoding="utf-8")
+    (tmp_path / "keep.Remix.mp3").write_bytes(b"a")
+    (tmp_path / "keep.Remix.lrc").write_text("[00:01.00]la", encoding="utf-8")
     context.store.add_history(str(keep), title="Lecture one", site="youtube", kind="video")
     context.store.add_history(str(tmp_path / "gone.mp3"), title="Song", site="soundcloud", kind="audio")
     library = LibraryController(context)
@@ -130,11 +135,11 @@ def test_library_filters_and_recycle_bin(qapp, context, tmp_path):
     assert library.total == 1 and library.model.get(0)["missing"] is False
     library.setFilters("", "audio", "")
     assert library.model.get(0)["missing"] is True
-    with patch.object(library_ctrl, "to_recycle_bin", return_value=True) as recycle:
+    with patch.object(recycle_module, "to_recycle_bin", return_value=True) as recycle:
         library.setFilters("", "", "")
         lecture = next(library.model.get(i) for i in range(library.model.count) if library.model.get(i)["title"] == "Lecture one")
         library.deleteFiles([lecture["historyId"]])
-    recycle.assert_called_once_with([str(keep)])
+    recycle.assert_called_once_with([str(keep), str(tmp_path / "keep.en.srt")])
     assert library.total == 1
 
 
@@ -244,7 +249,7 @@ def test_preferences_save_and_presets(qapp, context):
     assert any(p["code"] == preset_id for p in prefs.presets)
     prefs.saveSettings({"downloads.preset": preset_id})
     prefs.deletePreset(preset_id)
-    assert prefs.value("downloads.preset") == "video-1080"
+    assert prefs.value("downloads.preset") == "video-best-mp4"
     prefs.saveSettings({"downloads.concurrent": 99})  # invalid: dropped on reload
     assert prefs.value("downloads.concurrent") == 0
     prefs.shutdown()

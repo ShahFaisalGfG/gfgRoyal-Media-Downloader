@@ -26,6 +26,11 @@ _TIMEOUT_S = 15
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) gfgRoyal-Media-Downloader"
 
 
+def cache_file(folder: Path, url: str) -> Path:
+    """Where the cache keeps a thumbnail's image (it may not be fetched yet)."""
+    return folder / (hashlib.sha1(url.encode("utf-8")).hexdigest() + ".img")
+
+
 def _fetch(url: str, target: Path) -> Path:
     """Download one image to target (written atomically); raises on any failure."""
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
@@ -85,7 +90,7 @@ class ThumbnailCache(QObject):
         return self._revision
 
     def _path(self, url: str) -> Path:
-        return self._folder / (hashlib.sha1(url.encode("utf-8")).hexdigest() + ".img")
+        return cache_file(self._folder, url)
 
     @Slot(str, int, result=str)
     def localFor(self, url: str, revision: int = 0) -> str:  # noqa: ARG002 - revision drives QML re-evaluation

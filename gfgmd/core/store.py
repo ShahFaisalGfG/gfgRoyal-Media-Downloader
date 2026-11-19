@@ -15,6 +15,9 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
+# The layout number older versions check: one that sees a higher number refuses the library. Raise it
+# only for a change an older version would misread; columns it doesn't know it ignores, so those are
+# added without raising it (see _add_columns) and 1.0.0 still opens a library a newer version used.
 SCHEMA_VERSION = 2
 
 # Playback positions kept (the newest ones).
@@ -43,6 +46,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     thumbnail TEXT NOT NULL DEFAULT '',
     options_json TEXT NOT NULL,
     output_root TEXT NOT NULL,
+    input_path TEXT NOT NULL DEFAULT '',
     account_id INTEGER,
     subscription_id INTEGER,
     state TEXT NOT NULL,
@@ -159,9 +163,18 @@ class Store:
             raise RuntimeError("The library was created by a newer version of the app")
         if version < 1:
             self._db.executescript("BEGIN;" + _SCHEMA + _PLAYBACK + f"PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;")
-        elif version < 2:
+            return
+        if version < 2:
             # Version 2 remembers where playback stopped in each file.
             self._db.executescript("BEGIN;" + _PLAYBACK + "PRAGMA user_version = 2; COMMIT;")
+        self._add_columns()
+
+    def _add_columns(self) -> None:
+        """Add the columns made after 1.0.0, which 1.0.0 ignores (it reads rows by name)."""
+        jobs = {str(row[1]) for row in self._db.execute("PRAGMA table_info(jobs)")}
+        if "input_path" not in jobs:
+            # The file a job works on: a video whose audio it extracts.
+            self._db.execute("ALTER TABLE jobs ADD COLUMN input_path TEXT NOT NULL DEFAULT ''")
 
     def _transaction(self) -> _Transaction:
         return _Transaction(self._db, self._lock)
@@ -179,17 +192,22 @@ class Store:
     def add_job(self, url: str, source_kind: str, source_id: str, site: str, options: dict[str, Any],
                 output_root: str, tab: str = "", title: str = "", thumbnail: str = "",
                 items: list[dict[str, Any]] | None = None, account_id: int | None = None,
-                subscription_id: int | None = None, state: str = "queued", not_before: float = 0.0) -> int:
-        """Add a job at the end of the queue; returns its id."""
+                subscription_id: int | None = None, state: str = "queued", not_before: float = 0.0,
+                input_path: str = "") -> int:
+        """Add a job at the end of the queue; returns its id.
+
+        `input_path` is set for a job that works on a file on disk instead of downloading: a video
+        whose audio it extracts (`url` is then the video's page, for its link).
+        """
         now = time.time()
         with self._transaction() as db:
             top = db.execute("SELECT COALESCE(MAX(position), 0) FROM jobs").fetchone()[0]
             cursor = db.execute(
                 "INSERT INTO jobs (url, source_kind, source_id, site, tab, title, thumbnail, options_json, output_root,"
-                " account_id, subscription_id, state, position, not_before, items_total, created, updated)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " input_path, account_id, subscription_id, state, position, not_before, items_total, created, updated)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (url, source_kind, source_id, site, tab, title, thumbnail, json.dumps(options), output_root,
-                 account_id, subscription_id, state, top + 1, not_before, len(items or []), now, now))
+                 input_path, account_id, subscription_id, state, top + 1, not_before, len(items or []), now, now))
             job_id = int(cursor.lastrowid or 0)
             if items:
                 db.executemany(
@@ -264,6 +282,14 @@ class Store:
         row = self._one("SELECT filepath FROM history WHERE job_id = ? ORDER BY finished DESC, id DESC LIMIT 1",
                         (job_id,))
         return str(row["filepath"]) if row else ""
+
+    def history_record(self, history_id: int) -> dict[str, Any] | None:
+        """One library record."""
+        return self._one("SELECT * FROM history WHERE id = ?", (history_id,))
+
+    def history_for_job(self, job_id: int) -> list[dict[str, Any]]:
+        """The library records of the files a download saved, oldest first."""
+        return self._rows("SELECT * FROM history WHERE job_id = ? ORDER BY finished, id", (job_id,))
 
     def history_for_path(self, filepath: str) -> dict[str, Any] | None:
         """The library record of a file, if it was downloaded here."""

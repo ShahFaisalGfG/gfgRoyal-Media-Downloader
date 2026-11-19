@@ -1,10 +1,11 @@
 """The library database: queue order, recovery, history search, subscriptions, and sign-in records."""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-from gfgmd.core.store import Store
+from gfgmd.core.store import SCHEMA_VERSION, Store
 
 
 @pytest.fixture
@@ -95,3 +96,28 @@ def test_reopen_keeps_data(tmp_path: Path) -> None:
     again = Store(tmp_path / "library.db")
     assert len(again.jobs()) == 1
     again.close()
+
+
+def test_a_1_0_0_library_gains_the_jobs_input_file_and_stays_readable(tmp_path: Path) -> None:
+    """The new column is added in place, and the layout number 1.0.0 checks stays 2, so it still opens."""
+    db = Store(tmp_path / "library.db")
+    add(db, "a")
+    db.close()
+    raw = sqlite3.connect(tmp_path / "library.db")
+    raw.execute("ALTER TABLE jobs DROP COLUMN input_path")  # as 1.0.0 left it
+    raw.commit()
+    raw.close()
+    again = Store(tmp_path / "library.db")
+    try:
+        assert [job["input_path"] for job in again.jobs()] == [""]
+        job = add(again, "b", input_path="C:/Videos/b.mp4")
+        assert again.job(job)["input_path"] == "C:/Videos/b.mp4"
+    finally:
+        again.close()
+    raw = sqlite3.connect(tmp_path / "library.db")
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+    # 1.0.0 inserts by column name; the new column fills in its default.
+    raw.execute("INSERT INTO jobs (url, source_kind, source_id, site, options_json, output_root, state, position,"
+                " created, updated) VALUES ('u', 'video', 'c', 'youtube', '{}', 'C:/D', 'queued', 9, 0, 0)")
+    assert raw.execute("SELECT input_path FROM jobs WHERE source_id = 'c'").fetchone()[0] == ""
+    raw.close()

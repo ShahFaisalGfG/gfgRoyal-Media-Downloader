@@ -57,6 +57,15 @@ def test_drop_invalid_keeps_good_values():
     assert cleaned == raw
 
 
+def test_a_retired_preset_falls_back_to_the_default():
+    """1.0.0's "up to 1080p" and "up to 720p" presets became "best quality MP4"."""
+    defaults = get_default_settings()
+    for retired in ("video-1080", "video-720", "nonsense"):
+        assert settings.drop_invalid({"downloads": {"preset": retired}}, defaults)["downloads"] == {}
+    assert settings.drop_invalid({"downloads": {"preset": "user-12"}}, defaults)["downloads"] == {"preset": "user-12"}
+    assert defaults["downloads"]["preset"] == "video-best-mp4"
+
+
 def test_damaged_file_resets_once(isolated_data):
     (isolated_data / "settings.json").write_text("{not json", encoding="utf-8")
     assert load_settings() == get_default_settings()

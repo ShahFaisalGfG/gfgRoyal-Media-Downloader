@@ -138,6 +138,7 @@ def test_version_1_library_gains_playback(tmp_path):
     path = tmp_path / "library.db"
     db = sqlite3.connect(path)
     db.execute("CREATE TABLE history (id INTEGER PRIMARY KEY, filepath TEXT)")
+    db.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, url TEXT)")
     db.execute("PRAGMA user_version = 1")
     db.commit()
     db.close()
@@ -149,4 +150,5 @@ def test_version_1_library_gains_playback(tmp_path):
         store.close()
     db = sqlite3.connect(path)
     assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+    assert "input_path" in [row[1] for row in db.execute("PRAGMA table_info(jobs)")]
     db.close()

@@ -18,7 +18,7 @@ from typing import Any
 
 from PySide6.QtCore import Property, QLocale, QObject, QUrl, Signal, Slot
 
-from gfgmd.core.captions import Cue, cue_at, line_at, parse_file, sidecars
+from gfgmd.core.captions import COVER_EXTENSIONS, Cue, cue_at, line_at, parse_file, sidecars
 from gfgmd.core.naming import AUDIO_EXTENSIONS
 from gfgmd.core.platform import hidden_window_flags
 from gfgmd.core.tools import ToolsMissing
@@ -33,7 +33,6 @@ REPEAT_MODES = ("off", "all", "one")
 SPEEDS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
 # Positions this close to either end aren't worth resuming from.
 RESUME_MARGIN = 10.0
-_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 def is_audio(path: str) -> bool:
@@ -471,7 +470,7 @@ class PlayerController(QObject):
     def _find_cover(self, path: str) -> str:
         """On the pool: a cover beside the file, else the one in its tags, saved to the cover cache."""
         media = Path(path)
-        for extension in _IMAGE_EXTENSIONS:
+        for extension in COVER_EXTENSIONS:
             beside = media.with_suffix(extension)
             if beside.is_file():
                 return str(beside)

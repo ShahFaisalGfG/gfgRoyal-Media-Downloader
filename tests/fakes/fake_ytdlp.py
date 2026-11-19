@@ -166,9 +166,21 @@ def main() -> int:
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
         (state / "grandchild.pid").write_text(str(child.pid))
         out(MARKER + 'item {"id":"aaaaaaaaaaa","title":"Slow"}')
+        # The unfinished file yt-dlp keeps in the temp folder until the download completes.
+        temp = next((value[5:] for value in option(args, "--paths") if value.startswith("temp:")), "")
+        part = ""
+        if temp:
+            staged = render(fake.template, {"id": "aaaaaaaaaaa", "title": "Slow", "extractor_key": "Youtube",
+                                            "ext": "mp4"})
+            part_path = Path(temp) / f"{staged}.part"
+            part_path.parent.mkdir(parents=True, exist_ok=True)
+            part_path.write_bytes(b"part")
+            part = str(part_path)
         for _ in range(1200):
-            out(MARKER + 'dl {"p":{"status":"downloading","downloaded_bytes":10,"total_bytes":1000,"speed":1.0,'
-                         '"eta":99},"i":{"id":"aaaaaaaaaaa","format_id":"18","vcodec":"avc1","acodec":"mp4a"}}')
+            out(MARKER + "dl " + json.dumps({
+                "p": {"status": "downloading", "downloaded_bytes": 10, "total_bytes": 1000, "speed": 1.0, "eta": 99,
+                      "tmpfilename": part},
+                "i": {"id": "aaaaaaaaaaa", "format_id": "18", "vcodec": "avc1", "acodec": "mp4a"}}))
             time.sleep(0.1)
         return 0
     if scenario == "flood":

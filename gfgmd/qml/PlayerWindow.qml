@@ -150,14 +150,21 @@ AppWindow {
             fillMode: VideoOutput.PreserveAspectFit
         }
 
-        // Pointer movement shows the controls; a click plays or pauses; a double click is fullscreen.
+        // Pointer movement shows the controls; a click plays or pauses; a double click is fullscreen only.
+        // A click waits the system's double-click time before pausing, so a double click doesn't also
+        // pause (and play again) the video.
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: playerWin.controlsShown || !playerWin.full ? Qt.ArrowCursor : Qt.BlankCursor
             onPositionChanged: playerWin.showControls()
-            onClicked: { stage.forceActiveFocus(); player.playbackState === MediaPlayer.PlayingState ? player.pause() : player.play() }
-            onDoubleClicked: playerWin.toggleFull()
+            onClicked: { stage.forceActiveFocus(); clickTimer.restart() }
+            onDoubleClicked: { clickTimer.stop(); playerWin.toggleFull() }
+        }
+        Timer {
+            id: clickTimer
+            interval: Application.styleHints.mouseDoubleClickInterval
+            onTriggered: playerWin.playing ? player.pause() : player.play()
         }
 
         // A subtitle file saved beside the video (embedded tracks are drawn by the video output).

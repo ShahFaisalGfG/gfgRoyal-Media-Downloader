@@ -31,6 +31,7 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - [Quick Start](#quick-start)
 - [Video and Audio Formats](#video-and-audio-formats)
 - [Lyrics](#lyrics)
+- [Extract Audio](#extract-audio)
 - [Built-in Players](#built-in-players)
 - [Shorts, Reels, and Other Sites](#shorts-reels-and-other-sites)
 - [Signing In to Sites](#signing-in-to-sites)
@@ -78,7 +79,7 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - 🕑 **Scheduling**: start the queue at a set time, limit the speed by time of day, and sleep or shut down the PC when everything is done
 - 🔴 **Live streams**: record from the start, or wait for a scheduled stream or premiere and record it when it begins
 - 🧩 **Companion extension**: send the page you are watching to the app, or sign a site in, from Chrome, Edge, Opera, or Brave
-- 🗄️ **Library**: every finished download, searchable, with Play, Play all, show in folder, download again, and Recycle Bin
+- 🗄️ **Library**: every finished download, searchable, with Play, Play all, show in folder, extract audio, download again, and Recycle Bin
 - ⌨️ **Command line**: `gfgmd` keeps the original script's options and exit codes for scripts and scheduled tasks
 - 🎨 **Built for everyday use**: light and dark themes, keyboard shortcuts, tooltips everywhere, tray icon, notifications, and in-app updates
 
@@ -119,7 +120,7 @@ Drag links from the browser onto the window to queue them, or drop a `.txt` file
 | Ctrl+Shift+O | Open Options for the link |
 | Ctrl+L | Go to the link box |
 | Space | Pause or resume the selected download |
-| Delete | Remove the selected download from the list |
+| Delete | Remove the selected download from the list (asks first, and can delete its files too) |
 | Ctrl+Shift+P | Pause or resume every download |
 | Ctrl+1 to Ctrl+4 | Downloads, Library, Subscriptions, Sign-ins |
 | Ctrl+, | Preferences |
@@ -130,7 +131,7 @@ Drag links from the browser onto the window to queue them, or drop a `.txt` file
 
 ## Video and Audio Formats
 
-Presets next to the link box cover the usual choices (video up to 1080p MP4, best quality MKV, 720p MP4, MP3 320 kbps, M4A, FLAC); **Options** shows every choice for one link, and Preferences sets the starting values.
+Presets next to the link box cover the usual choices (video in the best quality offered as MP4 or MKV, MP3 320 kbps, M4A, FLAC); **Options** shows every choice for one link, and Preferences sets the starting values.
 
 | Video | Choices |
 |---|---|
@@ -152,6 +153,14 @@ Presets next to the link box cover the usual choices (video up to 1080p MP4, bes
 ## Lyrics
 
 Audio downloads save the song's lyrics as `<song>.lrc` beside the file, timed line by line, which the built-in music player and most music players show as the song plays. The site's own captions come first, in the song's language: they were timed against this very recording. When a song has none, the app asks [LRCLIB](https://lrclib.net), a free and open lyrics database, by artist, title, album, and length, and uses its timed lyrics only when the track length matches the file within two seconds, so the lines land where they are sung. Plain lyrics also go in the file's tags (MP3, M4A, and FLAC). Turn lyrics or the LRCLIB lookup off in Preferences > Audio; the lookup sends only the song's title, artist, album, and length.
+
+---
+
+## Extract Audio
+
+**Extract audio** in a finished download's menu (or a library video's) turns a video you already downloaded into a song, without downloading it again. It offers the audio download's choices, starting from Preferences: format and bitrate, the cover and its shape, the tags and chapters, and lyrics. The cover is the thumbnail the video holds, the artist and title are cleaned up as in audio downloads, and the lyrics come from the video's caption files, then LRCLIB. The extraction runs in the download list with its progress, and the song goes to the audio folder, in a folder named like the video's.
+
+**Remove** in the same menu takes a download off the list and asks first; tick **Also delete its files** to move its saved files, with their captions and lyrics, to the Recycle Bin and delete its unfinished parts.
 
 ---
 
@@ -389,6 +398,12 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 ---
 
 ## Changelog
+
+### Unreleased
+- 🎵 **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download
+- 🗑️ **Remove** asks first and can move the download's files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
+- 🎬 The default preset is **Video, best quality MP4**, which replaces the 1080p and 720p MP4 presets
+- 🐞 Fixed: choosing Audio only in Options froze the app; a single click in the video player paused before a double click went fullscreen; download menus cut their text off
 
 ### v1.0.0 - November 2026 *(current)*
 - 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates

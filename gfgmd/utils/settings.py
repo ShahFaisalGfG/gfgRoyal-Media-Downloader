@@ -12,6 +12,7 @@ from gfgmd.config.defaults import (
     DownloadDefaults,
     FormatDefaults,
     LoggingDefaults,
+    PresetDefaults,
     ScheduleDefaults,
     ThemeDefaults,
     ToolDefaults,
@@ -198,7 +199,8 @@ _ALLOWED: Dict[str, Callable[[Any], bool]] = {
     "interval_hours": lambda value: value in ScheduleDefaults.INTERVALS,
     "source": lambda value: value in ToolDefaults.SOURCES,
     "channel": lambda value: value in ToolDefaults.CHANNELS,
-    "preset": lambda value: 0 < len(value) <= 80,
+    # A built-in preset or a saved one; a retired built-in (1.0.0's 1080p and 720p) falls back to the default.
+    "preset": lambda value: value in PresetDefaults.IDS or (value.startswith("user-") and len(value) <= 80),
     "presets": lambda value: len(value) <= 50 and all(_preset(preset) for preset in value),
     "volume": lambda value: 0 <= value <= 1,
     "speed": lambda value: 0.25 <= value <= 2,

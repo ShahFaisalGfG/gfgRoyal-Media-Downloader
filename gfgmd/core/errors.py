@@ -58,6 +58,9 @@ CATEGORIES = {category.key: category for category in (
     Category("tools", Policy.STOP, "A required tool is missing or damaged", "repair_tools"),
     Category("upcoming", Policy.STOP, "The stream or premiere hasn't started yet"),
     Category("postprocess", Policy.RETRY, "Converting or merging failed"),
+    # Extracting the audio of a downloaded video (no site involved).
+    Category("no_audio", Policy.STOP, "The video has no sound to extract"),
+    Category("source_missing", Policy.STOP, "The video file is no longer there"),
     Category("network", Policy.RETRY, "The connection failed; trying again"),
     Category("unknown", Policy.RETRY, "The download failed"),
 )}

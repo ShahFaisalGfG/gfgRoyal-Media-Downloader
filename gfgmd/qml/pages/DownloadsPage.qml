@@ -172,7 +172,7 @@ Item {
             }
             Keys.onDeletePressed: {
                 var row = queueController.model.get(queueView.currentIndex)
-                if (row.jobId !== undefined) queueController.remove(row.jobId)
+                if (row.jobId !== undefined) removeDialog.show(row.jobId, row.title)
             }
             Keys.onMenuPressed: {
                 var row = queueController.model.get(queueView.currentIndex)
@@ -202,10 +202,11 @@ Item {
         }
     }
 
-    Menu {
+    AppMenu {
         id: jobMenu
         property int jobId: -1
         property var row: ({})
+        readonly property bool hasLink: (jobMenu.row.url || "").length > 0
 
         function openFor(jobId) {
             jobMenu.jobId = jobId
@@ -216,22 +217,92 @@ Item {
             jobMenu.popup()
         }
 
-        MenuItem { text: "Open folder"; onTriggered: appController.openPath(jobMenu.row.folder) }
-        MenuItem { text: "Copy link"; onTriggered: appController.copyText(jobMenu.row.url) }
-        MenuItem { text: "Open link in browser"; onTriggered: appController.openUrl(jobMenu.row.url) }
-        MenuSeparator {}
-        MenuItem { text: "Move up"; onTriggered: queueController.move(jobMenu.jobId, -1) }
-        MenuItem { text: "Move down"; onTriggered: queueController.move(jobMenu.jobId, 1) }
-        MenuSeparator {}
-        MenuItem { text: "Pause"; enabled: jobMenu.row.canPause === true; onTriggered: queueController.pause(jobMenu.jobId) }
-        MenuItem { text: "Resume"; enabled: jobMenu.row.canResume === true; onTriggered: queueController.resume(jobMenu.jobId) }
-        MenuItem { text: "Try again"; enabled: jobMenu.row.canRetry === true; onTriggered: queueController.retry(jobMenu.jobId) }
-        MenuItem {
+        AppMenuItem { text: "Open folder"; onTriggered: appController.openPath(jobMenu.row.folder) }
+        AppMenuItem { text: "Copy link"; enabled: jobMenu.hasLink; onTriggered: appController.copyText(jobMenu.row.url) }
+        AppMenuItem {
+            text: "Open link in browser"
+            enabled: jobMenu.hasLink
+            onTriggered: appController.openUrl(jobMenu.row.url)
+        }
+        AppMenuSeparator {}
+        AppMenuItem { text: "Move up"; onTriggered: queueController.move(jobMenu.jobId, -1) }
+        AppMenuItem { text: "Move down"; onTriggered: queueController.move(jobMenu.jobId, 1) }
+        AppMenuSeparator {}
+        AppMenuItem { text: "Pause"; enabled: jobMenu.row.canPause === true; onTriggered: queueController.pause(jobMenu.jobId) }
+        AppMenuItem { text: "Resume"; enabled: jobMenu.row.canResume === true; onTriggered: queueController.resume(jobMenu.jobId) }
+        AppMenuItem { text: "Try again"; enabled: jobMenu.row.canRetry === true; onTriggered: queueController.retry(jobMenu.jobId) }
+        AppMenuItem {
             text: "Cancel and delete unfinished files"
+            danger: true
             enabled: jobMenu.row.canPause === true || jobMenu.row.jobState === "paused"
             onTriggered: queueController.cancel(jobMenu.jobId)
         }
-        MenuItem { text: "Remove from the list"; onTriggered: queueController.remove(jobMenu.jobId) }
+        AppMenuSeparator {}
+        AppMenuItem {
+            text: "Extract audio"
+            enabled: jobMenu.row.jobState === "done" && jobMenu.row.kind === "video" && (jobMenu.row.lastFile || "").length > 0
+            onTriggered: extractDialog.forJob(jobMenu.jobId, jobMenu.row.title)
+        }
+        AppMenuItem { text: "Remove"; onTriggered: removeDialog.show(jobMenu.jobId, jobMenu.row.title) }
+    }
+
+    ExtractAudioDialog { id: extractDialog }
+
+    AppDialog {
+        id: removeDialog
+        property int jobId: -1
+        function show(jobId, title) {
+            removeDialog.jobId = jobId
+            removeName.text = title
+            deleteFiles.checked = false
+            removeDialog.open()
+        }
+        title: "Remove this download?"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        defaultButton: Dialog.Ok
+        width: Math.min(page.width - 2 * Theme.spaceXl, 460)
+        Component.onCompleted: removeDialog.standardButton(Dialog.Ok).text = "Remove"
+        onAccepted: queueController.remove(removeDialog.jobId, deleteFiles.checked)
+
+        ColumnLayout {
+            width: parent.width
+            spacing: Theme.spaceSm
+
+            Text {
+                id: removeName
+                Layout.fillWidth: true
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                font.weight: Font.DemiBold
+                color: Theme.text
+                wrapMode: Text.WordWrap
+                maximumLineCount: 3
+                elide: Text.ElideRight
+            }
+            Text {
+                Layout.fillWidth: true
+                text: "It leaves the download list. Its files stay in the folder unless you choose to delete them."
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                color: Theme.text
+                wrapMode: Text.WordWrap
+            }
+            CheckBox {
+                id: deleteFiles
+                Layout.leftMargin: -Theme.spaceSm
+                text: "Also delete its files"
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+            }
+            Text {
+                Layout.fillWidth: true
+                text: "Saved files go to the Recycle Bin, where you can restore them; unfinished parts are deleted."
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textMuted
+                wrapMode: Text.WordWrap
+            }
+        }
     }
 
     AppDialog {
