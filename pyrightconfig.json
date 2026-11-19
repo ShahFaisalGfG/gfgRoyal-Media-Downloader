@@ -1,0 +1,9 @@
+{
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard",
+  "include": ["gfgmd"],
+  "reportMissingImports": "warning",
+  "reportPrivateImportUsage": "none"
+}

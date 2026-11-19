@@ -3,30 +3,55 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "youtube-video-downloader"
-dynamic = ["version"]
-description = "Resumable YouTube playlist, video, and Shorts downloader that saves quality-labeled MP4s"
+name = "gfgmd"
+version = "1.0.0"
+description = "gfgRoyal Media Downloader: download videos, playlists, channels, and live streams from YouTube and other sites"
 authors = [{ name = "Shah Faisal", email = "shahfaisalgfg@gmail.com" }]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
+# The command-line tool needs only the standard library; the desktop app adds PySide6 (the "gui" extra).
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.7"]
+dev = ["PySide6>=6.7", "pyinstaller>=6.17", "pytest>=8.0", "pyright>=1.1"]
 
 [project.scripts]
-youtube-video-downloader = "download_playlist:main"
+gfgmd = "gfgmd.cli:main"
+
+[project.gui-scripts]
+gfgroyal-media-downloader = "gfgmd.app:main"
 
 [project.urls]
-Homepage = "https://github.com/ShahFaisalGfG/youtube-video-downloader"
-Issues = "https://github.com/ShahFaisalGfG/youtube-video-downloader/issues"
+Homepage = "https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader"
+Issues = "https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/issues"
 
-[tool.setuptools]
-py-modules = ["download_playlist"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gfgmd*"]
 
-# The version lives in the script, so a copy run on its own still knows it.
-[tool.setuptools.dynamic]
-version = { attr = "download_playlist.__version__" }
+[tool.setuptools.package-data]
+gfgmd = [
+    "assets/icons/*.png",
+    "assets/icons/*.ico",
+    "qml/*.qml",
+    "qml/components/*.qml",
+    "qml/components/*.js",
+    "qml/components/qmldir",
+    "qml/pages/*.qml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
+
+[tool.gfgmd]
+display_name = "gfgRoyal Media Downloader"
+file_name    = "gfgRoyal-Media-Downloader"
+publisher    = "gfgRoyal"
+url          = "https://shahfaisalgfg.github.io/"
+exe_name     = "gfgRoyal-Media-Downloader.exe"
+winget_id    = "gfgRoyal.MediaDownloader"
