@@ -1,12 +1,16 @@
 singleton Theme 1.0 Theme.qml
 AppButton 1.0 AppButton.qml
 AppDialog 1.0 AppDialog.qml
+AppMenu 1.0 AppMenu.qml
+AppMenuItem 1.0 AppMenuItem.qml
+AppMenuSeparator 1.0 AppMenuSeparator.qml
 AppSwitch 1.0 AppSwitch.qml
 AppWindow 1.0 AppWindow.qml
 AudioBar 1.0 AudioBar.qml
 Card 1.0 Card.qml
 ChoiceMenu 1.0 ChoiceMenu.qml
 EmptyState 1.0 EmptyState.qml
+ExtractAudioDialog 1.0 ExtractAudioDialog.qml
 EntryList 1.0 EntryList.qml
 FormRow 1.0 FormRow.qml
 Icon 1.0 Icon.qml

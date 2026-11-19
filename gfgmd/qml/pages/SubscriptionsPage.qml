@@ -164,7 +164,7 @@ Item {
 
     Shortcut { sequence: "F5"; enabled: page.visible; onActivated: subscriptionsController.checkAll() }
 
-    Menu {
+    AppMenu {
         id: subMenu
         property int subId: -1
         property string url: ""
@@ -175,25 +175,25 @@ Item {
             subMenu.auto = auto
             subMenu.popup()
         }
-        MenuItem { text: "Open in browser"; onTriggered: appController.openUrl(subMenu.url) }
-        MenuItem { text: "Copy link"; onTriggered: appController.copyText(subMenu.url) }
-        MenuItem {
+        AppMenuItem { text: "Open in browser"; onTriggered: appController.openUrl(subMenu.url) }
+        AppMenuItem { text: "Copy link"; onTriggered: appController.copyText(subMenu.url) }
+        AppMenuItem {
             text: subMenu.auto ? "Only tell me about new uploads" : "Download new uploads automatically"
             onTriggered: subscriptionsController.setAutoDownload(subMenu.subId, !subMenu.auto)
         }
-        Menu {
+        AppMenu {
             title: "Check"
             Repeater {
                 model: prefsController.options.interval
-                delegate: MenuItem {
+                delegate: AppMenuItem {
                     required property var modelData
                     text: modelData.label
                     onTriggered: subscriptionsController.setInterval(subMenu.subId, modelData.code)
                 }
             }
         }
-        MenuSeparator {}
-        MenuItem { text: "Unsubscribe (keep downloaded files)"; onTriggered: subscriptionsController.remove(subMenu.subId) }
+        AppMenuSeparator {}
+        AppMenuItem { text: "Unsubscribe (keep downloaded files)"; onTriggered: subscriptionsController.remove(subMenu.subId) }
     }
 
     AppDialog {

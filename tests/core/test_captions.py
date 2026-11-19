@@ -5,6 +5,7 @@ from pathlib import Path
 from gfgmd.core.captions import (
     Cue,
     clock,
+    companion_files,
     cue_at,
     is_synced_lrc,
     line_at,
@@ -90,3 +91,15 @@ def test_files_and_sidecars(tmp_path: Path) -> None:
     assert [path.name for path in found] == ["Song (1080p).lrc", "Song (1080p).en.srt"]
     assert parse_file(found[1])[0].text == "Hello there"
     assert parse_file(tmp_path / "missing.srt") == []
+
+
+def test_another_songs_lyrics_and_the_cover_are_told_apart(tmp_path: Path) -> None:
+    song = tmp_path / "Song.wav"
+    song.write_bytes(b"")
+    (tmp_path / "Song.lrc").write_text("[00:01.00]Hi", encoding="utf-8")
+    (tmp_path / "Song.jpg").write_bytes(b"jpg")
+    (tmp_path / "Song.Remix.mp3").write_bytes(b"")
+    (tmp_path / "Song.Remix.lrc").write_text("[00:01.00]Remix", encoding="utf-8")
+    assert [path.name for path in sidecars(song)] == ["Song.lrc"]
+    assert [path.name for path in companion_files(song)] == ["Song.lrc", "Song.jpg"]
+    assert [path.name for path in sidecars(tmp_path / "Song.Remix.mp3")] == ["Song.Remix.lrc"]

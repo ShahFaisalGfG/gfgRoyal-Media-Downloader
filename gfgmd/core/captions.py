@@ -12,9 +12,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from gfgmd.core.naming import MEDIA_EXTENSIONS
+
 # Caption and lyric files are small; anything larger isn't one.
 MAX_CAPTION_BYTES = 4 * 1024 * 1024
 CAPTION_EXTENSIONS = (".srt", ".vtt", ".lrc")
+# A cover saved beside its song ("Song.jpg"), as WAV files get, since they can't hold one.
+COVER_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 # How long the last lyric line (which has no next line to end it) stays current.
 _LAST_LINE_SECONDS = 6.0
 
@@ -156,13 +160,24 @@ def plain_text(cues: list[Cue]) -> str:
 
 
 def sidecars(media: Path) -> list[Path]:
-    """Caption and lyric files saved beside `media` ("Song.lrc", "Video.en.srt"), sorted by name."""
+    """Caption and lyric files saved beside `media` ("Song.lrc", "Video.en.srt"), sorted by name.
+
+    "Song.Remix.lrc" belongs to "Song.Remix.mp3" when that file is there, not to "Song.mp3".
+    """
     stem = media.stem
     try:
         entries = list(media.parent.iterdir())
     except OSError:
         return []
+    others = {entry.stem for entry in entries
+              if entry.suffix[1:].lower() in MEDIA_EXTENSIONS and entry.stem != stem}
     found = [entry for entry in entries
              if entry.is_file() and entry.suffix.lower() in CAPTION_EXTENSIONS
-             and (entry.stem == stem or entry.stem.startswith(stem + "."))]
+             and (entry.stem == stem or (entry.stem.startswith(stem + ".") and entry.stem not in others))]
     return sorted(found, key=lambda entry: (entry.stem != stem, entry.name.casefold()))
+
+
+def companion_files(media: Path) -> list[Path]:
+    """The caption, lyric, and cover files beside `media` that belong to it (removed along with it)."""
+    covers = [media.with_suffix(extension) for extension in COVER_EXTENSIONS]
+    return sidecars(media) + [cover for cover in covers if cover.is_file()]

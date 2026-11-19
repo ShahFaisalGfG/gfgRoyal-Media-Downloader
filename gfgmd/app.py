@@ -81,7 +81,6 @@ class _Startup:
             from gfgmd.services.notifier import Notifier
             from gfgmd.services.thumbnails import ThumbnailCache
             from gfgmd.services.tool_manager import ToolManager
-            from gfgmd.utils.paths import local_subdir
 
             self._app.setWindowIcon(_load_icon())
             context = AppContext()
@@ -98,11 +97,12 @@ class _Startup:
             player_ctrl = PlayerController(context)
             update_ctrl = UpdateController(_update_config())
             update_ctrl.set_busy_sources([queue_ctrl])
-            thumbnails = ThumbnailCache(local_subdir("thumbnails"))
+            thumbnails = ThumbnailCache(context.thumbnails_dir)
 
             prefs_ctrl.settingsChanged.connect(update_ctrl.preferencesChanged)
             prefs_ctrl.settingsChanged.connect(self._apply_preferences)
             queue_ctrl.fileSaved.connect(library_ctrl.file_saved)
+            queue_ctrl.filesRemoved.connect(library_ctrl.reload)
             queue_ctrl.signInNeeded.connect(lambda site: app_ctrl.notice.emit(
                 f"A download needs you to sign in to {context.site(site).label}; open Sign-ins."))
             # A stale browser-window sign-in is re-read quietly first; it often still works.

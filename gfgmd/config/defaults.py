@@ -168,14 +168,14 @@ class FormatDefaults:
 class PresetDefaults:
     """The download presets offered next to the link box; users can save their own."""
 
-    DEFAULT = "video-1080"
+    DEFAULT = "video-best-mp4"
     BUILT_IN: list[dict[str, Any]] = [
-        {"id": "video-1080", "label": "Video, up to 1080p MP4", "kind": "video", "max_height": 1080,
-         "container": "mp4"},
+        # The highest resolution offered: "balanced" puts resolution first, so 1440p and 4K come as
+        # VP9 or AV1 (which MP4 holds), and takes H.264 with AAC sound whenever it offers the same.
+        {"id": "video-best-mp4", "label": "Video, best quality MP4", "kind": "video", "max_height": 0,
+         "container": "mp4", "codec_profile": "balanced"},
         {"id": "video-best", "label": "Video, best quality MKV", "kind": "video", "max_height": 0,
          "container": "mkv", "codec_profile": "best"},
-        {"id": "video-720", "label": "Video, up to 720p MP4", "kind": "video", "max_height": 720,
-         "container": "mp4"},
         {"id": "audio-mp3", "label": "Audio, MP3 320 kbps", "kind": "audio", "audio_format": "mp3",
          "audio_quality": 320},
         {"id": "audio-m4a", "label": "Audio, M4A 256 kbps", "kind": "audio", "audio_format": "m4a",

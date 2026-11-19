@@ -189,7 +189,7 @@ Item {
                         compact: true
                         iconName: "more"
                         toolTipText: "More actions"
-                        onClicked: menu.openFor(record.historyId, record.url, record.missing)
+                        onClicked: menu.openFor(record.historyId, record.url, record.missing, record.kind, record.title)
                     }
                 }
                 MouseArea {
@@ -198,7 +198,7 @@ Item {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: function (mouse) {
                         view.currentIndex = record.index
-                        if (mouse.button === Qt.RightButton) menu.openFor(record.historyId, record.url, record.missing)
+                        if (mouse.button === Qt.RightButton) menu.openFor(record.historyId, record.url, record.missing, record.kind, record.title)
                     }
                     onDoubleClicked: if (!record.missing) page.play(record.path)
                 }
@@ -215,34 +215,46 @@ Item {
         }
     }
 
-    Menu {
+    AppMenu {
         id: menu
         property int historyId: -1
         property string url: ""
         property bool missing: false
-        function openFor(historyId, url, missing) {
+        property string kind: ""
+        property string videoTitle: ""
+        function openFor(historyId, url, missing, kind, title) {
             menu.historyId = historyId
             menu.url = url
             menu.missing = missing
+            menu.kind = kind
+            menu.videoTitle = title
             menu.popup()
         }
-        MenuItem {
+        AppMenuItem {
             text: "Open in another player"
             enabled: !menu.missing
             onTriggered: appController.openPath(libraryController.pathOf(menu.historyId))
         }
-        MenuSeparator {}
-        MenuItem { text: "Copy link"; enabled: menu.url.length > 0; onTriggered: appController.copyText(menu.url) }
-        MenuItem { text: "Open link in browser"; enabled: menu.url.length > 0; onTriggered: appController.openUrl(menu.url) }
-        MenuItem { text: "Download again"; enabled: menu.url.length > 0; onTriggered: libraryController.redownload(menu.historyId) }
-        MenuSeparator {}
-        MenuItem { text: "Remove from the library (keep the file)"; onTriggered: libraryController.remove([menu.historyId]) }
-        MenuItem {
+        AppMenuItem {
+            text: "Extract audio"
+            enabled: !menu.missing && menu.kind === "video"
+            onTriggered: extractDialog.forVideo(menu.historyId, menu.videoTitle)
+        }
+        AppMenuSeparator {}
+        AppMenuItem { text: "Copy link"; enabled: menu.url.length > 0; onTriggered: appController.copyText(menu.url) }
+        AppMenuItem { text: "Open link in browser"; enabled: menu.url.length > 0; onTriggered: appController.openUrl(menu.url) }
+        AppMenuItem { text: "Download again"; enabled: menu.url.length > 0; onTriggered: libraryController.redownload(menu.historyId) }
+        AppMenuSeparator {}
+        AppMenuItem { text: "Remove from the library (keep the file)"; onTriggered: libraryController.remove([menu.historyId]) }
+        AppMenuItem {
             text: "Move the file to the Recycle Bin"
+            danger: true
             enabled: !menu.missing
             onTriggered: deleteDialog.open()
         }
     }
+
+    ExtractAudioDialog { id: extractDialog }
 
     AppDialog {
         id: deleteDialog
@@ -253,7 +265,7 @@ Item {
         onAccepted: libraryController.deleteFiles([menu.historyId])
         Text {
             width: parent.width
-            text: "The file goes to the Recycle Bin, where you can restore it, and leaves the library."
+            text: "The file, with its captions and lyrics, goes to the Recycle Bin, where you can restore it, and leaves the library."
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.text

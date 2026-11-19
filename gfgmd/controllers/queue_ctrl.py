@@ -7,7 +7,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import shutil
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,6 +25,7 @@ from gfgmd.config.defaults import DownloadDefaults, FormatDefaults, PresetDefaul
 from gfgmd.core.archive import archive_path
 from gfgmd.core.auth import Checkout
 from gfgmd.core.command import Auth, RunPaths
+from gfgmd.core.extract import AudioExtractor, ExtractSpec
 from gfgmd.core.jobs import JobExecutor, JobResult, JobSpec, Runner
 from gfgmd.core.lyrics import Fetch
 from gfgmd.core.naming import AUDIO_EXTENSIONS, remove_partials
@@ -31,12 +35,15 @@ from gfgmd.core.runner import run_to_completion
 from gfgmd.core.schedule import limit_at, next_queue_start, per_job_limit
 from gfgmd.core.secret_store import SecretError
 from gfgmd.core.sources import Source, canonical_url, source_from_url
+from gfgmd.core.store import ACTIVE_STATES
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services import power
 from gfgmd.services.context import VAULT_METHODS, AppContext
 from gfgmd.services.notifier import Notifier
+from gfgmd.services.recycle import recycle_media
 from gfgmd.services.taskbar import INDETERMINATE, NORMAL, PAUSED, TaskbarProgress
 from gfgmd.services.tasks import TaskRunner
+from gfgmd.services.thumbnails import cache_file
 from gfgmd.services.tool_manager import ToolManager
 from gfgmd.utils.format import format_bytes, format_duration
 from gfgmd.utils.logging import write_log
@@ -49,6 +56,13 @@ ROLES = ("jobId", "title", "url", "site", "kind", "thumbnail", "jobState", "stat
          "hasItems")
 _WAITING = ("queued", "scheduled", "waiting_live")
 _LIVE_STATES = ("running", "retry_wait")
+_CLEARABLE = ("done", "cancelled")
+# What the Extract audio dialog chooses, over the audio preferences.
+EXTRACT_CHOICES = ("audio_format", "audio_quality", "cover", "lyrics", "lyrics_online", "embed_thumbnail",
+                   "embed_metadata", "embed_chapters")
+# Unfinished files a stopped download reported, kept in its scratch folder so Cancel and Remove can
+# delete them after a pause or a restart, when no download is running to report them.
+PARTIALS_FILE = "partials.json"
 
 
 @dataclass
@@ -57,9 +71,9 @@ class _Running:
 
     job_id: int
     archive: str
-    site: str
+    site: str  # "" for an audio extraction, which no site limits
     live: bool
-    executor: JobExecutor | None = None
+    executor: JobExecutor | AudioExtractor | None = None
     stop_reason: str = ""
     files: list[tuple[dict[str, Any], str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -116,6 +130,8 @@ class QueueController(QObject):
     notice = Signal(str)
     # A finished file, for the library (history id, path).
     fileSaved = Signal(int, str)
+    # Library records went with files moved to the Recycle Bin.
+    filesRemoved = Signal()
     # The queue finished with an action chosen: QML shows a countdown before it happens.
     whenDoneCountdown = Signal(str)
     # A job needs the user to sign in to a site (site key).
@@ -182,7 +198,8 @@ class QueueController(QObject):
 
     @Property(int, notify=changed)
     def finishedCount(self) -> int:
-        return len(self._context.store.jobs(("done", "failed", "cancelled")))
+        """Downloads Clear finished would remove."""
+        return len(self._context.store.jobs(_CLEARABLE))
 
     @Property(bool, notify=changed)
     def paused(self) -> bool:
@@ -276,12 +293,56 @@ class QueueController(QObject):
 
     def _add(self, url: str, source: Source, options: DownloadOptions, items: list[dict[str, Any]] | None = None,
              title: str = "", thumbnail: str = "", not_before: float = 0.0, subscription_id: int | None = None,
-             account_id: int | None = None, state: str = "") -> int:
+             account_id: int | None = None, state: str = "", input_path: str = "") -> int:
         root = str(self._context.download_root(options.kind))
-        return self._context.store.add_job(
+        job_id = self._context.store.add_job(
             url, source.kind, source.source_id, source.site, options.to_dict(), root, source.tab, title, thumbnail,
             items, account_id, subscription_id, state or ("scheduled" if not_before > time.time() else "queued"),
-            not_before)
+            not_before, input_path)
+        # A removed job's id can be given out again: nothing of the old job may carry over.
+        self._clear_scratch(job_id)
+        return job_id
+
+    @Slot(int, "QVariantMap")
+    def extractJobAudio(self, job_id: int, choices: dict[str, Any]) -> None:
+        """Extract the audio of every video a download saved, with the Extract audio dialog's choices."""
+        videos = [record for record in self._context.store.history_for_job(job_id) if record["kind"] == "video"]
+        self._extract(videos, choices)
+
+    @Slot(int, "QVariantMap")
+    def extractAudio(self, history_id: int, choices: dict[str, Any]) -> None:
+        """Extract the audio of one video in the library, with the Extract audio dialog's choices."""
+        record = self._context.store.history_record(history_id)
+        self._extract([record] if record is not None and record["kind"] == "video" else [], choices)
+
+    def _extract(self, records: list[dict[str, Any]], choices: dict[str, Any]) -> None:
+        """Queue an audio extraction for each video file still there (one at a time per file).
+
+        `choices` (format, bitrate, cover, tags, chapters, lyrics) go over the audio preferences;
+        anything else in it is ignored.
+        """
+        present = [record for record in records if os.path.isfile(record["filepath"])]
+        if not present:
+            self.notice.emit("The video file is no longer there, so its audio can't be extracted.")
+            return
+        busy = {job["input_path"] for job in self._context.store.jobs(ACTIVE_STATES) if job["input_path"]}
+        fresh = [record for record in present if record["filepath"] not in busy]
+        if not fresh:
+            self.notice.emit("Its audio is already being extracted.")
+            return
+        picked = {key: value for key, value in choices.items() if key in EXTRACT_CHOICES}
+        try:
+            options = DownloadOptions.from_dict({**base_options(load_settings()).to_dict(), **picked, "kind": "audio"})
+        except ValueError as error:
+            self.notice.emit(f"These audio choices can't be used: {error}")
+            return
+        for record in fresh:
+            path = record["filepath"]
+            item_id = record["video_id"] or hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
+            self._add(record["url"], Source("video", item_id, record["site"] or "generic"), options,
+                      title=record["title"] or Path(path).stem, thumbnail=record["thumbnail"], input_path=path)
+        self.notice.emit(f"Extracting the audio of {len(fresh)} video(s); it appears in Downloads and the Library.")
+        self._after_change()
 
     # ── Per-job actions ───────────────────────────────────────────────────
 
@@ -322,16 +383,26 @@ class QueueController(QObject):
         """Stop a download and delete its unfinished files (finished files stay)."""
         if job_id in self._running:
             self._running[job_id].stop("cancel")
-        else:
-            self._set_state(job_id, "cancelled", "")
-
-    @Slot(int)
-    def remove(self, job_id: int) -> None:
-        """Take a download off the list (its saved files stay on disk)."""
-        if job_id in self._running:
-            self._running[job_id].stop("remove")
             return
-        self._context.store.delete_jobs([job_id])
+        job = self._context.store.job(job_id)
+        if job is not None:
+            self._remove_partials(job, set())
+        self._set_state(job_id, "cancelled", "")
+
+    @Slot(int, bool)
+    def remove(self, job_id: int, with_files: bool) -> None:
+        """Take a download off the list; its files stay on disk unless `with_files` is set.
+
+        With `with_files`, its saved files (and their captions, lyrics, and covers) go to the Recycle
+        Bin and its unfinished files are deleted.
+        """
+        if job_id in self._running:
+            self._running[job_id].stop("remove_files" if with_files else "remove")
+            return
+        job = self._context.store.job(job_id)
+        if job is not None and with_files and not self._discard_files(job, set()):
+            return
+        self._forget_jobs([job_id])
         self._after_change()
 
     @Slot(int, int)
@@ -342,8 +413,8 @@ class QueueController(QObject):
 
     @Slot()
     def clearFinished(self) -> None:
-        """Remove done, failed, and cancelled downloads from the list."""
-        self._context.store.delete_jobs([job["id"] for job in self._context.store.jobs(("done", "cancelled"))])
+        """Remove done and cancelled downloads from the list (failed ones stay to be tried again)."""
+        self._forget_jobs([job["id"] for job in self._context.store.jobs(_CLEARABLE)])
         self._summary = ""
         self._after_change()
 
@@ -431,6 +502,8 @@ class QueueController(QObject):
         return limit_at(datetime.now(), int(network.get("limit_kib", 0)), network.get("limit_windows", []))
 
     def _job_archive(self, job: dict[str, Any]) -> str:
+        if job["input_path"]:
+            return f"extract:{job['input_path']}"  # one extraction of a file at a time; no archive
         options = DownloadOptions.from_dict(json.loads(job["options_json"]))
         return str(archive_path(Path(job["output_root"]), source_of(job), options.profile))
 
@@ -446,7 +519,7 @@ class QueueController(QObject):
             if job["not_before"] > now:
                 continue
             site = self._context.site(job["site"])
-            if sum(1 for r in self._running.values() if r.site == job["site"]) >= site.max_concurrent:
+            if not job["input_path"] and sum(1 for r in self._running.values() if r.site == job["site"]) >= site.max_concurrent:
                 continue
             archive = self._job_archive(job)
             if any(r.archive == archive for r in self._running.values()):
@@ -466,7 +539,7 @@ class QueueController(QObject):
         options = options.with_changes(
             proxy=str(network.get("proxy", "")), force_ipv4=bool(network.get("force_ipv4", False)),
             limit_rate=rate, fragments=1 if rate else fragments)
-        running = _Running(job["id"], archive, job["site"], live)
+        running = _Running(job["id"], archive, "" if job["input_path"] else job["site"], live)
         self._running[job["id"]] = running
         self._worked = True
         self._context.store.update_job(job["id"], state="running", message="", error_key="", action="")
@@ -483,6 +556,8 @@ class QueueController(QObject):
     def _work(self, running: _Running, spec_args: tuple[Any, ...]) -> JobResult:
         """On the pool: hand out the sign-in, run the download, take the sign-in back."""
         job, options, skip, max_attempts, retry_delay = spec_args
+        if job["input_path"]:
+            return self._extract_audio(running, job, options)
         context = self._context
         source = source_of(job)
         account = context.account_for(job["site"], job["account_id"])
@@ -517,6 +592,42 @@ class QueueController(QObject):
                     context.vault.checkin(account["id"], checkout)
                 except (SecretError, OSError, TimeoutError) as error:
                     write_log(f"Sign-in cookies couldn't be stored back: {error}", "critical")
+
+    def _extract_audio(self, running: _Running, job: dict[str, Any], options: DownloadOptions) -> JobResult:
+        """On the pool: write a downloaded video's audio into the audio folder."""
+        context = self._context
+        video = Path(job["input_path"])
+        record = context.store.history_for_path(job["input_path"]) or {}
+        cover = cache_file(context.thumbnails_dir, job["thumbnail"]) if job["thumbnail"].startswith("https://") else None
+        spec = ExtractSpec(video, options, Path(job["output_root"]), self._mirror_folder(video, record),
+                           context.job_dir(job["id"]), item_id=job["source_id"], title=job["title"],
+                           uploader=str(record.get("uploader") or ""), url=job["url"], thumbnail=job["thumbnail"],
+                           cover_hint=cover)
+
+        def saved(info: dict[str, Any], path: Path) -> None:
+            with running.lock:
+                running.files.append((info, str(path)))
+
+        extractor = AudioExtractor(spec, context.tools, on_file=saved, runner=self._program_runner,
+                                   lyrics_fetch=self._lyrics_fetch)
+        running.executor = extractor
+        if running.stop_reason:
+            return JobResult("stopped")
+        return extractor.run()
+
+    def _mirror_folder(self, video: Path, record: dict[str, Any]) -> str:
+        """The video's folder below its download root ("YouTube/Single Videos"), which the audio mirrors."""
+        roots = [self._context.download_root("video")]
+        job = self._context.store.job(record["job_id"]) if record.get("job_id") else None
+        if job is not None:
+            roots.insert(0, Path(job["output_root"]))
+        for root in roots:
+            try:
+                folder = video.parent.relative_to(root)
+            except ValueError:
+                continue
+            return "" if folder == Path(".") else folder.as_posix()
+        return ""  # a video saved elsewhere: its audio goes straight into the audio folder
 
     def _drain_files(self, running: _Running) -> None:
         """Record finished files in the library (on the GUI thread)."""
@@ -559,18 +670,25 @@ class QueueController(QObject):
         self._snapshots.pop(running.job_id, None)
         job = self._context.store.job(running.job_id)
         reason = running.stop_reason
-        if reason == "remove" or job is None:
-            self._context.store.delete_jobs([running.job_id])
+        partials = running.executor.partial_files() if running.executor is not None else set()
+        if job is None or reason == "remove":
+            self._forget_jobs([running.job_id])
+        elif reason == "remove_files":
+            if self._discard_files(job, partials):
+                self._forget_jobs([running.job_id])
+            else:
+                self._set_state(running.job_id, "cancelled", "", refresh=False)
         elif reason == "cancel":
-            if running.executor is not None:
-                remove_partials(running.executor.partial_files(), Path(job["output_root"]) / ".incomplete")
+            self._remove_partials(job, partials)
             self._set_state(running.job_id, "cancelled", "", refresh=False)
-        elif reason in ("pause", "pause_all"):
-            self._set_state(running.job_id, "paused", "", refresh=False)
-        elif reason in ("restart", "shutdown"):
-            self._set_state(running.job_id, "queued", "", refresh=False)
         else:
-            self._record_result(job, result)
+            self._keep_partials(running.job_id, partials)
+            if reason in ("pause", "pause_all"):
+                self._set_state(running.job_id, "paused", "", refresh=False)
+            elif reason in ("restart", "shutdown"):
+                self._set_state(running.job_id, "queued", "", refresh=False)
+            else:
+                self._record_result(job, result)
         self.busyChanged.emit()
         self._after_change()
         self._check_finished_queue()
@@ -596,7 +714,7 @@ class QueueController(QObject):
         settings = load_settings()
         notify = bool(settings.get("notifications", {}).get("enabled", True))
         if state == "done" and notify:
-            self._notifier.notify("Download finished", f"{name}\n{message}",
+            self._notifier.notify("Audio extracted" if job["input_path"] else "Download finished", f"{name}\n{message}",
                                   str(result.files[-1]) if result.files else "")
         elif state == "needs_auth":
             self.signInNeeded.emit(job["site"])
@@ -609,6 +727,65 @@ class QueueController(QObject):
                 self._notifier.notify("Downloads paused", "The disk is full.")
         elif state == "failed" and notify:
             self._notifier.notify("Download failed", f"{name}\n{message}")
+
+    def _keep_partials(self, job_id: int, partials: set[str]) -> None:
+        """Remember a stopped download's unfinished files, with any kept from its earlier runs."""
+        known = self._saved_partials(job_id)
+        if not partials or partials <= known:
+            return
+        target = self._context.job_dir(job_id) / PARTIALS_FILE
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(sorted(known | partials)), encoding="utf-8")
+        except OSError as error:
+            write_log(f"Unfinished files of download {job_id} couldn't be noted: {error}", "general")
+
+    def _saved_partials(self, job_id: int) -> set[str]:
+        try:
+            saved = json.loads((self._context.job_dir(job_id) / PARTIALS_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        return {item for item in saved if isinstance(item, str)} if isinstance(saved, list) else set()
+
+    def _remove_partials(self, job: dict[str, Any], partials: set[str]) -> None:
+        """Delete a download's unfinished files: those reported now and those noted when it stopped before."""
+        saved = self._saved_partials(job["id"])
+        archive = self._job_archive(job)
+        if saved and any(r.archive == archive and r.job_id != job["id"] for r in self._running.values()):
+            # Another download of the same videos is running and may be continuing these files.
+            saved = set()
+        else:
+            (self._context.job_dir(job["id"]) / PARTIALS_FILE).unlink(missing_ok=True)
+        remove_partials(partials | saved, Path(job["output_root"]) / ".incomplete")
+
+    def _discard_files(self, job: dict[str, Any], partials: set[str]) -> bool:
+        """Delete a download's unfinished files and move its saved ones to the Recycle Bin.
+
+        False when Windows didn't move them (a file open in a player), so the download stays listed.
+        """
+        self._remove_partials(job, partials)
+        records = self._context.store.history_for_job(job["id"])
+        saved = [record["filepath"] for record in records if os.path.isfile(record["filepath"])]
+        if not recycle_media(saved):
+            self.notice.emit("Windows couldn't move the files to the Recycle Bin; they may be open in a player.")
+            return False
+        self._context.store.delete_history(record["id"] for record in records)
+        if records:
+            self.filesRemoved.emit()
+        if saved:
+            self.notice.emit(f"Moved {len(saved)} file(s) to the Recycle Bin.")
+        return True
+
+    def _forget_jobs(self, job_ids: list[int]) -> None:
+        """Delete jobs with their scratch folders."""
+        self._context.store.delete_jobs(job_ids)
+        for job_id in job_ids:
+            self._clear_scratch(job_id)
+
+    def _clear_scratch(self, job_id: int) -> None:
+        """Forget what this app kept about a job id: its scratch folder (journal, unfinished files) and Play file."""
+        self._last_files.pop(job_id, None)
+        shutil.rmtree(self._context.job_dir(job_id), ignore_errors=True)
 
     def _crashed(self, running: _Running, message: str) -> None:
         """The worker raised (a bug): record it instead of leaving the job running forever."""
@@ -725,6 +902,8 @@ class QueueController(QObject):
         self._runner.shutdown(10_000)
         for running in list(self._running.values()):
             self._drain_files(running)
+            if running.executor is not None:
+                self._keep_partials(running.job_id, running.executor.partial_files())
             self._context.store.update_job(running.job_id, state="queued")
         self._running.clear()
         self._keep_awake(False)

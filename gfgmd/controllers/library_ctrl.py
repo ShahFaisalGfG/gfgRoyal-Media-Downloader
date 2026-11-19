@@ -12,7 +12,7 @@ from PySide6.QtCore import Property, QModelIndex, QObject, QPersistentModelIndex
 from gfgmd.core.sources import source_from_url
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services.context import AppContext
-from gfgmd.services.recycle import to_recycle_bin
+from gfgmd.services.recycle import recycle_media
 from gfgmd.utils.format import format_bytes, format_duration
 
 PAGE = 100
@@ -164,10 +164,10 @@ class LibraryController(QObject):
 
     @Slot("QVariantList")
     def deleteFiles(self, history_ids: list[int]) -> None:
-        """Move files to the Recycle Bin and take them off the list."""
+        """Move files (with their captions, lyrics, and covers) to the Recycle Bin and take them off the list."""
         records = [self._record(int(item)) for item in history_ids]
         paths = [record["path"] for record in records if record and not record["missing"]]
-        if paths and not to_recycle_bin(paths):
+        if not recycle_media(paths):
             self.notice.emit("Windows couldn't move the files to the Recycle Bin; they may be open in a player.")
             return
         self._context.store.delete_history(int(item) for item in history_ids)

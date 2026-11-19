@@ -31,6 +31,7 @@ class AppContext:
         self.run_root = local_subdir("run") if local is None else base / "run"
         self.jobs_root = local_subdir("jobs") if local is None else base / "jobs"
         self.signin_profiles = local_subdir("browser-profiles") if local is None else base / "browser-profiles"
+        self.thumbnails_dir = local_subdir("thumbnails") if local is None else base / "thumbnails"
 
     def close(self) -> None:
         """Close the database."""

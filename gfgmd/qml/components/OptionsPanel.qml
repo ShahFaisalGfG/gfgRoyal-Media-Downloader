@@ -29,7 +29,7 @@ Rectangle {
     function reset() {
         var preset = prefsController.preset(panel.presetId)
         kindBox.value = preset.kind || "video"
-        heightBox.value = preset.max_height !== undefined ? preset.max_height : 1080
+        heightBox.value = preset.max_height !== undefined ? preset.max_height : 0
         containerBox.value = preset.container || panel._pref("formats.container")
         codecBox.value = preset.codec_profile || panel._pref("formats.codec_profile")
         audioBox.value = preset.audio_format || panel._pref("formats.audio_format")
@@ -99,22 +99,29 @@ Rectangle {
     onVisibleChanged: if (visible) panel.reset()
 
     // The panel scrolls inside maxHeight, so a long playlist never squeezes the queue below it; the
-    // action row stays pinned below the scrolling part.
-    ScrollView {
+    // action row stays pinned below the scrolling part. A Flickable rather than a ScrollView: the
+    // content's width must not depend on whether the scroll bar shows. A ScrollView narrows its content
+    // for the bar, so rows that wrap taller or shorter can make the bar show or hide again. The bar
+    // draws over a gutter kept free on the right instead.
+    Flickable {
         id: scroller
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: actions.visible ? actions.top : parent.bottom
         anchors.margins: Theme.spaceLg
+        anchors.rightMargin: Theme.spaceSm
         anchors.bottomMargin: actions.visible ? Theme.spaceMd : Theme.spaceLg
-        contentWidth: availableWidth
+        contentWidth: width
+        contentHeight: column.implicitHeight
         clip: true
+        boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             id: column
-            width: scroller.availableWidth
+            // Always the same width, whether or not the bar shows: a fixed gutter holds the bar.
+            width: scroller.width - (Theme.spaceLg - Theme.spaceSm)
             spacing: Theme.spaceMd
 
             // Details
