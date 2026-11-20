@@ -71,3 +71,13 @@ def test_a_failed_test_hides_the_error_text(qapp, prefs, monkeypatch):
     message = finish(qapp, prefs, VIDEO)
     assert message.startswith("The speed test couldn't finish.") and "WinError" not in message
     assert not prefs.optimizing
+
+
+def test_a_reset_keeps_the_note_of_the_installers_choices(qapp, prefs):
+    """Otherwise the next start would apply the installer's choices again and undo the reset."""
+    prefs.saveSettings({"install.connections": "OnlineLyrics=0;ToolUpdates=1;UpdateChecks=1",
+                        "formats.lyrics_online": False})
+    prefs.resetDefaults()
+    saved = load_settings()
+    assert saved["install"]["connections"] == "OnlineLyrics=0;ToolUpdates=1;UpdateChecks=1"
+    assert saved["formats"]["lyrics_online"] is True

@@ -16,6 +16,26 @@ stay in the "gfgRoyal Media Downloader data" folder next to gfgRoyal-Media-Downl
 Delete this file to keep them in %APPDATA% and %LOCALAPPDATA% instead.
 "@
 
+function New-VersionFile {
+    <#
+    .SYNOPSIS
+        Writes an exe's version details for PyInstaller and returns the file's path.
+    .DESCRIPTION
+        Every exe the build makes carries the app's name as its product name and the version from
+        pyproject.toml (read_meta.py writes them), which code signing requires; the description
+        names the exe in Task Manager and in its Properties.
+    #>
+    param(
+        [Parameter(Mandatory)] [string]$Exe,
+        [Parameter(Mandatory)] [string]$Description
+    )
+    $root = Split-Path -Parent $PSScriptRoot
+    $path = "$root\build\pyinstaller\$Exe.version.txt"
+    python (Join-Path $PSScriptRoot "read_meta.py") --version-file $path --exe $Exe --description $Description
+    if ($LASTEXITCODE -ne 0) { Fail "Could not write the version details of $Exe.exe (exit $LASTEXITCODE)" }
+    return $path
+}
+
 function Get-PyInstallerArgs {
     <#
     .SYNOPSIS
@@ -32,6 +52,7 @@ function Get-PyInstallerArgs {
         "--windowed",
         "--$Mode",
         "--icon",      "$root\gfgmd\assets\icons\$AppIcon",
+        "--version-file", (New-VersionFile -Exe $Name -Description (Get-AppMeta).AppName),
         # The Qt modules the app loads; the project hooks trim each to what the app uses.
         "--hidden-import", "PySide6.QtCore",
         "--hidden-import", "PySide6.QtGui",
@@ -166,7 +187,8 @@ function New-ConsoleExe {
     param(
         [Parameter(Mandatory)] [string]$BundleDir,
         [Parameter(Mandatory)] [string]$Name,
-        [Parameter(Mandatory)] [string]$Entry
+        [Parameter(Mandatory)] [string]$Entry,
+        [Parameter(Mandatory)] [string]$Description
     )
     $root = Split-Path -Parent $PSScriptRoot
     Write-Step "Building $Name"
@@ -176,6 +198,7 @@ function New-ConsoleExe {
         "--console",
         "--onefile",
         "--icon",      "$root\gfgmd\assets\icons\$AppIcon",
+        "--version-file", (New-VersionFile -Exe $Name -Description $Description),
         "--exclude-module", "PySide6",
         "--exclude-module", "shiboken6",
         "--paths",     $root,
@@ -199,11 +222,13 @@ function New-ConsoleExes {
         Builds the command-line tool and the native host beside the app, and checks the tool runs.
     #>
     param([Parameter(Mandatory)] [string]$BundleDir)
-    $cli = New-ConsoleExe -BundleDir $BundleDir -Name "gfgmd" -Entry "gfgmd\cli.py"
+    $app = (Get-AppMeta).AppName
+    $cli = New-ConsoleExe -BundleDir $BundleDir -Name "gfgmd" -Entry "gfgmd\cli.py" -Description "$app command line"
     $version = & $cli --version
     if ($LASTEXITCODE -ne 0 -or $version -notmatch '^gfgmd \d+\.\d+\.\d+$') { Fail "gfgmd.exe --version failed: $version" }
     Write-Host "   $version" -ForegroundColor DarkGray
-    New-ConsoleExe -BundleDir $BundleDir -Name "gfgRoyal-Media-Downloader-host" -Entry "gfgmd\host_entry.py" | Out-Null
+    New-ConsoleExe -BundleDir $BundleDir -Name "gfgRoyal-Media-Downloader-host" -Entry "gfgmd\host_entry.py" `
+        -Description "$app browser extension connector" | Out-Null
 }
 
 function New-PortableArchive {

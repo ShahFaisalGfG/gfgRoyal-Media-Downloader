@@ -22,6 +22,7 @@ from gfgmd.services.companion import cookies_from_extension
 from gfgmd.ui.boot_thread import BootThread
 from gfgmd.ui.splash_screen import SplashScreen
 from gfgmd.utils.helpers import resource_path
+from gfgmd.utils.install_choices import apply_install_choices
 from gfgmd.utils.logging import write_log
 from gfgmd.utils.self_test import run_self_test
 from gfgmd.utils.settings import load_settings
@@ -411,6 +412,8 @@ def main() -> None:
     if instance.try_forward(request):
         sys.exit(0)
     hold_app_mutexes()
+    # Before anything reads the settings: the connections the installer was told to turn off.
+    apply_install_choices()
 
     # The tray keeps the app running with no window open, and the QML window closes to the tray,
     # so Qt must not quit when the last window closes.

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app's programs, signed before the installers are built from them (the release workflow's
+     first signing request; SignPath artifact configuration slug "programs"). Each must carry the
+     app's name as its product name and the release's version. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file-set product-name="gfgRoyal Media Downloader" product-version="${version}">
+      <include path="gfgRoyal-Media-Downloader.exe" />
+      <include path="gfgmd.exe" />
+      <include path="gfgRoyal-Media-Downloader-host.exe" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

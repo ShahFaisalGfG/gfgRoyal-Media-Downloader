@@ -44,6 +44,9 @@
 #define IconName MyFileName + ".ico"
 #define HostExe MyFileName + "-host.exe"
 #define RepoUrl "https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader"
+; The installer's connection choices, which the app applies at its next start
+; (gfgmd\utils\install_choices.py reads them; HKA is HKLM for all users, HKCU for one).
+#define ChoicesKey "Software\" + MyAppName + "\Install"
 
 [Setup]
 AppId={#AppGuid}
@@ -54,6 +57,16 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#RepoUrl}
 AppUpdatesURL={#RepoUrl}/releases
+; The setup exe's version details: the app's name and version, as code signing requires.
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoCopyright=Copyright (c) 2026 Shah Faisal
+; The privacy policy, shown before installing: every connection the app makes, and how to turn off
+; the ones it makes on its own (the choices below).
+InfoBeforeFile=..\PRIVACY.md
 
 ; One folder in the Start menu, without a page to rename it
 DefaultGroupName={#MyAppName}
@@ -91,6 +104,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "addtopath"; Description: "Add the gfgmd command to PATH (download from any terminal)"; GroupDescription: "Command line:"; Flags: unchecked
+Name: "companion"; Description: "Connect the companion browser extension (Chrome, Edge, Brave, Opera, Vivaldi)"; GroupDescription: "Browser:"
+; Clearing one turns that connection off at the app's next start; Preferences turns it back on.
+Name: "updatecheck"; Description: "Check GitHub for app updates once a day"; GroupDescription: "Connections the app makes on its own (see the privacy policy):"
+Name: "toolupdates"; Description: "Keep yt-dlp, FFmpeg, and Deno up to date from GitHub"; GroupDescription: "Connections the app makes on its own (see the privacy policy):"
+Name: "lyricsonline"; Description: "Look up song lyrics on LRCLIB (lrclib.net) when a site has none"; GroupDescription: "Connections the app makes on its own (see the privacy policy):"
 
 [Files]
 ; The app bundle from scripts\bundle.ps1, with gfgmd.exe and the companion's host beside the app.
@@ -100,6 +118,7 @@ Source: "{#IconsDir}\{#IconName}"; DestDir: "{app}\icons"; Flags: ignoreversion
 Source: "..\scripts\register-companion-host.ps1"; DestDir: "{app}\companion"; Flags: ignoreversion
 ; Documentation and the licence texts of every bundled component
 Source: "..\README.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\PRIVACY.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}\docs"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "{#IconsDir}\Square150x150Logo.scale-100.png"; DestDir: "{app}\docs\icons"; Flags: ignoreversion
@@ -115,6 +134,14 @@ Type: filesandordirs; Name: "{app}\docs"
 [Registry]
 ; The gfgmd command: the install folder joins PATH when the task is chosen (removed on uninstall).
 Root: {#PathRoot}; Subkey: "{#PathKey}"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
+; The connection choices: 1 keeps a connection on, 0 turns it off.
+Root: HKA; Subkey: "{#ChoicesKey}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "{#ChoicesKey}"; ValueType: dword; ValueName: "UpdateChecks"; ValueData: 1; Tasks: updatecheck
+Root: HKA; Subkey: "{#ChoicesKey}"; ValueType: dword; ValueName: "UpdateChecks"; ValueData: 0; Tasks: not updatecheck
+Root: HKA; Subkey: "{#ChoicesKey}"; ValueType: dword; ValueName: "ToolUpdates"; ValueData: 1; Tasks: toolupdates
+Root: HKA; Subkey: "{#ChoicesKey}"; ValueType: dword; ValueName: "ToolUpdates"; ValueData: 0; Tasks: not toolupdates
+Root: HKA; Subkey: "{#ChoicesKey}"; ValueType: dword; ValueName: "OnlineLyrics"; ValueData: 1; Tasks: lyricsonline
+Root: HKA; Subkey: "{#ChoicesKey}"; ValueType: dword; ValueName: "OnlineLyrics"; ValueData: 0; Tasks: not lyricsonline
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icons\{#IconName}"
@@ -124,8 +151,10 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 Filename: "{#RepoUrl}"; Description: "View README on GitHub"; Flags: shellexec nowait postinstall skipifsilent unchecked
-; Let the companion browser extension reach the app (Chrome, Edge, Brave, Opera, Vivaldi).
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\companion\register-companion-host.ps1"" -HostExe ""{app}\{#HostExe}"" -ExtensionId ""{#MyExtId}"" -Scope {#HostScope}"; Flags: runhidden; StatusMsg: "Connecting the companion browser extension"
+; Let the companion browser extension reach the app (Chrome, Edge, Brave, Opera, Vivaldi), or take
+; an earlier install's connection away when the choice is cleared.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\companion\register-companion-host.ps1"" -HostExe ""{app}\{#HostExe}"" -ExtensionId ""{#MyExtId}"" -Scope {#HostScope}"; Flags: runhidden; StatusMsg: "Connecting the companion browser extension"; Tasks: companion
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\companion\register-companion-host.ps1"" -HostExe ""{app}\{#HostExe}"" -Scope {#HostScope} -Unregister"; Flags: runhidden; Tasks: not companion
 
 [UninstallRun]
 ; Remove the companion host manifest and its browser registry keys before the files are deleted.

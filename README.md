@@ -44,6 +44,7 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - [Quality and Speed](#quality-and-speed)
 - [The Download Tools](#the-download-tools)
 - [Privacy and Security](#privacy-and-security)
+- [Code Signing Policy](#code-signing-policy)
 - [Troubleshooting](#troubleshooting)
 - [Building from Source](#building-from-source)
 - [Roadmap](#roadmap)
@@ -96,6 +97,8 @@ Get the latest release from the [Releases page](https://github.com/ShahFaisalGfG
 | `gfgRoyal-Media-Downloader_<version>_portable.exe` | You want one file that runs from anywhere and keeps its data beside itself |
 | `gfgRoyal-Media-Downloader_<version>_portable.7z` | The same, unpacked, with `gfgmd.exe` included |
 | `gfgRoyal-Media-Downloader-Companion_<version>_chrome.zip` | The companion browser extension (see [below](#companion-browser-extension)) |
+
+The Windows files are signed as the [Code signing policy](#code-signing-policy) describes, and the installers show the [privacy policy](PRIVACY.md) before they install.
 
 Windows 10 version 1809 or later, 64-bit. On first start the app offers to download yt-dlp, FFmpeg, and Deno (about 280 MB) from their official releases; or choose **Use the installed tools** if you installed them yourself with winget.
 
@@ -347,7 +350,7 @@ yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube
 
 ## Privacy and Security
 
-- **No accounts, no telemetry, no ads.** The app contacts the sites you download from, GitHub (for its own updates and the tools), LRCLIB for lyrics (title, artist, album, and length only; it can be turned off), and nothing else.
+- **No accounts, no telemetry, no ads.** The app contacts the sites you download from, GitHub (for its own updates and the tools), LRCLIB for lyrics (title, artist, album, and length only), and nothing else. The [privacy policy](PRIVACY.md) lists each connection; the installers let you turn off the ones the app makes on its own, and Preferences turns them off at any time.
 - **No configuration from elsewhere runs.** Every yt-dlp run ignores yt-dlp's own configuration files, plugins, and remote code, and links are always passed after `--`, so nothing can add options such as `--exec`.
 - **Verified downloads.** Tools must match their published SHA-256 checksums and come only from GitHub over HTTPS; app updates must carry the release signature.
 - **Sign-ins stay on your PC**, encrypted for your Windows account, and are never written to logs. A download that needs one gets a copy for that run only, removed when it ends (and at the next start after a crash). A browser window's sign-in is read over a private pipe, never a network port another program could reach.
@@ -355,6 +358,19 @@ yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube
 - **Text from sites is only text.** Titles and names are shown as plain text, and nothing a site puts in a title can pose as the app's own progress lines or point it at a file outside the download folder.
 - **The tools are never taken from the current folder**, so a program dropped where the command line runs can't stand in for yt-dlp or FFmpeg.
 - **No administrator rights** are needed to run the app or to install it for your account.
+
+---
+
+## Code Signing Policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+Releases are built from this repository by GitHub Actions and signed through SignPath once the project is accepted into the SignPath Foundation's program for open-source projects; until then they are unsigned. Signed files name SignPath Foundation as their publisher, and each release is approved by hand before it is signed.
+
+- Committers and reviewers: [Shah Faisal](https://github.com/ShahFaisalGfG)
+- Approvers: [Shah Faisal](https://github.com/ShahFaisalGfG)
+
+Privacy policy: see [PRIVACY.md](PRIVACY.md). This program connects only to the sites you use, GitHub, and LRCLIB, as that page describes.
 
 ---
 
@@ -401,7 +417,16 @@ Running from source keeps settings next to the code and the library and tools in
 
 The companion extension is in `companion/` (Node.js 22): `npm install`, `npm run build`, `npm run typecheck`, `npm run lint`, `npm test`, and `npm run test:e2e`.
 
-Versions follow [Semantic Versioning](https://semver.org/); the version lives in `pyproject.toml`, and a `v<version>` tag builds and publishes a release with its notes from `release_notes/`.
+Versions follow [Semantic Versioning](https://semver.org/); the version lives in `pyproject.toml`, and a `v<version>` tag builds and publishes a release with its notes from `release_notes/`. Every exe the build makes carries the app's name as its product name and the version from `pyproject.toml`.
+
+### Signing releases
+
+The release workflow signs through SignPath when the repository has the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, and `SIGNPATH_POLICY_SLUG` and the secret `SIGNPATH_API_TOKEN`; without them it publishes unsigned files. Each release makes two signing requests, and each waits up to two hours for approval in SignPath:
+
+1. The app's programs (`gfgRoyal-Media-Downloader.exe`, `gfgmd.exe`, and the companion's host), before the installers are built from them.
+2. Both installers and the portable exe.
+
+The SignPath project takes its artifact configurations from `.signpath/artifact-configurations/`: `programs.xml` under the slug `programs` and `packages.xml` under `packages`. Both accept a file only when its product name is the app's and its product version is the release's.
 
 ---
 
@@ -446,6 +471,7 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🔁 A video of a signed-in playlist that fails with the sign-in (YouTube's signed-in downloads can break off partway) is downloaded once more by its own link without it, into the playlist's folder, so a song that downloads on its own also downloads in its playlist; with logging on, the log holds yt-dlp's own words for each failure
 - 🔁 A playlist video that keeps breaking off with an error that doesn't name it (a missing part, "HTTP Error 403") is given up on like any other, so the list finishes; a download waiting to try again says why ("Trying again in 5 minutes · The connection dropped"); a list's videos you already have show **Downloaded before** as the list is read (yt-dlp's current wording, which names each one, wasn't recognized), and the summary leaves out a count of nothing saved ("7 downloaded before, 1 couldn't be downloaded"); a finished download deletes what earlier attempts left unfinished of the videos it saved, and a download leaving the list takes its other unfinished files with it
 - ⌨️ Where a message points at the app's window (sign in, choose a folder, wait for a stream), `gfgmd` names its own option instead (`--cookies`, `--output-dir`, `--wait-for-video`)
+- 🔏 A [privacy policy](PRIVACY.md) lists every connection the app makes; the installers show it and let you turn off app update checks, download tool updates, and online lyrics, and connecting the companion extension is an installer choice too. Every exe carries the app's name and version, and releases are ready to be signed through SignPath ([Code signing policy](#code-signing-policy))
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry
 
 ### v1.0.0 - November 2026 *(current)*

@@ -344,4 +344,7 @@ def get_default_settings() -> Dict[str, Any]:
             "auto_check": UpdateDefaults.AUTO_CHECK,
             "auto_install": UpdateDefaults.AUTO_INSTALL,
         },
+        # The installer's connection choices as this user's settings last applied them
+        # ("OnlineLyrics=0;ToolUpdates=1;UpdateChecks=1"); see utils/install_choices.py.
+        "install": {"connections": ""},
     }
