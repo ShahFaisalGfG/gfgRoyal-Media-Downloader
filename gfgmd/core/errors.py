@@ -38,6 +38,12 @@ class Category:
         """What the user reads once nothing more will be tried."""
         return self.final_message or self.message
 
+    @property
+    def cause(self) -> str:
+        """What went wrong, without what the app does about it: "The connection dropped" (shown beside
+        "Trying again in 5 minutes")."""
+        return self.message.split(";")[0].rstrip(".")
+
 
 @dataclass(frozen=True)
 class Failure:

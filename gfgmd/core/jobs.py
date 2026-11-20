@@ -6,7 +6,9 @@ it with a fake yt-dlp and no network.
 
 Each saved file is finished (renamed, given its lyrics, reported) as soon as yt-dlp moves it into
 place, so a playlist's songs reach the library while the rest download. A video whose download stops
-moving is set aside: the rest of the list goes first, and it gets fresh links afterwards.
+moving is set aside: the rest of the list goes first, and it gets fresh links afterwards. A signed-in
+list's video that fails in a way the sign-in can cause is downloaded once more by its own link, without
+the sign-in, into the list's folder.
 """
 
 from __future__ import annotations
@@ -106,12 +108,14 @@ class JobResult:
             return "Already downloaded" if self.archived == 1 else f"All {self.archived} were downloaded before"
         if not self.files and not self.archived and not self.skipped and self.state == "done":
             return "There was nothing to download: the list is empty"
-        parts = [f"{count_media(len(self.files), self.kind)} saved"]
+        # "7 downloaded before, 1 couldn't be downloaded": a count of nothing saved is left out.
+        parts = [f"{count_media(len(self.files), self.kind)} saved"] if self.files else []
         if self.archived:
             parts.append(f"{self.archived} downloaded before")
         if self.skipped:
-            parts.append(f"{len(self.skipped)} couldn't be downloaded")
-        return ", ".join(parts)
+            failed = len(self.skipped)
+            parts.append(f"{failed if parts else count_media(failed, self.kind)} couldn't be downloaded")
+        return ", ".join(parts) or f"{count_media(0, self.kind)} saved"
 
 
 class JobExecutor:
@@ -156,14 +160,17 @@ class JobExecutor:
         self._saved_ids: set[str] = set()
         self._updates_lock = threading.Lock()
         self._updates: list[Update] = []
-        # The current attempt's playlist files: videos listed so far, and each one's place in the list
-        # being downloaded (for archive lines that name a title, not an ID).
+        # How many videos the current attempt's playlist files listed so far, and how many list files it
+        # has read (its first names the download).
         self._list_offset = 0
-        self._positions: dict[int, str] = {}
+        self._attempt_lists = 0
         # The IDs of the lists read (a playlist, a channel's tabs), which are no video of their own,
         # and the parts of the link that can name the list.
         self._list_ids: set[str] = set()
         self._link_names = _link_names(spec.url)
+        # Each video's own link and its folder below the download root ("" for the root itself), from
+        # the item line yt-dlp prints before downloading it.
+        self._places: dict[str, tuple[str, str]] = {}
 
     def stop(self) -> None:
         """Stop the running attempt (or the wait before the next one)."""
@@ -197,18 +204,14 @@ class JobExecutor:
         "failed" (failed this time), "deferred" (its server stopped answering; tried again after the
         rest), or "pending" (being tried again).
         """
+        self._pull_tracker()
         with self._updates_lock:
             updates, self._updates = self._updates, []
-            positions = dict(self._positions)
-        taken: list[Update] = []
-        for kind, value in updates + self._tracker.take_updates():
-            if kind == "archived_at":
-                video_id = positions.get(int(value), "")
-                if video_id:
-                    taken.append(("state", (video_id, "archived", "")))
-            else:
-                taken.append((kind, value))
-        return taken
+        return updates
+
+    def _pull_tracker(self) -> None:
+        """Move the tracker's "downloaded before" marks here."""
+        self._push(self._tracker.take_updates())
 
     def partial_files(self) -> set[str]:
         """Every partial file yt-dlp reported in any attempt (for removing a cancelled download)."""
@@ -258,6 +261,8 @@ class JobExecutor:
         # times each one stalled.
         item_failures: dict[str, int] = {}
         stall_counts: dict[str, int] = {}
+        # A signed-in list's videos already downloaded once on their own without the sign-in.
+        alone: set[str] = set()
         while True:
             # Tries so far, this one included; a restart after setting a stalled video aside isn't one.
             result.attempts = self._retries + 1
@@ -333,6 +338,13 @@ class JobExecutor:
                 return result
             if code != 0 and not failures and any(_harmless(event.text) for event in self._tracker.errors):
                 code = 0  # only yt-dlp's own note that it couldn't rewrite the playlist file
+            if code != 0 and failures and spec.auth is not None and spec.source.is_collection:
+                failures = self._without_sign_in(failures, alone, result)
+                if self._stop.is_set():
+                    result.state = "stopped"
+                    return result
+                if not failures:
+                    code = 0  # the videos that failed were saved on their own
             if code == 0:
                 if deferred:
                     self._release(deferred, released)
@@ -405,11 +417,67 @@ class JobExecutor:
     def _wait_to_retry(self, wait: Callable[[float], bool], key: str, result: JobResult) -> bool:
         """Wait before the next attempt; True (with the job stopped) when stopped meanwhile."""
         delay = retry_delay(self._retries, self._spec.retry_delay, key)
-        self._tracker.mark_stage(f"Trying again {format_wait(delay)}", PHASE_WAIT)
+        reason = result.failure.category.cause if result.failure is not None else ""
+        self._tracker.mark_stage(f"Trying again {format_wait(delay)}", PHASE_WAIT, reason)
         if wait(delay) or self._stop.is_set():
             result.state = "stopped"
             return True
         return False
+
+    def _without_sign_in(self, failures: list[Failure], tried: set[str], result: JobResult) -> list[Failure]:
+        """Download a signed-in list's videos that failed in a way the sign-in can cause once more, each by
+        its own link without the sign-in, into the folder yt-dlp chose for it; the failures of those saved
+        are left out. A video that fails this way too keeps its first failure, and its row says so."""
+        with self._updates_lock:
+            places = dict(self._places)
+        retried: dict[str, Failure] = {}  # each video's first failure
+        for failure in failures:
+            item = failure.item_id
+            fresh = item not in tried and item not in retried
+            if fresh and item in places and failure.category.key in _SIGN_IN_MAY_CAUSE:
+                retried[item] = failure
+        if not retried:
+            return failures
+        tried.update(retried)
+        folders: dict[str, list[str]] = {}
+        for item in retried:
+            link, folder = places[item]
+            folders.setdefault(folder, []).append(link)
+        list_tracker = self._tracker
+        self._tracker = self._new_tracker()
+        self._tracker.mark_stage("Trying without your sign-in")
+        self._push([("state", (item, "pending", "")) for item in retried])
+        try:
+            for folder, links in folders.items():
+                if not self._stop.is_set():
+                    self._run_alone(links, folder)
+        finally:
+            self._pull_tracker()
+            self._partials |= self._tracker.partials
+            self._tracker = list_tracker
+        self._finalize(result)
+        with self._files_lock:
+            saved = set(self._saved_ids)
+        self._push([("state", (item, "skipped" if failure.category.policy is Policy.SKIP else "failed",
+                               failure.category.final)) for item, failure in retried.items() if item not in saved])
+        return [failure for failure in failures if failure.item_id not in saved]
+
+    def _run_alone(self, links: list[str], folder: str) -> None:
+        """One yt-dlp run for videos by their own links, without the sign-in, saved in `folder`."""
+        spec, tools = self._spec, self._attempt_tools
+        if tools is None:
+            return
+        # Whatever the list's choices picked out of it (--playlist-items) doesn't apply to its videos' own links.
+        options = spec.options.with_changes(items="")
+        command = download_command(links[0], Source("video", "", spec.source.site), options, tools, spec.paths,
+                                   urls=links, folder=folder, marker=self._marker)
+        batch = url_args(links, spec.paths.job_dir)[1]
+        try:
+            if batch:
+                (spec.paths.job_dir / "urls.txt").write_text(batch, encoding="utf-8")
+            self._run_attempt(command, [])
+        except OSError:
+            return  # yt-dlp didn't start: the videos keep their failures
 
     def _release(self, deferred: list[str], released: set[str]) -> None:
         """Try the set-aside videos again, with fresh links, now that the rest of the list is done."""
@@ -419,12 +487,12 @@ class JobExecutor:
 
     def _begin_attempt(self) -> None:
         """A fresh tracker, keeping what the last one noted; and a fresh playlist file to read."""
-        self._push(self._tracker.take_updates())
+        self._pull_tracker()
         self._partials |= self._tracker.partials
         self._tracker = self._new_tracker()
         with self._updates_lock:
             self._list_offset = 0
-            self._positions = {}
+            self._attempt_lists = 0
         # yt-dlp leaves an existing playlist file alone, and then never says where it is.
         shutil.rmtree(self._spec.paths.lists, ignore_errors=True)
         batch = url_args(self._spec.urls, self._spec.paths.job_dir)[1] if self._spec.urls else ""
@@ -476,7 +544,10 @@ class JobExecutor:
         if listed:
             # Read on the finishing thread: a channel's list can be megabytes, and the reader must keep up.
             self._finish_queue.put({_LIST_KEY: listed})
-        if event.kind == "file":
+        self._pull_tracker()
+        if event.kind == "item":
+            self._note_place(event.data)
+        elif event.kind == "file":
             self._finish_queue.put(dict(event.data))
         elif event.kind == "error" and event.data.get("id") and not self._is_list(str(event.data["id"])):
             spec = self._spec
@@ -485,6 +556,18 @@ class JobExecutor:
             self._push([("state", (failure.item_id, state, failure.category.final))])
         if self._on_event is not None:
             self._on_event(event)
+
+    def _note_place(self, data: dict[str, Any]) -> None:
+        """Note a video's own link and the folder yt-dlp is about to save it in."""
+        video_id, link, filename = (str(data.get(key) or "") for key in ("id", "webpage_url", "filename"))
+        if not video_id or not filename or not link.startswith(("https://", "http://")):
+            return
+        try:
+            folder = Path(filename).parent.relative_to(self._spec.paths.root)
+        except ValueError:
+            return  # never outside the download folder
+        with self._updates_lock:
+            self._places[video_id] = (link, "" if folder == Path(".") else folder.as_posix())
 
     def _video_id(self, item_id: str) -> str:
         """The ID an error names when it is a video's; "" for the list's own (an error about the list)."""
@@ -531,10 +614,10 @@ class JobExecutor:
         if not isinstance(info, dict):
             return
         with self._updates_lock:
-            first = self._list_offset == 0 and not self._positions
+            first = self._attempt_lists == 0
+            self._attempt_lists += 1
             entries = listed_entries(info, self._list_offset)
             self._list_offset += len(entries)
-            self._positions = {position: entry["id"] for position, entry in enumerate(entries, start=1)}
         updates: list[Update] = []
         if first and info.get("title"):
             updates.append(("list_title", str(info["title"])))
@@ -618,6 +701,11 @@ def _give_up_on_repeats(failures: list[Failure], counts: dict[str, int], progres
     return [given_up(failure) if failure.item_id in failing and counts[failure.item_id] >= ITEM_ATTEMPTS
             else failure for failure in failures]
 
+
+# A signed-in list's video failures that a download without the sign-in can get past: a site can refuse
+# a signed-in download of a video anyone can watch (YouTube's signed-in players can break off partway or
+# offer fewer formats).
+_SIGN_IN_MAY_CAUSE = frozenset({"network", "unknown", "bot_check", "extractor_broken", "format", "no_formats"})
 
 # Temporary failures that say nothing about one video: the site limiting downloads, a bot check, or a
 # stall (counted on its own). A dropped connection counts only when the same attempt got somewhere,

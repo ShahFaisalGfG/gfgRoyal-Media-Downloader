@@ -153,6 +153,15 @@ def test_report_messages(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> 
     assert "--cookies" in capsys.readouterr().err
 
 
+def test_app_controls_become_command_line_options(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Where the app would say "choose another folder" or "wait for it", the command line names its option."""
+    from gfgmd.core.errors import CATEGORIES, Failure
+    for key, option in (("disk_full", "--output-dir"), ("folder_missing", "--output-dir"),
+                        ("upcoming", "--wait-for-video"), ("auth_required", "--cookies")):
+        cli._report(JobResult("failed", attempts=1, failure=Failure(CATEGORIES[key], "")), tmp_path, strict=False)
+        assert option in capsys.readouterr().err
+
+
 def test_broken_tools_report_how_to_reinstall(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     """A tool that didn't start reads as a reinstall step; its error text shows only with --verbose."""
     from gfgmd.core.errors import CATEGORIES, Failure

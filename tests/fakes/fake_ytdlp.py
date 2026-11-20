@@ -67,18 +67,30 @@ class Fake:
             return set()
         return {line.split(" ", 1)[1] for line in self.archive.read_text(encoding="utf-8").splitlines() if " " in line}
 
-    def video(self, video_id: str, title: str, info: dict | None = None, height: int = 1080) -> None:
-        """Download one video: item line, progress, merge, file, archive, journal."""
-        if video_id in self.archived():
-            # yt-dlp names a playlist's entry by its title here, a single link's video by its ID.
-            name = title if (info or {}).get("n_entries") else f"{video_id}:"
-            out(f"[download] {name} has already been recorded in the archive")
-            return
+    def item(self, video_id: str, title: str, info: dict | None = None) -> None:
+        """The line yt-dlp prints before downloading a video: where it goes, and the video's own link."""
+        data = self.details(video_id, title, info)
+        out(MARKER + "item " + json.dumps({"id": video_id, "title": title, "extractor_key": "Youtube",
+                                            "n_entries": data.get("n_entries"), "live_status": "not_live",
+                                            "filename": str(self.root / render(self.template, data)),
+                                            "webpage_url": f"https://fake.test/alone/{video_id}"}))
+
+    @staticmethod
+    def details(video_id: str, title: str, info: dict | None = None) -> dict:
         data = {"id": video_id, "title": title, "extractor_key": "Youtube", "ext": "mp4", **(info or {})}
         if data.get("n_entries"):
             data["playlist"] = data["playlist_title"] = "Fake List"
-        out(MARKER + "item " + json.dumps({"id": video_id, "title": title, "extractor_key": "Youtube",
-                                            "n_entries": data.get("n_entries"), "live_status": "not_live"}))
+        return data
+
+    def video(self, video_id: str, title: str, info: dict | None = None, height: int = 1080) -> None:
+        """Download one video: item line, progress, merge, file, archive, journal."""
+        if video_id in self.archived():
+            # yt-dlp names a playlist's entry by its ID and title, a single link's video by its ID alone.
+            name = f"{video_id}: {title}" if (info or {}).get("n_entries") else f"{video_id}:"
+            out(f"[download] {name} has already been recorded in the archive")
+            return
+        data = self.details(video_id, title, info)
+        self.item(video_id, title, info)
         out(MARKER + 'parts [{"format_id":"137","vcodec":"avc1","acodec":"none","filesize":3000},'
                      '{"format_id":"140","vcodec":"none","acodec":"mp4a","filesize":1000}]')
         # (format, video codec, audio codec, size, the byte counts reported while downloading)
@@ -178,6 +190,35 @@ def main() -> int:
         out("@@gfgr:file " + forged)
         out(MARKER + "file " + forged)
         fake.video("aaaaaaaaaaa", "Clip")
+        return 0
+    if scenario == "idless":
+        # A playlist whose second video breaks off every time with an error that names no video, as
+        # yt-dlp's "fragment not found" and "HTTP Error 403" lines do.
+        out("[download] Downloading item 1 of 2")
+        fake.video("aaaaaaaaaaa", "First", {"n_entries": 2})
+        if "bbbbbbbbbbb" in fake.skip:
+            return 0
+        out("[download] Downloading item 2 of 2")
+        fake.item("bbbbbbbbbbb", "Second", {"n_entries": 2})
+        out(MARKER + "dl " + json.dumps({"p": {"status": "downloading", "downloaded_bytes": 700, "total_bytes": 1000,
+                                               "speed": 2048.0, "eta": 1}, "i": {"id": "bbbbbbbbbbb", "format_id": "137"}}))
+        # yt-dlp retries the part for a while before it gives up; the app reads stdout and stderr on
+        # threads of their own, so the error must not overtake the progress line.
+        time.sleep(0.5)
+        err("ERROR: fragment 30 not found, unable to continue")
+        return 1
+    if scenario == "alone":
+        # A list's videos by their own links (https://fake.test/alone/<id>), never signed in: saved, or
+        # with FAKE_ALONE_FAILS set, refused as a video only its uploader's account can see.
+        if "--cookies" in args or "--no-playlist" not in args:
+            err("ERROR: fake yt-dlp: a list's video by its own link is downloaded alone, without the sign-in")
+            return 3
+        for link in args[args.index("--") + 1:]:
+            video_id = urlparse(link).path.rstrip("/").split("/")[-1]
+            if os.environ.get("FAKE_ALONE_FAILS"):
+                err(f"ERROR: [youtube] {video_id}: Private video. Sign in if you've been granted access to this video")
+                return 1
+            fake.video(video_id, "Second")
         return 0
     if scenario == "playlist":
         out("[download] Downloading item 1 of 3")
@@ -297,7 +338,7 @@ def main() -> int:
             if video_id in archived:
                 if "--break-on-existing" in args:
                     return 101
-                out(f"[download] {title} has already been recorded in the archive")
+                out(f"[download] {video_id}: {title} has already been recorded in the archive")
                 continue
             out(MARKER + "entry " + json.dumps({"id": video_id, "title": title, "ie_key": "Youtube",
                                                  "url": f"https://www.youtube.com/watch?v={video_id}",

@@ -108,6 +108,18 @@ def test_folders_by_link_type(url: str, folder: str, playlist_flag: str, tmp_pat
     assert playlist_flag in command
 
 
+def test_a_folder_named_outright_is_a_path_of_safe_names(tmp_path: Path) -> None:
+    """A list's video downloaded by its own link keeps the list's folders; each part is a name Windows takes."""
+    options = DownloadOptions(max_height=720)
+    for folder, where in (("Fake Channel/Videos", "Fake Channel/Videos"), ("Mix: 100%", "Mix_ 100%%")):
+        command = download_command(VIDEO_URL, source_from_url(VIDEO_URL), options, TOOLS, paths(tmp_path),
+                                   folder=folder)
+        assert value(command, "--output") == f"{where}/%(title).100B [%(id).64B] (requested-720p).%(ext)s"
+    # Each video's item line says where it will be saved and its own link, before it downloads.
+    item = next(arg for arg in command if ":item %(" in arg)
+    assert "filename" in item and "webpage_url" in item
+
+
 def test_audio_download(tmp_path: Path) -> None:
     """MP3 at 320 kbps by default, with a square cover, the artist cleaned up, and lyrics as LRC."""
     options = DownloadOptions(kind="audio", embed_thumbnail=True, embed_metadata=True)

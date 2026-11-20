@@ -121,6 +121,52 @@ def test_a_playlist_video_that_keeps_failing_is_skipped(tmp_path: Path) -> None:
     assert _give_up_on_repeats([dropped], counts, True)[0].category.policy is Policy.SKIP
 
 
+def test_a_video_that_breaks_off_without_naming_itself_is_skipped(fake_ytdlp: list[str], tmp_path: Path) -> None:
+    """Its error ("fragment 30 not found") names no video, yet it is the one given up on: the list
+    finishes instead of trying again forever, and each wait says why."""
+    spec = make_spec(tmp_path, "idless", kind="playlist")
+    executor = JobExecutor(spec, lambda: TOOLS, runner=fake_runner(fake_ytdlp))
+    reasons: list[str] = []
+    result = executor.run(sleep=lambda seconds: reasons.append(executor.snapshot().reason) or False)
+    assert result.state == "done" and len(result.files) == 1
+    assert [failure.item_id for failure in result.skipped] == ["bbbbbbbbbbb"]
+    assert reasons and all(reason for reason in reasons)
+    # Not signed in: nothing to try without a sign-in.
+    assert not (Path(fake_ytdlp[-1]) / "attempts-alone.txt").exists()
+
+
+def test_a_signed_in_lists_video_that_breaks_off_is_saved_without_the_sign_in(fake_ytdlp: list[str],
+                                                                              tmp_path: Path) -> None:
+    """It breaks off only with the sign-in (as YouTube's signed-in players can), so it is downloaded by
+    its own link without the sign-in, into the list's folder, and the list finishes at once."""
+    spec = make_spec(tmp_path, "idless", kind="playlist", auth=Auth(cookies_file=str(tmp_path / "cookies.txt")))
+    executor = JobExecutor(spec, lambda: TOOLS, runner=fake_runner(fake_ytdlp))
+    waits: list[float] = []
+    result = executor.run(sleep=lambda seconds: waits.append(seconds) or False)
+    assert result.state == "done" and not result.skipped and not waits
+    assert sorted(path.parent.name for path in result.files) == ["Fake List", "Fake List"]
+    assert result.message == "2 videos saved"
+    argv = json.loads((Path(fake_ytdlp[-1]) / "argv.json").read_text())
+    assert argv[argv.index("--") + 1:] == ["https://fake.test/alone/bbbbbbbbbbb"] and "--cookies" not in argv
+    rows = [value[1] for kind, value in executor.take_updates() if kind == "state" and value[0] == "bbbbbbbbbbb"]
+    assert rows == ["failed", "pending"]
+
+
+def test_a_video_that_fails_without_the_sign_in_too_is_tried_so_once(fake_ytdlp: list[str], tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its own link fails as well: it keeps its first failure (its row too) and is given up on as before."""
+    monkeypatch.setenv("FAKE_ALONE_FAILS", "1")
+    spec = make_spec(tmp_path, "idless", kind="playlist", auth=Auth(cookies_file=str(tmp_path / "cookies.txt")))
+    executor = JobExecutor(spec, lambda: TOOLS, runner=fake_runner(fake_ytdlp))
+    result = executor.run(sleep=lambda seconds: False)
+    assert result.state == "done" and len(result.files) == 1
+    assert [failure.item_id for failure in result.skipped] == ["bbbbbbbbbbb"]
+    assert (Path(fake_ytdlp[-1]) / "attempts-alone.txt").read_text() == "1"
+    rows = [value for kind, value in executor.take_updates() if kind == "state" and value[0] == "bbbbbbbbbbb"]
+    # Failed, tried alone, failed alone (another reason), then its first failure again.
+    assert [row[1] for row in rows[:2]] == ["failed", "pending"] and rows[3] == rows[0]
+
+
 def test_a_video_whose_server_never_answers_is_skipped(fake_ytdlp: list[str], tmp_path: Path,
                                                        monkeypatch: pytest.MonkeyPatch) -> None:
     """Stalling attempt after attempt, it is left out after ITEM_ATTEMPTS stalls; the rest is saved."""
@@ -152,6 +198,22 @@ def test_a_download_folder_that_cant_be_made_says_so(fake_ytdlp: list[str], tmp_
     result = JobExecutor(spec, lambda: TOOLS, runner=fake_runner(fake_ytdlp)).run()
     assert result.state == "failed" and result.failure is not None
     assert result.failure.category.action == "choose_folder"
+
+
+def test_a_summary_leaves_out_nothing_saved() -> None:
+    from gfgmd.core.errors import CATEGORIES, Failure
+    from gfgmd.core.jobs import JobResult
+    skipped = [Failure(CATEGORIES["network"], "", "bbbbbbbbbbb")]
+    assert JobResult("done", archived=7, skipped=skipped).message == "7 downloaded before, 1 couldn't be downloaded"
+    assert JobResult("done", skipped=skipped, kind="audio").message == "1 song couldn't be downloaded"
+    assert JobResult("done", files=[Path("a.mp4")], archived=2).message == "1 video saved, 2 downloaded before"
+
+
+def test_a_lists_video_downloaded_before_is_marked_as_it_is_passed_over(tmp_path: Path) -> None:
+    """yt-dlp names a list's video it passes over by its ID, then its title (which may hold ": ")."""
+    executor = JobExecutor(make_spec(tmp_path, "playlist", kind="playlist"), lambda: TOOLS)
+    executor._feed("out", "[download] v2aaaaaaaaa: Mix: Best of has already been recorded in the archive")
+    assert executor.take_updates() == [("state", ("v2aaaaaaaaa", "archived", ""))]
 
 
 def test_success_renames_and_reports(fake_ytdlp: list[str], tmp_path: Path) -> None:

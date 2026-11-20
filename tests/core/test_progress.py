@@ -33,6 +33,18 @@ def test_only_the_runs_own_marker_counts() -> None:
     assert tracker.feed("out", line).kind == "log"
 
 
+def test_an_error_naming_no_video_is_the_downloading_videos() -> None:
+    """yt-dlp's "fragment not found" names no video; said mid-download, it is that video's."""
+    tracker = ProgressTracker()
+    tracker.feed("out", '@@gfgr:item {"id":"bbbbbbbbbbb","title":"Second"}')
+    tracker.feed("out", dl(500, 1000, "137", "avc1", "none"))
+    tracker.feed("err", "ERROR: fragment 30 not found, unable to continue")
+    assert tracker.errors[-1].data["id"] == "bbbbbbbbbbb"
+    idle = ProgressTracker()
+    idle.feed("err", "ERROR: Unable to download API page")  # not while a video downloads: the list's
+    assert not idle.errors[-1].data.get("id")
+
+
 def test_parse_tolerates_na_and_bad_json() -> None:
     """Treat yt-dlp's NA as missing and keep going on a damaged line."""
     assert parse_line("out", "@@gfgr:parts NA").data == {"parts": []}
@@ -211,9 +223,12 @@ def test_archive_skips_name_their_video() -> None:
     tracker = ProgressTracker()
     tracker.feed("out", "[download] Downloading item 2 of 3")
     tracker.feed("out", "[download] aaaaaaaaaaa: has already been recorded in the archive")
-    tracker.feed("out", "[download] Downloading item 3 of 3")
+    tracker.feed("out", "[download] bbbbbbbbbbb: Mix: Best of has already been recorded in the archive")
+    # One that names no ID (an older yt-dlp) is counted; the queue marks it once the list ends.
     tracker.feed("out", "[download] Some Song has already been recorded in the archive")
-    assert tracker.take_updates() == [("state", ("aaaaaaaaaaa", "archived", "")), ("archived_at", 3)]
+    assert tracker.take_updates() == [("state", ("aaaaaaaaaaa", "archived", "")),
+                                      ("state", ("bbbbbbbbbbb", "archived", ""))]
+    assert tracker.snapshot().archived == 3
 
 
 def test_a_list_without_titles_gets_them_from_links_then_from_each_video() -> None:

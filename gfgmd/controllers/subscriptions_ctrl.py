@@ -17,7 +17,7 @@ from typing import Any
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 from gfgmd.core.archive import append_archive, archive_path, read_archive_ids
-from gfgmd.core.command import EXIT_BREAK_ON_EXISTING, Auth, check_command, run_marker
+from gfgmd.core.command import EXIT_BREAK_ON_EXISTING, Auth, check_command, folder_name, run_marker
 from gfgmd.core.errors import CATEGORIES, classify
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import ProgressTracker
@@ -360,7 +360,7 @@ class SubscriptionsController(QObject):
         """
         if source.kind != "playlist" or source.site != "youtube":
             return ""
-        return list_title or sub["title"]
+        return folder_name(list_title or sub["title"])
 
     def _checked(self, sub_id: int, result: dict[str, Any]) -> None:
         self._checking.discard(sub_id)

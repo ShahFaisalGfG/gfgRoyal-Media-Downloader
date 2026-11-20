@@ -86,6 +86,8 @@ def running_values(snap: Snapshot) -> dict[str, Any]:
             parts.append(f"{format_bytes(int(snap.speed))}/s")
     if snap.eta >= 0 and not snap.is_live and snap.phase in (PHASE_DOWNLOAD, PHASE_POST):
         parts.append(format_time_left(snap.eta))
+    if snap.phase == PHASE_WAIT and snap.reason:
+        parts.append(snap.reason)
     return {"statusText": stage, "progress": progress, "detail": "  ·  ".join(parts)}
 
 
@@ -107,6 +109,8 @@ def collection_values(snap: Snapshot, counts: dict[str, int], total: int, kind: 
         parts.append(f"{saved} saved")
     if snap.speed and snap.phase == PHASE_DOWNLOAD:
         parts.append(f"{format_bytes(int(snap.speed))}/s")
+    if snap.phase == PHASE_WAIT and snap.reason:
+        parts.append(snap.reason)
     noun = media_noun(kind if kind == "audio" else "video").capitalize()
     item = f"{noun} {number} of {total}" if number and total and snap.phase != PHASE_WAIT else ""
     return {"statusText": snap.stage, "progress": progress, "detail": "  ·  ".join(parts), "itemText": item}

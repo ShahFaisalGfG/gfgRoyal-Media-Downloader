@@ -73,7 +73,7 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - 💬 **Subtitles and extras**: written or automatic subtitles in the languages you pick, embedded, as SRT or WebVTT files, or both; embedded thumbnail, details, and chapters; SponsorBlock marks or cuts sponsor segments
 - 🗂️ **A full queue**: several downloads at once, per-site limits, pause, resume, retry, reorder, and progress on the taskbar; a playlist, channel, or subscription lists every video under it, each saved, waiting, or downloading
 - ⏯️ **Resumable**: partial files continue, finished videos are skipped through per-playlist archives, and interrupted downloads resume when the app starts again
-- 🔁 **Knows when to retry**: dropped connections retry with growing waits; a video whose server stops answering waits while the rest of its playlist downloads; private, removed, or region-locked videos are skipped instead of retried forever; a sign-in request or a full disk stops and tells you why
+- 🔁 **Knows when to retry**: dropped connections retry with growing waits; a video whose server stops answering waits while the rest of its playlist downloads; a signed-in playlist's video that fails with the sign-in is downloaded once more without it; private, removed, or region-locked videos are skipped instead of retried forever; a sign-in request or a full disk stops and tells you why
 - 🔑 **Website sign-ins**: one click opens the site in your own browser; sign in and click Done, and your private playlists, Watch later, Liked videos, and members-only or age-restricted videos download; sign-ins stay encrypted on your PC
 - 🔔 **Subscriptions**: watch channels and playlists and download new uploads on a schedule, without downloading anything twice
 - 🕑 **Scheduling**: start the queue at a set time, limit the speed by time of day, and sleep or shut down the PC when everything is done
@@ -219,7 +219,7 @@ Posts with only pictures are skipped with a clear message. Many Instagram and Fa
 
 ## Signing In to Sites
 
-Some videos need an account: your own private playlists, Watch later, and Liked videos, members-only and age-restricted videos on YouTube, and most posts on Instagram and Facebook. When a link or a download needs a sign-in, it stops with a **Sign in** button instead of retrying, and continues by itself once you have signed in.
+Some videos need an account: your own private playlists, Watch later, and Liked videos, members-only and age-restricted videos on YouTube, and most posts on Instagram and Facebook. When a link or a download needs a sign-in, it stops with a **Sign in** button instead of retrying, and continues by itself once you have signed in. If a video of a signed-in playlist fails to download with the sign-in, the app downloads it once more by its own link without it, into the playlist's folder.
 
 On the **Sign-ins** page, click **Sign in** next to the site. The site's sign-in page opens in your default browser (Edge, Chrome, Brave, Vivaldi, or Firefox; otherwise Edge), in a window of its own with its own profile, so your everyday browsing isn't touched. Sign in there, then click **Done** in the app: it closes that window and saves the sign-in. A YouTube sign-in is then checked by opening Watch later, and the site's card offers **Watch later**, **Liked videos**, and **Your playlists** to download from.
 
@@ -373,7 +373,7 @@ yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube
 | **The download folder can't be reached** | Plug in the drive the folder is on, or click **Choose folder** on the download |
 | **The download tools are missing or damaged** | Click **Update tools** on the download, or Preferences > Tools > **Update tools** (**Download tools** when they're missing); **Previous version** after a bad update |
 
-Still stuck? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/issues) with the link (if you can share it) and, with logging turned on in Preferences, the last lines of the log. Logs never contain your sign-ins.
+Still stuck? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/issues) with the link (if you can share it) and, with logging turned on in Preferences, the last lines of the log, which hold yt-dlp's own words for each failure. Logs never contain your sign-ins.
 
 ---
 
@@ -443,6 +443,9 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🛡️ Reliability: a file that couldn't be finished, or a subtitle another program held open, no longer stops a download or loses its file; a playlist video that keeps failing is skipped after three tries instead of retrying the list forever; Cancel and Remove stay what they are when you quit right after; a download folder on an unplugged drive says so and offers **Choose folder**; the Library and long playlists stay fast
 - ⌨️ `gfgmd` accepts links typed without `https://`, numbers retries by failed attempts only, and says a reason once
 - 🛡️ Lyrics, thumbnails, and tool downloads use the proxy set in Preferences; a browser window's sign-in is read over a private pipe instead of a local debugging port; check boxes and radio buttons match the rest of the app and show a focus ring
+- 🔁 A video of a signed-in playlist that fails with the sign-in (YouTube's signed-in downloads can break off partway) is downloaded once more by its own link without it, into the playlist's folder, so a song that downloads on its own also downloads in its playlist; with logging on, the log holds yt-dlp's own words for each failure
+- 🔁 A playlist video that keeps breaking off with an error that doesn't name it (a missing part, "HTTP Error 403") is given up on like any other, so the list finishes; a download waiting to try again says why ("Trying again in 5 minutes · The connection dropped"); a list's videos you already have show **Downloaded before** as the list is read (yt-dlp's current wording, which names each one, wasn't recognized), and the summary leaves out a count of nothing saved ("7 downloaded before, 1 couldn't be downloaded"); a finished download deletes what earlier attempts left unfinished of the videos it saved, and a download leaving the list takes its other unfinished files with it
+- ⌨️ Where a message points at the app's window (sign in, choose a folder, wait for a stream), `gfgmd` names its own option instead (`--cookies`, `--output-dir`, `--wait-for-video`)
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry
 
 ### v1.0.0 - November 2026 *(current)*

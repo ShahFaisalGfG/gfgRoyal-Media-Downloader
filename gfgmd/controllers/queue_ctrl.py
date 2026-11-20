@@ -25,7 +25,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 from gfgmd.config.defaults import DownloadDefaults, FormatDefaults, PresetDefaults
 from gfgmd.controllers.queue_rows import (ACTIVE, ROLES, collection_values, entry_key, entry_row, job_key, job_row,
                                           kind_of, running_values)
-from gfgmd.core.archive import archive_path
+from gfgmd.core.archive import archive_path, read_archive_ids
 from gfgmd.core.auth import Checkout
 from gfgmd.core.command import SESSION_ARCHIVE, Auth, RunPaths, folder_name
 from gfgmd.core.extract import AudioExtractor, ExtractSpec
@@ -33,7 +33,7 @@ from gfgmd.core.jobs import STALL_SECONDS, JobExecutor, JobResult, JobSpec, Runn
 from gfgmd.core.lyrics import Fetch
 from gfgmd.core.naming import AUDIO_EXTENSIONS, format_label, group_of, remove_partials
 from gfgmd.core.options import DownloadOptions, options_from_preset
-from gfgmd.core.progress import Snapshot
+from gfgmd.core.progress import Event, Snapshot
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.schedule import limit_at, next_queue_start, per_job_limit
 from gfgmd.core.secret_store import SecretError, wipe
@@ -836,8 +836,12 @@ class QueueController(QObject):
                 with running.lock:
                     running.files.append((info, str(path)))
 
-            executor = JobExecutor(spec, context.tools, on_file=saved, update_tools=self._tools.update_ytdlp,
-                                   stall_seconds=self._stall_seconds,
+            def noted(event: Event) -> None:
+                if event.kind == "error":  # yt-dlp's own words, for the log; the row shows the plain one
+                    write_log(f"Download {job['id']}: {event.text}", "critical")
+
+            executor = JobExecutor(spec, context.tools, on_file=saved, on_event=noted,
+                                   update_tools=self._tools.update_ytdlp, stall_seconds=self._stall_seconds,
                                    runner=self._program_runner, lyrics_fetch=self._lyrics_fetch)
             running.executor = executor
             if running.stop_reason:
@@ -1005,10 +1009,13 @@ class QueueController(QObject):
                 self._set_state(running.job_id, "queued", "", refresh=False)
             else:
                 self._record_result(job, result)
+                if result.state == "done":
+                    self._tidy_partials(job)
 
     def _record_result(self, job: dict[str, Any], result: JobResult) -> None:
         job_id = job["id"]
         failure = result.failure
+        self._mark_downloaded_before(job)
         if result.state == "done" and not result.files and result.archived == 1 and not result.skipped \
                 and not job["batch"]:
             self._record_archived(job, result)
@@ -1050,14 +1057,38 @@ class QueueController(QObject):
     def _keep_partials(self, job_id: int, partials: set[str]) -> None:
         """Remember a stopped download's unfinished files, with any kept from its earlier runs."""
         known = self._saved_partials(job_id)
-        if not partials or partials <= known:
-            return
+        if partials and not partials <= known:
+            self._note_partials(job_id, known | partials)
+
+    def _note_partials(self, job_id: int, partials: set[str]) -> None:
+        """Write which unfinished files a download keeps for later; with none, the note goes."""
         target = self._context.job_dir(job_id) / PARTIALS_FILE
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps(sorted(known | partials)), encoding="utf-8")
+            if partials:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(sorted(partials)), encoding="utf-8")
+            else:
+                target.unlink(missing_ok=True)
         except OSError as error:
             write_log(f"Unfinished files of download {job_id} couldn't be noted: {error}", "general")
+
+    def _tidy_partials(self, job: dict[str, Any]) -> None:
+        """A finished download keeps only the unfinished files of the videos it couldn't download, which
+        Try again continues; the rest, such as a saved video's leftover from an attempt that picked
+        another stream, are deleted."""
+        noted = self._saved_partials(job["id"])
+        if not noted or self._shares_archive(job):
+            return
+        open_tags = [f"[{item['item_id']}]" for item in self._context.store.job_items(job["id"])
+                     if item["state"] in ("skipped", "failed")]
+        kept = {path for path in noted if any(tag in Path(path).name for tag in open_tags)}
+        self._note_partials(job["id"], kept)
+        remove_partials(noted - kept, Path(job["output_root"]) / ".incomplete")
+
+    def _shares_archive(self, job: dict[str, Any]) -> bool:
+        """True while another download of the same videos runs (it may be continuing the same files)."""
+        archive = self._job_archive(job)
+        return any(r.archive == archive and r.job_id != job["id"] for r in self._running.values())
 
     def _saved_partials(self, job_id: int) -> set[str]:
         try:
@@ -1069,12 +1100,10 @@ class QueueController(QObject):
     def _remove_partials(self, job: dict[str, Any], partials: set[str]) -> None:
         """Delete a download's unfinished files: those reported now and those noted when it stopped before."""
         saved = self._saved_partials(job["id"])
-        archive = self._job_archive(job)
-        if saved and any(r.archive == archive and r.job_id != job["id"] for r in self._running.values()):
-            # Another download of the same videos is running and may be continuing these files.
+        if saved and self._shares_archive(job):
             saved = set()
         else:
-            (self._context.job_dir(job["id"]) / PARTIALS_FILE).unlink(missing_ok=True)
+            self._note_partials(job["id"], set())
         remove_partials(partials | saved, Path(job["output_root"]) / ".incomplete")
 
     def _recycle_saved(self, job: dict[str, Any]) -> bool:
@@ -1097,7 +1126,11 @@ class QueueController(QObject):
         return True
 
     def _forget_jobs(self, job_ids: list[int]) -> None:
-        """Delete jobs with their scratch folders."""
+        """Delete jobs with their scratch folders and the unfinished files they kept."""
+        for job_id in job_ids:
+            job = self._context.store.job(job_id)
+            if job is not None:
+                self._remove_partials(job, set())
         self._context.store.delete_jobs(job_ids)
         for job_id in job_ids:
             self._clear_scratch(job_id)
@@ -1106,6 +1139,17 @@ class QueueController(QObject):
         """Forget what this app kept about a job id: its scratch folder (journal, unfinished files) and Play file."""
         self._last_files.pop(job_id, None)
         shutil.rmtree(self._context.job_dir(job_id), ignore_errors=True)
+
+    def _mark_downloaded_before(self, job: dict[str, Any]) -> None:
+        """A list's videos still waiting as its download ends, which its archive records (saved by an
+        earlier run, or listed before the site changed the list), show as downloaded before."""
+        if job["input_path"] or not job["items_total"]:
+            return
+        archived = read_archive_ids(Path(self._job_archive(job)))
+        waiting = [(str(item["item_id"]), "archived", "") for item in self._context.store.job_items(job["id"])
+                   if item["state"] == "pending" and item["item_id"] in archived]
+        if waiting:
+            self._context.store.set_item_states(job["id"], waiting)
 
     def _record_archived(self, job: dict[str, Any], result: JobResult) -> None:
         """One video the archive skipped and nothing else.
