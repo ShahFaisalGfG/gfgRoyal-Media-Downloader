@@ -132,7 +132,7 @@ def test_library_filters_and_recycle_bin(qapp, context, tmp_path):
     library = LibraryController(context)
     assert library.total == 2
     library.setFilters("lecture", "", "")
-    assert library.total == 1 and library.model.get(0)["missing"] is False
+    assert library.total == 1 and library.model.get(0)["missing"] is False and library.model.get(0)["format"] == "MP4"
     library.setFilters("", "audio", "")
     assert library.model.get(0)["missing"] is True
     with patch.object(recycle_module, "to_recycle_bin", return_value=True) as recycle:
@@ -141,6 +141,21 @@ def test_library_filters_and_recycle_bin(qapp, context, tmp_path):
         library.deleteFiles([lecture["historyId"]])
     recycle.assert_called_once_with([str(keep), str(tmp_path / "keep.en.srt")])
     assert library.total == 1
+
+
+def test_library_select_all_and_play_the_selection(qapp, context, tmp_path):
+    """Select all takes every file the filters show; Play takes the picked files still there, newest first."""
+    older, newer, gone = tmp_path / "older.mp3", tmp_path / "newer.mp4", tmp_path / "gone.mp3"
+    older.write_bytes(b"a")
+    newer.write_bytes(b"v")
+    ids = [context.store.add_history(str(older), title="Older", kind="audio", finished=100.0),
+           context.store.add_history(str(newer), title="Newer", kind="video", finished=200.0),
+           context.store.add_history(str(gone), title="Gone", kind="audio", finished=300.0)]
+    library = LibraryController(context)
+    assert sorted(library.allIds()) == sorted(ids)
+    library.setFilters("", "audio", "")
+    assert sorted(library.allIds()) == sorted([ids[0], ids[2]])
+    assert library.pathsOf(ids) == [str(newer), str(older)]
 
 
 # ── Subscriptions ─────────────────────────────────────────────────────────
@@ -269,3 +284,17 @@ def test_refused_youtube_sign_in_is_marked_for_signing_in_again(qapp, context, t
     row = next(signins.model.get(i) for i in range(signins.model.count) if signins.model.get(i)["siteKey"] == "youtube")
     assert row["status"] == "expired" and row["library"] == []
     signins.shutdown()
+
+
+def test_every_row_value_is_a_model_role(context, tmp_path):
+    """A value missing from a model's roles never reaches QML, and a delegate requiring it isn't created."""
+    from gfgmd.controllers import library_ctrl, queue_ctrl
+
+    clip = tmp_path / "Clip (720p).mp4"
+    clip.write_bytes(b"v")
+    context.store.add_history(str(clip), title="Clip", kind="video", site="youtube")
+    record = context.store.history()[0]
+    assert set(library_ctrl._row(record, "YouTube")) == set(library_ctrl.ROLES)
+    job_id = context.store.add_job("https://youtu.be/x", "video", "x", "youtube", {"kind": "video"}, str(tmp_path))
+    job_row = queue_ctrl._job_row(context.store.job(job_id), None, "YouTube")
+    assert set(job_row) == set(queue_ctrl.ROLES)

@@ -133,7 +133,9 @@ Rectangle {
                     Layout.preferredWidth: 160
                     Layout.preferredHeight: 90
                     source: analyzeController.thumbnail
-                    kind: analyzeController.liveStatus === "is_live" || analyzeController.liveStatus === "is_upcoming"
+                    // Follows the Type choice: Audio only previews the song's square cover.
+                    kind: panel.audio ? "audio"
+                        : analyzeController.liveStatus === "is_live" || analyzeController.liveStatus === "is_upcoming"
                         ? "live" : "video"
                 }
                 ColumnLayout {

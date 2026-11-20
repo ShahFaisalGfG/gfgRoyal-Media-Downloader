@@ -6,12 +6,12 @@ import QtQuick.Layouts
 // Choices for extracting a downloaded video's audio, the same ones an audio download offers: format,
 // bitrate, cover and its shape, lyrics (from the video's captions, then LRCLIB), and what goes in
 // the file. They start from the audio preferences each time. Open it with forJob() for every
-// video a download saved, or forVideo() for one library video.
+// video a download saved, or forVideos() for library videos (songs among them are left out).
 AppDialog {
     id: dialog
 
     property int jobId: -1
-    property int historyId: -1
+    property var historyIds: []
     readonly property bool lossless: prefsController.losslessAudio.indexOf(formatBox.currentValue) >= 0
 
     function _open(title) {
@@ -29,12 +29,12 @@ AppDialog {
 
     function forJob(jobId, title) {
         dialog.jobId = jobId
-        dialog.historyId = -1
+        dialog.historyIds = []
         dialog._open(title)
     }
 
-    function forVideo(historyId, title) {
-        dialog.historyId = historyId
+    function forVideos(historyIds, title) {
+        dialog.historyIds = historyIds
         dialog.jobId = -1
         dialog._open(title)
     }
@@ -60,7 +60,7 @@ AppDialog {
     Component.onCompleted: dialog.standardButton(Dialog.Ok).text = "Extract"
     onAccepted: {
         if (dialog.jobId >= 0) queueController.extractJobAudio(dialog.jobId, dialog.choices())
-        else queueController.extractAudio(dialog.historyId, dialog.choices())
+        else queueController.extractAudio(dialog.historyIds, dialog.choices())
     }
 
     ColumnLayout {

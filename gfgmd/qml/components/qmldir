@@ -15,11 +15,14 @@ EntryList 1.0 EntryList.qml
 FormRow 1.0 FormRow.qml
 Icon 1.0 Icon.qml
 JobItem 1.0 JobItem.qml
+ListSelection 1.0 ListSelection.qml
 NowPlaying 1.0 NowPlaying.qml
 OptionsPanel 1.0 OptionsPanel.qml
 ResizeHandles 1.0 ResizeHandles.qml
 RunBar 1.0 RunBar.qml
 SeekBar 1.0 SeekBar.qml
+SelectMark 1.0 SelectMark.qml
+SelectionBar 1.0 SelectionBar.qml
 SettingRow 1.0 SettingRow.qml
 StatusBadge 1.0 StatusBadge.qml
 StyledComboBox 1.0 StyledComboBox.qml

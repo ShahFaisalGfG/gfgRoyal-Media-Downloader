@@ -85,7 +85,7 @@ def test_download_finishes_and_reaches_the_library(qapp, queue, context):
     record = context.store.history()[0]
     assert record["filepath"] == saved[0] and record["kind"] == "video"
     row = queue.model.get(0)
-    assert row["jobState"] == "done" and row["title"] == "Clip"
+    assert row["jobState"] == "done" and row["title"] == "Clip" and row["format"] == "MP4"
     assert queue.busy is False
 
 
@@ -327,3 +327,68 @@ def test_finished_downloads_leave_the_list_when_the_app_closes(qapp, context, fa
         assert context.store.job(finished) is None and third.model.count == 2
     finally:
         third.shutdown()
+
+
+def test_removing_always_deletes_unfinished_parts_and_asks_only_when_needed(qapp, queue, context):
+    """A paused download's parts go with it; saved files stay unless asked; the page asks only to lose work."""
+    queue.addLinks("https://fake.test/slow", "video-best-mp4")
+    assert wait_for(qapp, lambda: queue.runningCount == 1 and _partials(context))
+    slow = context.store.jobs()[0]["id"]
+    assert queue.removal([slow]) == {"count": 1, "inProgress": 1, "savedFiles": 0}
+    queue.pause(slow)
+    assert wait_for(qapp, lambda: states(context) == ["paused"] and queue.runningCount == 0)
+    assert queue.removal([slow]) == {"count": 1, "inProgress": 1, "savedFiles": 0}  # paused is still to finish
+    queue.remove(slow, False)
+    assert context.store.jobs() == [] and _partials(context) == []
+    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
+    done = context.store.jobs()[0]["id"]
+    assert queue.removal([done]) == {"count": 1, "inProgress": 0, "savedFiles": 1}
+    queue.remove(done, False)
+    assert context.store.jobs() == [] and Path(context.store.history()[0]["filepath"]).exists()
+    queue.pauseAll()
+    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    waiting = context.store.jobs()[0]["id"]
+    queue.cancel(waiting)
+    assert queue.removal([waiting]) == {"count": 1, "inProgress": 0, "savedFiles": 0}  # removed without asking
+
+
+def test_actions_on_several_downloads_at_once(qapp, queue, context):
+    """One refresh and one Recycle Bin notice for the lot; removal() adds up what would be lost."""
+    notices = []
+    queue.notice.connect(notices.append)
+    queue.pauseAll()
+    queue.addLinks("https://fake.test/ok https://fake.test/playlist", "video-best-mp4")
+    ids = [job["id"] for job in context.store.jobs()]
+    changes = []
+    queue.changed.connect(lambda: changes.append(True))
+    queue.applyToJobs("pause", ids)
+    assert states(context) == ["paused", "paused"] and len(changes) == 1
+    assert queue.removal(ids) == {"count": 2, "inProgress": 2, "savedFiles": 0}
+    queue.applyToJobs("resume", ids)
+    queue.resumeAll()
+    assert wait_for(qapp, lambda: states(context) == ["done", "done"] and len(context.store.history()) == 3)
+    assert queue.removal(ids) == {"count": 2, "inProgress": 0, "savedFiles": 3}
+    with patch.object(recycle_module, "to_recycle_bin", return_value=True):
+        queue.applyToJobs("remove_saved", ids)
+    assert context.store.jobs() == [] and context.store.history() == []
+    assert notices[-1] == "Moved 3 file(s) to the Recycle Bin."
+    queue.applyToJobs("unknown", ids)  # ignored
+
+
+def test_extract_audio_of_several_library_files_leaves_songs_out(qapp, queue, context, tmp_path):
+    notices = []
+    queue.notice.connect(notices.append)
+    queue.pauseAll()
+    song = tmp_path / "Song.mp3"
+    song.write_bytes(b"a")
+    song_id = context.store.add_history(str(song), title="Song", kind="audio")
+    queue.extractAudio([song_id], {})
+    assert context.store.jobs() == [] and notices[-1].startswith("Only videos have audio")
+    video = tmp_path / "Clip (720p).mp4"
+    video.write_bytes(b"v")
+    video_id = context.store.add_history(str(video), title="Clip", kind="video")
+    queue.extractAudio([song_id, video_id], {"audio_format": "flac"})
+    jobs = context.store.jobs()
+    assert [job["input_path"] for job in jobs] == [str(video)]
+

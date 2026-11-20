@@ -115,6 +115,8 @@ Drag links from the browser onto the window to queue them, or drop a `.txt` file
 
 **Downloads** lists what is downloading, waiting, paused, or failed, and what finished since you opened the app; the **Library** keeps every finished file. **Clear finished** above the list tidies it at any time, and finished downloads leave it on their own when you quit the app (Preferences > Downloads can keep them). Failed and unfinished downloads stay, to be tried again or resumed.
 
+Songs show a square cover and videos a wide thumbnail, each with a badge naming the type (**♪ MP3**, **▶ MP4**). To act on several at once, tick the round box on their thumbnails (it appears on hover), or Ctrl+click and Shift+click them; a bar above the list then offers Pause, Resume, Try again, and Remove in Downloads, and Play, Extract audio, Remove, and Recycle Bin in the Library. **Select all** there takes every file the Library's search and filters show.
+
 | Shortcut | Action |
 |---|---|
 | Ctrl+V | Paste the copied link |
@@ -122,7 +124,9 @@ Drag links from the browser onto the window to queue them, or drop a `.txt` file
 | Ctrl+Shift+O | Open Options for the link |
 | Ctrl+L | Go to the link box |
 | Space | Pause or resume the selected download |
-| Delete | Remove the selected download from the list (asks first, and can delete its files too) |
+| Delete | Remove the selected download from the list (asks first when it is unfinished or saved files) |
+| Ctrl+click, Shift+click | Pick several downloads or library files, or a range of them |
+| Ctrl+A / Ctrl+Space / Esc | Pick every row / pick the current row / clear the picks |
 | Ctrl+Shift+P | Pause or resume every download |
 | Ctrl+1 to Ctrl+4 | Downloads, Library, Subscriptions, Sign-ins |
 | Ctrl+, | Preferences |
@@ -162,7 +166,7 @@ Audio downloads save the song's lyrics as `<song>.lrc` beside the file, timed li
 
 **Extract audio** in a finished download's menu (or a library video's) turns a video you already downloaded into a song, without downloading it again. It offers the audio download's choices, starting from Preferences: format and bitrate, the cover and its shape, the tags and chapters, and lyrics. The cover is the thumbnail the video holds, the artist and title are cleaned up as in audio downloads, and the lyrics come from the video's caption files, then LRCLIB. The extraction runs in the download list with its progress, and the song takes the video's place in the audio folder: a single video's song goes straight into it, and a playlist video's into a folder of the playlist's name.
 
-**Remove** in the same menu takes a download off the list and asks first; tick **Also delete its files** to move its saved files, with their captions and lyrics, to the Recycle Bin and delete its unfinished parts.
+**Remove** in the same menu takes a download off the list and always deletes its unfinished parts. A cancelled or failed download that saved nothing goes at once; an unfinished one asks first; one that saved files asks too, and **Also move the saved files to the Recycle Bin** sends them there with their captions and lyrics (left unticked, they stay in the folder and the Library).
 
 ---
 
@@ -404,8 +408,9 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 
 ### Unreleased
 - 🎵 **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download
-- 🗑️ **Remove** asks first and can move the download's files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
+- 🗑️ **Remove** deletes a download's unfinished parts, asks only for unfinished downloads or ones with saved files, and can move saved files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
 - 🎬 The default preset is **Video, best quality MP4**, which replaces the 1080p and 720p MP4 presets
+- ☑️ Pick several downloads or library files (boxes on the thumbnails, Ctrl+click, Shift+click, Ctrl+A) and act on them together; songs and videos are told apart by their cover shape and a type badge
 - 🗂️ **Downloads** holds work in progress and this session's finished downloads, which leave it when you quit (the Library keeps them); **Clear finished** sits above the list
 - 📁 Single downloads go straight into the download folder; playlists, channels, profiles, and posts with several videos get folders of their own, and the `.archives` and `.incomplete` folders are hidden
 - ♻️ A video downloaded before reads **Already downloaded** and plays the file you have, or downloads again when you deleted its file; **Download again** (in its menu and the Library) downloads it anyway, and a link already waiting in the list isn't added twice

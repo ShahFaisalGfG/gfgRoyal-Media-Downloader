@@ -9,6 +9,7 @@ from typing import Any
 
 from PySide6.QtCore import Property, QModelIndex, QObject, QPersistentModelIndex, QTimer, Signal, Slot
 
+from gfgmd.core.naming import format_label
 from gfgmd.core.sources import source_from_url
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services.context import AppContext
@@ -19,7 +20,7 @@ PAGE = 100
 # The most files the players get as a playlist from the library (newest first).
 PLAYLIST_LIMIT = 500
 ROLES = ("historyId", "title", "uploader", "site", "kind", "path", "fileName", "sizeText", "dateText",
-         "durationText", "qualityText", "url", "missing", "thumbnail")
+         "durationText", "qualityText", "url", "missing", "thumbnail", "format")
 
 _Index = QModelIndex | QPersistentModelIndex
 
@@ -34,6 +35,7 @@ def _row(record: dict[str, Any], site_label: str) -> dict[str, Any]:
         "durationText": format_duration(record["duration"]) if record["duration"] else "",
         "qualityText": f"{record['height']}p" if record["height"] else "",
         "url": record["url"], "missing": not os.path.exists(path), "thumbnail": record["thumbnail"],
+        "format": format_label(path),
     }
 
 
@@ -136,6 +138,20 @@ class LibraryController(QObject):
         """The files the filters show that are still there, newest first, for the players' Previous and Next."""
         records = self._context.store.history(self._query, self._kind, self._site, 0, PLAYLIST_LIMIT)
         return [record["filepath"] for record in records if os.path.isfile(record["filepath"])]
+
+    @Slot(result="QVariantList")
+    def allIds(self) -> list[int]:
+        """Every file the filters show, loaded into the list yet or not (Select all)."""
+        return self._context.store.history_ids(self._query, self._kind, self._site)
+
+    @Slot("QVariantList", result="QVariantList")
+    def pathsOf(self, history_ids: list[int]) -> list[str]:
+        """These files that are still there, newest first as the list shows them (Play the selection)."""
+        wanted = {int(item) for item in history_ids}
+        records = [self._context.store.history_record(history_id) for history_id in wanted]
+        present = [record for record in records if record is not None and os.path.isfile(record["filepath"])]
+        present.sort(key=lambda record: (record["finished"], record["id"]), reverse=True)
+        return [record["filepath"] for record in present]
 
     @Slot(int, result=str)
     def pathOf(self, history_id: int) -> str:

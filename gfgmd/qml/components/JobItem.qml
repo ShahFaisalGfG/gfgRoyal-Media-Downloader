@@ -12,6 +12,9 @@ Rectangle {
     signal fixRequested(int jobId, string action)
     signal menuRequested(int jobId)
     signal itemsRequested(int jobId, string title)
+    // Ctrl+click or its mark picks this download; Shift+click picks the rows up to it.
+    signal selectToggled(int jobId, int index)
+    signal rangeRequested(int index)
 
     required property int index
     required property int jobId
@@ -32,7 +35,11 @@ Rectangle {
     required property bool canRetry
     required property bool hasItems
     required property string lastFile
+    required property string format
     property bool current: false
+    property bool selected: false
+    // Some download is picked, so every row shows its mark.
+    property bool selecting: false
 
     readonly property bool _running: job.jobState === "running" || job.jobState === "retry_wait"
     readonly property color _tone: {
@@ -63,12 +70,13 @@ Rectangle {
 
     implicitHeight: 76
     radius: Theme.radius
-    color: hover.hovered || job.current ? Theme.surfaceHover : "transparent"
+    color: job.selected ? Theme.accentSoft : hover.hovered || job.current ? Theme.surfaceHover : "transparent"
     border.width: job.current && job.ListView.view && job.ListView.view.activeFocus ? 2 : 0
     border.color: Theme.focusRing
 
     Accessible.role: Accessible.ListItem
-    Accessible.name: job.title + ", " + job.statusText + (job.detail ? ", " + job.detail : "")
+    Accessible.name: job.title + ", " + (job.kind === "audio" ? "audio" : "video") + ", " + job.statusText
+        + (job.detail ? ", " + job.detail : "")
 
     HoverHandler { id: hover }
 
@@ -83,6 +91,14 @@ Rectangle {
             Layout.preferredHeight: 54
             source: job.thumbnail
             kind: job.kind
+            label: job.format
+
+            SelectMark {
+                checked: job.selected
+                shown: job.selecting || hover.hovered
+                itemName: job.title
+                onToggled: job.selectToggled(job.jobId, job.index)
+            }
         }
 
         ColumnLayout {
@@ -202,6 +218,8 @@ Rectangle {
         onClicked: function (mouse) {
             if (job.ListView.view) job.ListView.view.currentIndex = job.index
             if (mouse.button === Qt.RightButton) job.menuRequested(job.jobId)
+            else if (mouse.modifiers & Qt.ControlModifier) job.selectToggled(job.jobId, job.index)
+            else if (mouse.modifiers & Qt.ShiftModifier) job.rangeRequested(job.index)
         }
     }
 }

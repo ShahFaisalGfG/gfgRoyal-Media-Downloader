@@ -359,6 +359,11 @@ class Store:
         return self._rows(f"SELECT * FROM history {where} ORDER BY finished DESC LIMIT ? OFFSET ?",
                           (*params, limit, offset))
 
+    def history_ids(self, query: str = "", kind: str = "", site: str = "") -> list[int]:
+        """The ids of every finished file the filters match, newest first (Select all)."""
+        where, params = self._history_filter(query, kind, site)
+        return [int(row["id"]) for row in self._rows(f"SELECT id FROM history {where} ORDER BY finished DESC", params)]
+
     def history_count(self, query: str = "", kind: str = "", site: str = "") -> int:
         """How many finished files match the filters."""
         where, params = self._history_filter(query, kind, site)

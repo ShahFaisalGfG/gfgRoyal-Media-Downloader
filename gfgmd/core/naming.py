@@ -12,6 +12,24 @@ from gfgmd.core.platform import hidden_window_flags
 
 MEDIA_EXTENSIONS = {"mp4", "mkv", "webm", "m4a", "mp3", "opus", "ogg", "flac", "wav", "mov", "aac"}
 AUDIO_EXTENSIONS = {"m4a", "mp3", "opus", "ogg", "flac", "wav", "aac"}
+# The extension each audio format saves (yt-dlp's --audio-format names); "best" keeps the site's own.
+_AUDIO_FORMAT_EXTENSIONS = {"mp3": "mp3", "m4a": "m4a", "opus": "opus", "vorbis": "ogg", "flac": "flac", "wav": "wav"}
+
+
+def format_label(path: str = "", options: dict[str, object] | None = None) -> str:
+    """The file type the lists show on a thumbnail ("MP3", "MP4"): the file's own, else the one asked for.
+
+    "" when it isn't known yet (the original audio, kept in whatever format the site sends).
+    """
+    extension = Path(path).suffix[1:] if path else ""
+    if not extension and options:
+        if options.get("kind") == "audio":
+            extension = _AUDIO_FORMAT_EXTENSIONS.get(str(options.get("audio_format", "mp3")), "")
+        else:
+            extension = str(options.get("container", "mp4"))
+    return extension.upper()
+
+
 # The original script's staged names, kept for the recovery sweep: an optional "001 - " playlist number, the
 # title, the bracketed ID, and the requested resolution.
 STAGED_VIDEO_NAME = re.compile(

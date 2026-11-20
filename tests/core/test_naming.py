@@ -99,3 +99,12 @@ def test_inside_root(tmp_path: Path) -> None:
     assert naming.inside_root(root / "a" / "b.mp4", root)
     assert not naming.inside_root(root / ".." / "b.mp4", root)
     assert not naming.inside_root(tmp_path / "rootx" / "b.mp4", root)
+
+
+def test_format_labels_for_the_lists() -> None:
+    """The file's own type once it exists, else the one asked for; nothing for the site's original audio."""
+    assert naming.format_label("C:/Music/Song.mp3") == "MP3"
+    assert naming.format_label("", {"kind": "audio", "audio_format": "vorbis"}) == "OGG"
+    assert naming.format_label("", {"kind": "audio", "audio_format": "best"}) == ""
+    assert naming.format_label("", {"kind": "video", "container": "mkv"}) == "MKV"
+    assert naming.format_label("C:/Videos/Talk (1080p).webm", {"kind": "video", "container": "mp4"}) == "WEBM"
