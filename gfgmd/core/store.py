@@ -355,7 +355,9 @@ class Store:
     def set_item_states(self, job_id: int, states: Iterable[tuple[str, str, str]]) -> None:
         """Record items' outcomes, (item id, state, message), adding an item the job hadn't listed.
 
-        A video this run saved stays saved when a later attempt's archive check calls it "archived".
+        A video this run saved stays saved: a later attempt's archive check calls it "archived", and a
+        state the download sent before its file arrived (a set-aside video "pending" again) can reach
+        the store after it. Try again and Download again put saved videos back with reset_items.
         """
         rows = [(job_id, item_id, job_id, state, message) for item_id, state, message in states if item_id]
         if not rows:
@@ -365,7 +367,7 @@ class Store:
                 "INSERT INTO job_items (job_id, item_id, idx, state, message) VALUES (?, ?,"
                 " (SELECT COALESCE(MAX(idx), 0) + 1 FROM job_items WHERE job_id = ?), ?, ?)"
                 " ON CONFLICT (job_id, item_id) DO UPDATE SET state = excluded.state, message = excluded.message"
-                " WHERE NOT (job_items.state = 'done' AND excluded.state = 'archived')", rows)
+                " WHERE job_items.state != 'done'", rows)
             db.execute("UPDATE jobs SET items_total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?) WHERE id = ?",
                        (job_id, job_id))
 
