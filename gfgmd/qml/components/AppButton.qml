@@ -12,6 +12,9 @@ Button {
     property string iconName: ""
     property string toolTipText: ""
     property bool compact: false
+    // Square corners on one side, where the button joins another (SplitButton's halves).
+    property bool flatLeft: false
+    property bool flatRight: false
 
     readonly property bool _iconOnly: control.text.length === 0 && control.iconName.length > 0
     readonly property color _fg: {
@@ -76,6 +79,10 @@ Button {
 
     background: Rectangle {
         radius: Theme.radius
+        topLeftRadius: control.flatLeft ? 0 : Theme.radius
+        bottomLeftRadius: control.flatLeft ? 0 : Theme.radius
+        topRightRadius: control.flatRight ? 0 : Theme.radius
+        bottomRightRadius: control.flatRight ? 0 : Theme.radius
         color: {
             if (control.kind === "primary")
                 return !control.enabled ? Theme.border : (control.down || control.hovered ? Theme.accentHover : Theme.accentFill)

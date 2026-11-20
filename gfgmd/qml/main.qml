@@ -149,7 +149,7 @@ AppWindow {
 
             DownloadsPage {
                 id: downloads
-                onOpenPreferences: { mainWin.openPreferences(); preferences.scrollToTools() }
+                onOpenPreferences: { mainWin.openPreferences(); preferences.showTools() }
                 onOpenSignIns: mainWin.page = 3
             }
             LibraryPage {}

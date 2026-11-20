@@ -7,7 +7,7 @@ import QtQuick.Layouts
 
 import "../components"
 
-// Paste a link and press Download, or open Options to choose formats and videos first. Below,
+// Paste a link and press Download, or the arrow on its right to choose formats and videos first. Below,
 // the queue: every download with its progress, its buttons, and a menu of everything else.
 Item {
     id: page
@@ -16,6 +16,8 @@ Item {
     signal openSignIns()
 
     property bool optionsOpen: false
+    // The download options show (or are being read): the Download button's cap points up.
+    readonly property bool optionsShown: page.optionsOpen && (analyzeController.busy || analyzeController.hasResult)
     readonly property string presetId: { prefsController.revision; return prefsController.value("downloads.preset") }
 
     // Downloads that saved nothing and are finished (cancelled, failed, already downloaded) go at
@@ -72,41 +74,41 @@ Item {
     }
 
     function pasteLink() {
-        var text = appController.clipboardText().trim()
-        if (text.length > 0) linkField.text = text
-        linkField.input.forceActiveFocus()
+        linkField.pasteClipboard()
     }
 
+    // Every link in the box (a paste of several keeps them all); an empty box takes the clipboard's.
     function download() {
-        var text = linkField.text.trim()
-        if (text.length === 0) {
-            page.pasteLink()
-            text = linkField.text.trim()
-        }
-        if (text.length > 0 && queueController.addLinks(text, page.presetId) > 0)
-            linkField.text = ""
+        if (linkField.links.length === 0) page.pasteLink()
+        if (linkField.links.length > 0 && queueController.addLinks(linkField.links.join("\n"), page.presetId) > 0)
+            linkField.clear()
     }
 
+    // The download options read one link: the one in the box.
     function showOptions() {
-        var text = linkField.text.trim()
+        if (linkField.text.length === 0) page.pasteLink()
+        var text = linkField.text
         if (text.length === 0) {
-            page.pasteLink()
-            text = linkField.text.trim()
+            appController.notice("Paste a link first, then open its download options.")
+            return
         }
-        if (text.length === 0) return
         page.optionsOpen = true
-        analyzeController.analyze(text.split(/\s+/)[0])
+        analyzeController.analyze(text)
+    }
+    function toggleOptions() {
+        if (page.optionsShown) page.optionsOpen = false
+        else page.showOptions()
     }
 
-    // Put a link in the link box and read it, as Options does (the Sign-ins page's library shortcuts).
+    // Put a link in the link box and open its download options (the Sign-ins page's library shortcuts).
     function openLink(url) {
-        linkField.text = url
+        linkField.setLinks(url)
         page.showOptions()
     }
 
     function addDropped(text) {
         if (queueController.addLinks(text, page.presetId) === 0)
-            linkField.text = text
+            linkField.setLinks(text)
     }
 
     ColumnLayout {
@@ -118,18 +120,13 @@ Item {
             Layout.fillWidth: true
             spacing: Theme.spaceSm
 
-            StyledTextField {
+            LinkField {
                 id: linkField
                 Layout.fillWidth: true
-                placeholderText: "Paste a link to a video, playlist, or channel (several links: one per line)"
+                placeholderText: "Paste a link to a video, playlist, or channel"
                 toolTipText: "YouTube and every other site yt-dlp supports. Press Enter to download with the chosen preset."
                 onAccepted: page.download()
-                input.Keys.onEscapePressed: linkField.text = ""
-            }
-            AppButton {
-                iconName: "paste"
-                toolTipText: "Paste the copied link (Ctrl+V)"
-                onClicked: page.pasteLink()
+                input.Keys.onEscapePressed: linkField.clear()
             }
             StyledComboBox {
                 Layout.preferredWidth: 230
@@ -139,21 +136,17 @@ Item {
                 toolTipText: "How the Download button saves: the type, quality, and container"
                 onActivated: prefsController.saveSettings({"downloads.preset": currentValue})
             }
-            AppButton {
-                text: "Options"
-                iconName: "settings"
+            // Download with the preset, or open the cap for this link's download options.
+            SplitButton {
                 enabled: toolsController.ready
-                toolTipText: "Read the link first to choose quality, subtitles, and which videos to get (Ctrl+Shift+O)"
-                onClicked: page.showOptions()
-            }
-            AppButton {
-                kind: "primary"
                 text: "Download"
                 iconName: "download"
-                enabled: toolsController.ready
                 toolTipText: toolsController.ready ? "Download with the chosen preset (Enter)"
                     : "Get the download tools first"
+                capToolTipText: "Download options: pick the quality, format, subtitles, and which videos (Ctrl+Shift+O)"
+                capOpen: page.optionsShown
                 onClicked: page.download()
+                onCapClicked: page.toggleOptions()
             }
         }
 
@@ -192,7 +185,7 @@ Item {
 
         OptionsPanel {
             Layout.fillWidth: true
-            visible: page.optionsOpen && (analyzeController.busy || analyzeController.hasResult)
+            visible: page.optionsShown
             maxHeight: Math.max(240, page.height * 0.62)
             presetId: page.presetId
             onClosed: page.optionsOpen = false
@@ -337,7 +330,7 @@ Item {
                 iconName: "download"
                 title: "Nothing downloading yet"
                 text: "Copy a link from your browser and press Download, or drag links onto this window. "
-                    + "Playlists and channels download whole; open Options to pick videos, quality, and subtitles."
+                    + "Playlists and channels download whole; the arrow beside Download picks the videos, quality, and subtitles."
             }
         }
     }

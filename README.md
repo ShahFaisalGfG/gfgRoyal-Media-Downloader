@@ -15,7 +15,7 @@
 
 ---
 
-gfgRoyal Media Downloader saves a single video, a whole playlist, a channel, a Short or Reel, or a live stream as clean, quality-labeled files such as `Episode 001 (1080p).mp4`, and music as MP3 (320 kbps by default) or another format with its cover art and synced lyrics. Paste a link and press Download, or open Options to pick the quality, audio tracks, subtitles, and the exact videos you want. Play what you downloaded in the built-in video and music players. Downloads resume after a dropped connection, a crash, or a restart, and the app keeps its own copies of yt-dlp, FFmpeg, and Deno up to date so site changes don't break it.
+gfgRoyal Media Downloader saves a single video, a whole playlist, a channel, a Short or Reel, or a live stream as clean, quality-labeled files such as `Episode 001 (1080p).mp4`, and music as MP3 (320 kbps by default) or another format with its cover art and synced lyrics. Paste a link and press Download, or the arrow on the Download button to pick the quality, audio tracks, subtitles, and the exact videos you want. Play what you downloaded in the built-in video and music players. Downloads resume after a dropped connection, a crash, or a restart, and the app keeps its own copies of yt-dlp, FFmpeg, and Deno up to date so site changes don't break it.
 
 > *Paste once. Come back to a finished playlist.*
 
@@ -101,15 +101,15 @@ Windows 10 version 1809 or later, 64-bit. On first start the app offers to downl
 
 ### Updating
 
-The app checks GitHub once a day and installs updates when you quit, after checking the release's signature and checksums. Preferences > Updates turns either step off. Your downloads, library, sign-ins, and settings stay.
+The app checks GitHub once a day and installs updates when you quit, after checking the release's signature and checksums. Preferences > Updates and logs turns either step off. Your downloads, library, sign-ins, and settings stay.
 
 ---
 
 ## Quick Start
 
 1. Copy a link from your browser.
-2. Press **Ctrl+V** in the app (or click the paste button), choose a preset, and press **Download**.
-3. To choose formats and videos first, press **Options** instead.
+2. Press **Ctrl+V** in the app (or the paste button inside the empty link box), choose a preset, and press **Download**.
+3. To choose formats and videos first, press the arrow on the right of **Download** (or Ctrl+Shift+O) instead; press it again to close the choices.
 
 Drag links from the browser onto the window to queue them, or drop a `.txt` file with one link per line. Turn on **Offer copied links** in Preferences and the app offers to download each link you copy.
 
@@ -121,7 +121,7 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 |---|---|
 | Ctrl+V | Paste the copied link |
 | Enter | Download with the chosen preset |
-| Ctrl+Shift+O | Open Options for the link |
+| Ctrl+Shift+O | Open the download options for the link |
 | Ctrl+L | Go to the link box |
 | Space | Pause or resume the selected download |
 | Delete | Remove the selected download from the list (asks first when it is unfinished or saved files) |
@@ -137,14 +137,14 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 
 ## Video and Audio Formats
 
-Presets next to the link box cover the usual choices (video in the best quality offered as MP4 or MKV, MP3 320 kbps, M4A, FLAC); **Options** shows every choice for one link, and Preferences sets the starting values.
+Presets next to the link box cover the usual choices (video in the best quality offered as MP4 or MKV, MP3 320 kbps, M4A, FLAC); the arrow on the **Download** button shows every choice for one link, and Preferences sets the starting values.
 
 | Video | Choices |
 |---|---|
 | Quality | Best available, 2160p, 1440p, 1080p, 720p, 480p, 360p (measured on the shorter side, so portrait Shorts fit too) |
 | File | MP4 (plays everywhere), MKV (keeps any codec), WebM |
 | Codecs | Compatible (H.264 and AAC first), Balanced, Best quality (AV1 and VP9 allowed) |
-| Audio tracks | The original language only, or dubbed languages too as extra tracks in one MP4 or MKV file; Options lists the languages a video has |
+| Audio tracks | The original language only, or dubbed languages too as extra tracks in one MP4 or MKV file; the download options list the languages a video has |
 | Subtitles | None, embedded, separate SRT or WebVTT files, or both; pick the languages, and optionally the site's automatic captions |
 
 | Audio | Choices |
@@ -249,7 +249,7 @@ A subscription shares its archive with downloads of the same channel, so nothing
 
 ## Live Streams
 
-Options shows **Live now** or **Starts** for streams. A live stream records from its beginning where the site allows it; a scheduled stream or premiere waits in the queue and starts recording on time. MKV is used for recordings, since it stays playable even when a recording stops early.
+The download options show **Live now** or **Starts** for streams. A live stream records from its beginning where the site allows it; a scheduled stream or premiere waits in the queue and starts recording on time. MKV is used for recordings, since it stays playable even when a recording stops early.
 
 ---
 
@@ -411,11 +411,14 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🗑️ **Remove** deletes a download's unfinished parts, asks only for unfinished downloads or ones with saved files, and can move saved files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
 - 🎬 The default preset is **Video, best quality MP4**, which replaces the 1080p and 720p MP4 presets
 - ☑️ Pick several downloads or library files (boxes on the thumbnails, Ctrl+click, Shift+click, Ctrl+A) and act on them together; songs and videos are told apart by their cover shape and a type badge
+- 🔽 **Options** became the arrow on the **Download** button, which opens the download options for the link and closes them again
+- 🔗 The link box holds a paste button while it is empty, takes only characters a link can hold (spaces and line breaks are dropped), and keeps several pasted links together as **+N more**
+- ⚙️ Preferences lists its sections down the side (General, Downloads, Video, Audio, Network and schedule, Subscriptions, Tools, Updates and logs)
 - 🗂️ **Downloads** holds work in progress and this session's finished downloads, which leave it when you quit (the Library keeps them); **Clear finished** sits above the list
 - 📁 Single downloads go straight into the download folder; playlists, channels, profiles, and posts with several videos get folders of their own, and the `.archives` and `.incomplete` folders are hidden
 - ♻️ A video downloaded before reads **Already downloaded** and plays the file you have, or downloads again when you deleted its file; **Download again** (in its menu and the Library) downloads it anyway, and a link already waiting in the list isn't added twice
 - 📊 Audio downloads show how far the conversion has got, and the progress bar moves on downloads whose size the site doesn't list
-- 🐞 Fixed: choosing Audio only in Options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off
+- 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off
 
 ### v1.0.0 - November 2026 *(current)*
 - 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
