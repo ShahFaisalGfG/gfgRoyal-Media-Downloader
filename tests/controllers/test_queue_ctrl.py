@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from gfgmd.controllers.queue_ctrl import QueueController
-from gfgmd.controllers.queue_rows import entry_key, job_key, running_values
+from gfgmd.controllers.queue_rows import entry_key, entry_row, job_key, running_values
 from gfgmd.core import extract, naming
 from gfgmd.core.naming import group_of
 from gfgmd.core.extract import VideoProbe
@@ -530,14 +530,21 @@ def test_a_stalled_video_waits_while_the_rest_download(qapp, context, fake_ytdlp
     try:
         queue.addLinks("https://fake.test/stall", "video-best-mp4")
         job_id = context.store.jobs()[0]["id"]
-        assert wait_for(qapp, lambda: context.store.item_counts(job_id).get("deferred") == 1)
-        assert queue.model.get(queue.model.row_of(entry_key(job_id, "bbbbbbbbbbb")))["statusText"] == \
-            "Waiting for its server"
         assert wait_for(qapp, lambda: states(context) == ["done"])
         assert context.store.item_counts(job_id) == {"done": 3}
         assert queue.model.get(queue.model.row_of(job_key(job_id)))["progress"] == 1.0
+        # The stalled video was saved after the rest. Its "deferred" state can come and go between two
+        # polls, so the order of the saved files is what shows it waited.
+        saved = [record["video_id"] for record in sorted(context.store.history_for_job(job_id), key=lambda r: r["id"])]
+        assert saved == ["aaaaaaaaaaa", "ccccccccccc", "bbbbbbbbbbb"]
     finally:
         queue.shutdown()
+
+
+def test_a_video_set_aside_says_it_waits_for_its_server():
+    job = {"id": 1, "state": "running", "options_json": "{}"}
+    item = {"item_id": "bbbbbbbbbbb", "state": "deferred", "title": "Clip", "url": "", "thumbnail": "", "message": ""}
+    assert entry_row(job, item, 2, "video", "", None)["statusText"] == "Waiting for its server"
 
 
 def test_a_subscriptions_new_uploads_are_one_download(qapp, queue, context):
