@@ -122,9 +122,10 @@ def normalize_downloads(output_root: Path, archive: Path, ffprobe: str) -> int:
         return 0
     archived_ids = read_archive_ids(archive)
     renamed = 0
-    for media_dir in output_root.iterdir():
-        if not media_dir.is_dir() or media_dir.is_symlink():
-            continue
+    # Single downloads sit in the root, lists in folders of their own; the app's dot folders hold no downloads.
+    folders = [output_root, *(entry for entry in output_root.iterdir()
+                              if entry.is_dir() and not entry.is_symlink() and not entry.name.startswith("."))]
+    for media_dir in folders:
         occupied = {entry.name.casefold() for entry in media_dir.iterdir()}
         for video in sorted(media_dir.glob("*.mp4")):
             match = STAGED_VIDEO_NAME.fullmatch(video.name)

@@ -20,7 +20,7 @@ from gfgmd.core.errors import CATEGORIES, Failure, Policy, classify, judge
 from gfgmd.core.lyrics import Fetch, add_lyrics
 from gfgmd.core.naming import finalize_file
 from gfgmd.core.options import DownloadOptions
-from gfgmd.core.progress import Event, ProgressTracker, Snapshot
+from gfgmd.core.progress import Event, ProgressTracker, Snapshot, read_convert_progress
 from gfgmd.core.retry import retry_delay
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.sources import Source
@@ -62,13 +62,20 @@ class JobResult:
     skipped: list[Failure] = field(default_factory=list)
     failure: Failure | None = None
     rename_errors: list[str] = field(default_factory=list)
+    # Videos the archive skipped as downloaded before, and their IDs when yt-dlp named them.
+    archived: int = 0
+    archived_ids: list[str] = field(default_factory=list)
 
     @property
     def message(self) -> str:
         """A one-line summary for the user."""
         if self.failure is not None and self.state != "done":
             return self.failure.category.message
+        if not self.files and self.archived and not self.skipped:
+            return "Already downloaded" if self.archived == 1 else f"All {self.archived} already downloaded"
         parts = [f"{len(self.files)} file{'s' if len(self.files) != 1 else ''} saved"]
+        if self.archived:
+            parts.append(f"{self.archived} already downloaded")
         if self.skipped:
             parts.append(f"{len(self.skipped)} skipped")
         return ", ".join(parts)
@@ -111,8 +118,16 @@ class JobExecutor:
         return self._attempt
 
     def snapshot(self) -> Snapshot:
-        """The current attempt's progress."""
-        return self._tracker.snapshot()
+        """The current attempt's progress, with an audio conversion's from ffmpeg's progress file."""
+        tracker = self._tracker
+        snap = tracker.snapshot()
+        if tracker.converting_since and snap.duration > 0:
+            done = read_convert_progress(self._spec.paths.convert_progress, tracker.converting_since)
+            if done is not None:
+                seconds, speed = done
+                snap.convert_fraction = min(seconds / snap.duration, 1.0)
+                snap.eta = int((snap.duration - seconds) / speed) if speed > 0 and seconds < snap.duration else -1
+        return snap
 
     def partial_files(self) -> set[str]:
         """Every partial file yt-dlp reported in any attempt (for removing a cancelled download)."""
@@ -130,8 +145,7 @@ class JobExecutor:
         skip_ids = list(spec.skip_ids)
         updated = False
         category_counts: dict[str, int] = {}
-        spec.paths.job_dir.mkdir(parents=True, exist_ok=True)
-        spec.paths.archive.parent.mkdir(parents=True, exist_ok=True)
+        spec.paths.prepare()
         lock = ArchiveLock(spec.paths.archive, timeout=1.0)
         while not lock.acquire():
             self._tracker.mark_stage("Waiting for another download of this list")
@@ -157,6 +171,9 @@ class JobExecutor:
                     result.state, result.failure = "failed", Failure(CATEGORIES["tools"], f"yt-dlp didn't start: {error}")
                     return result
                 self._finalize(tools, result)
+                snap = self._tracker.snapshot()
+                result.archived = max(result.archived, snap.archived)
+                result.archived_ids += [i for i in self._tracker.archived_ids if i not in result.archived_ids]
                 if stopped or self._stop.is_set():
                     result.state = "stopped"
                     return result

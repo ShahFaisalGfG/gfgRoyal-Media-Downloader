@@ -68,7 +68,7 @@ class Fake:
     def video(self, video_id: str, title: str, info: dict | None = None, height: int = 1080) -> None:
         """Download one video: item line, progress, merge, file, archive, journal."""
         if video_id in self.archived():
-            out(f"[download] {title} has already been recorded in the archive")
+            out(f"[download] {video_id}: has already been recorded in the archive")
             return
         data = {"id": video_id, "title": title, "extractor_key": "Youtube", "ext": "mp4", **(info or {})}
         if data.get("n_entries"):

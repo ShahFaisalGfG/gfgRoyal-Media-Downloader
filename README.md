@@ -113,6 +113,8 @@ The app checks GitHub once a day and installs updates when you quit, after check
 
 Drag links from the browser onto the window to queue them, or drop a `.txt` file with one link per line. Turn on **Offer copied links** in Preferences and the app offers to download each link you copy.
 
+**Downloads** lists what is downloading, waiting, paused, or failed, and what finished since you opened the app; the **Library** keeps every finished file. **Clear finished** above the list tidies it at any time, and finished downloads leave it on their own when you quit the app (Preferences > Downloads can keep them). Failed and unfinished downloads stay, to be tried again or resumed.
+
 | Shortcut | Action |
 |---|---|
 | Ctrl+V | Paste the copied link |
@@ -158,7 +160,7 @@ Audio downloads save the song's lyrics as `<song>.lrc` beside the file, timed li
 
 ## Extract Audio
 
-**Extract audio** in a finished download's menu (or a library video's) turns a video you already downloaded into a song, without downloading it again. It offers the audio download's choices, starting from Preferences: format and bitrate, the cover and its shape, the tags and chapters, and lyrics. The cover is the thumbnail the video holds, the artist and title are cleaned up as in audio downloads, and the lyrics come from the video's caption files, then LRCLIB. The extraction runs in the download list with its progress, and the song goes to the audio folder, in a folder named like the video's.
+**Extract audio** in a finished download's menu (or a library video's) turns a video you already downloaded into a song, without downloading it again. It offers the audio download's choices, starting from Preferences: format and bitrate, the cover and its shape, the tags and chapters, and lyrics. The cover is the thumbnail the video holds, the artist and title are cleaned up as in audio downloads, and the lyrics come from the video's caption files, then LRCLIB. The extraction runs in the download list with its progress, and the song takes the video's place in the audio folder: a single video's song goes straight into it, and a playlist video's into a folder of the playlist's name.
 
 **Remove** in the same menu takes a download off the list and asks first; tick **Also delete its files** to move its saved files, with their captions and lyrics, to the Recycle Bin and delete its unfinished parts.
 
@@ -189,7 +191,7 @@ Media keys play, pause, and skip songs while the app is in front, and the tray m
 
 ## Shorts, Reels, and Other Sites
 
-Paste a link from any site yt-dlp supports. These short-form and social links are recognized, cleaned of share-tracking parameters, and saved into their own folders:
+Paste a link from any site yt-dlp supports. These short-form and social links are recognized, cleaned of share-tracking parameters, and saved as described in [Where Files Go](#where-files-go):
 
 | Site | Links |
 |---|---|
@@ -303,18 +305,19 @@ Exit status: `0` when every available item was saved (private or removed items a
 
 Videos go to `Videos\gfgRoyal Media Downloader` and audio to `Music\gfgRoyal Media Downloader` (Preferences > Downloads), wherever Windows keeps those folders. The original script's `Videos\youtube-video-downloader` is used instead when it already holds downloads, so its archives keep working.
 
+A single download goes straight into that folder; anything holding several videos gets a folder of its own. Subscriptions use the same folders as downloading the channel or playlist yourself.
+
 | Download | Folder |
 |---|---|
-| YouTube playlist | `<playlist name>\` |
-| YouTube video | `Single Videos\` |
-| YouTube Short | `Shorts\` |
-| YouTube channel | `<channel>\Videos\`, `Shorts\`, `Live\` |
-| TikTok, Reel, Spotlight | `<site>\Shorts\` |
-| X, Instagram, Facebook, Reddit, or Pinterest post | `<site>\Single Videos\` |
-| TikTok profile | `TikTok\<user>\` |
-| Other sites | `<site>\<playlist>\` or `<site>\Single Videos\` |
+| A video, Short, Reel, TikTok, song, or live recording | The download folder itself |
+| A post holding several videos (an X post, an Instagram carousel) | `<post title>\` (a post with one video stays in the download folder) |
+| A playlist, including Watch later and Liked videos | `<playlist name>\` |
+| A YouTube channel | `<channel>\Videos\`, `Shorts\`, `Live\` |
+| A TikTok, Instagram, or X profile | `<account>\` |
 
-Files are named after the title and the quality measured from the finished file, such as `Episode 001 (1080p).mp4`: a 1080p request that was only offered at 720p ends in `(720p)`, and videos that share a title get ` (2)`, ` (3)` instead of overwriting each other. Preferences offers other name styles (title only, date first, playlist number first). Unfinished files wait in a hidden `.incomplete` folder, and per-playlist, per-format archives in `.archives` record what is done.
+Files are named after the title and the quality measured from the finished file, such as `Episode 001 (1080p).mp4`: a 1080p request that was only offered at 720p ends in `(720p)`, and videos that share a title get ` (2)`, ` (3)` instead of overwriting each other. Preferences offers other name styles (title only, date first, playlist number first). Unfinished files wait in the `.incomplete` folder, and per-playlist, per-format archives in `.archives` record what is done; both folders are hidden.
+
+A video downloaded before isn't downloaded twice: its entry reads **Already downloaded**, and **Play** opens the file you have. When that file is gone (you deleted it), the video downloads again. **Download again** in its menu, or in the Library, downloads it once more anyway.
 
 ---
 
@@ -403,7 +406,11 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🎵 **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download
 - 🗑️ **Remove** asks first and can move the download's files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
 - 🎬 The default preset is **Video, best quality MP4**, which replaces the 1080p and 720p MP4 presets
-- 🐞 Fixed: choosing Audio only in Options froze the app; a single click in the video player paused before a double click went fullscreen; download menus cut their text off
+- 🗂️ **Downloads** holds work in progress and this session's finished downloads, which leave it when you quit (the Library keeps them); **Clear finished** sits above the list
+- 📁 Single downloads go straight into the download folder; playlists, channels, profiles, and posts with several videos get folders of their own, and the `.archives` and `.incomplete` folders are hidden
+- ♻️ A video downloaded before reads **Already downloaded** and plays the file you have, or downloads again when you deleted its file; **Download again** (in its menu and the Library) downloads it anyway, and a link already waiting in the list isn't added twice
+- 📊 Audio downloads show how far the conversion has got, and the progress bar moves on downloads whose size the site doesn't list
+- 🐞 Fixed: choosing Audio only in Options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off
 
 ### v1.0.0 - November 2026 *(current)*
 - 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates

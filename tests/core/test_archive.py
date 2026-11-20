@@ -1,8 +1,14 @@
 """Archives: the original script names, tolerant reading, seeding, and the shared lock."""
 
+import os
+import stat
+import sys
 from pathlib import Path
 
+import pytest
+
 from gfgmd.core.archive import ArchiveLock, append_archive, archive_path, read_archive_ids
+from gfgmd.core.command import RunPaths
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.sources import source_from_url
 
@@ -43,3 +49,15 @@ def test_lock_is_exclusive(tmp_path: Path) -> None:
     first.release()
     assert second.acquire()
     second.release()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the hidden attribute is a Windows file attribute")
+def test_the_working_folders_are_hidden(tmp_path: Path) -> None:
+    """.archives and .incomplete stay out of sight in Explorer, as their dot hides them elsewhere."""
+    paths = RunPaths(tmp_path, tmp_path / ".archives" / "single-videos-best.txt", tmp_path / "jobs" / "1", tmp_path)
+    paths.prepare()
+    for folder in (tmp_path / ".archives", tmp_path / ".incomplete", tmp_path / "jobs"):
+        hidden = bool(os.stat(folder).st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN)
+        assert hidden == folder.name.startswith(".")
+    paths.prepare()  # an already hidden folder stays as it is
+    assert os.stat(tmp_path / ".archives").st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN

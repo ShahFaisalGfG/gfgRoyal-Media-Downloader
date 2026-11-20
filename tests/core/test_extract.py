@@ -116,7 +116,7 @@ def fake_ffmpeg(code: int = 0, errors: tuple[str, ...] = ()):
 
 @pytest.fixture
 def video(tmp_path: Path) -> Path:
-    path = tmp_path / "Videos" / "YouTube" / "Single Videos" / "Clip (720p).mp4"
+    path = tmp_path / "Videos" / "Morning Mix" / "Clip (720p).mp4"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"video")
     (path.parent / "Clip (720p).en.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nHello\n", encoding="utf-8")
@@ -124,7 +124,7 @@ def video(tmp_path: Path) -> Path:
 
 
 def spec_for(video: Path, tmp_path: Path, **changes) -> ExtractSpec:
-    return ExtractSpec(video, audio(**changes), tmp_path / "Music", "YouTube/Single Videos", tmp_path / "scratch",
+    return ExtractSpec(video, audio(**changes), tmp_path / "Music", "Morning Mix", tmp_path / "scratch",
                        item_id="abc", title="Clip", uploader="Uploader", url="https://youtu.be/abc")
 
 
@@ -135,7 +135,7 @@ def test_extraction_saves_the_song_with_lyrics_from_the_captions(tmp_path: Path,
                                probe=lambda ffprobe, path: PROBE)
     with patch.object(lyrics, "file_length", return_value=6.0):
         result = extractor.run()
-    song = tmp_path / "Music" / "YouTube" / "Single Videos" / "Clip.mp3"
+    song = tmp_path / "Music" / "Morning Mix" / "Clip.mp3"
     assert result.state == "done" and result.files == [song] and song.is_file()
     assert saved[0][0]["webpage_url"] == "https://youtu.be/abc" and saved[0][1] == song
     assert "[00:01.00]Hello" in song.with_suffix(".lrc").read_text(encoding="utf-8")
@@ -167,5 +167,5 @@ def test_a_stopped_extraction_reports_its_unfinished_file(tmp_path: Path, video:
     extractor = AudioExtractor(spec_for(video, tmp_path), lambda: TOOLS, runner=stopped,
                                probe=lambda ffprobe, path: PROBE)
     result = extractor.run()
-    partial = tmp_path / "Music" / ".incomplete" / "YouTube" / "Single Videos" / "Clip [abc] (requested-audio-mp3-320k).mp3"
+    partial = tmp_path / "Music" / ".incomplete" / "Morning Mix" / "Clip [abc] (requested-audio-mp3-320k).mp3"
     assert result.state == "stopped" and extractor.partial_files() == {str(partial)} and partial.is_file()

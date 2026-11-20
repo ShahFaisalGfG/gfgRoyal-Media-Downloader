@@ -12,6 +12,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 MARKER = "@@gfgr:"
@@ -21,7 +22,12 @@ _PAGE = re.compile(r"Downloading (?:API JSON )?page (\d+)", re.IGNORECASE)
 _WAIT = re.compile(r"\[wait\] Remaining time until next attempt: (\d+):(\d+):(\d+)")
 _ITEM_OF = re.compile(r"^\[download\] Downloading item (\d+) of (\d+)")
 _ARCHIVED = "has already been recorded in the archive"
+# A link whose ID yt-dlp knows without reading the page (YouTube) is skipped as "[download] <id>: has
+# already been recorded in the archive"; other skips name the title instead.
+_ARCHIVED_ID = re.compile(r"^\[download\] (?P<id>[^\s:]{1,128}): has already been recorded in the archive")
 
+# The post-processor that converts audio; its ffmpeg run writes a -progress file (see command.py).
+_AUDIO_CONVERSION = ("ExtractAudio", "FFmpegExtractAudio")
 # Post-processor names (yt-dlp class names without "PP") to the stage shown in the UI.
 _PP_STAGES = {
     "Merger": "Merging",
@@ -98,6 +104,33 @@ def _item_of(message: str) -> dict[str, Any]:
     return {"extractor": match.group("extractor"), "id": match.group("id")}
 
 
+def read_convert_progress(path: Path, since: float) -> tuple[float, float] | None:
+    """(seconds converted, speed as a multiple of real time) from ffmpeg's -progress file.
+
+    None when the file is missing or older than `since` (the previous item's conversion).
+    """
+    try:
+        if path.stat().st_mtime < since - 1:
+            return None
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - 4096))
+            tail = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    seconds, speed = None, 0.0
+    for line in tail.splitlines():
+        key, _, value = line.strip().partition("=")
+        if key in ("out_time_us", "out_time_ms") and value.isdigit():
+            seconds = int(value) / 1_000_000  # both keys count microseconds
+        elif key == "speed" and value.endswith("x"):
+            try:
+                speed = float(value[:-1])
+            except ValueError:
+                speed = 0.0
+    return (seconds, speed) if seconds is not None else None
+
+
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -129,6 +162,9 @@ class Snapshot:
     page: int = 0
     wait_seconds: int = -1
     updated: float = 0.0
+    # The current item's length in seconds, and how much of its audio conversion is done (-1: unknown).
+    duration: float = 0.0
+    convert_fraction: float = -1.0
 
     def as_dict(self) -> dict[str, Any]:
         """The snapshot as a dict (for the database and QML)."""
@@ -152,6 +188,10 @@ class ProgressTracker:
         self.playlist: dict[str, Any] = {}
         # Partial files yt-dlp reported writing, so a cancelled download can remove them.
         self.partials: set[str] = set()
+        # IDs of the videos the archive skipped, when yt-dlp named them.
+        self.archived_ids: list[str] = []
+        # When the current audio conversion started (wall clock; 0 when none is running).
+        self.converting_since = 0.0
 
     def feed(self, stream: str, line: str) -> Event:
         """Parse a line, update the snapshot, and return the event."""
@@ -188,6 +228,8 @@ class ProgressTracker:
                 snap.item_count = count
             snap.is_live = data.get("live_status") == "is_live"
             snap.stage = "Recording" if snap.is_live else "Starting download"
+            snap.duration = _number(data.get("duration")) or 0.0
+            self.converting_since = 0.0
             snap.item_fraction = 0.0
             snap.downloaded = 0
             snap.total = 0
@@ -206,7 +248,11 @@ class ProgressTracker:
             name = str((progress or {}).get("postprocessor") or "")
             if (progress or {}).get("status") == "started":
                 snap.stage = _PP_STAGES.get(name, "Processing")
+                # The download's speed and time left no longer apply.
+                snap.speed, snap.eta = 0.0, -1
+                self.converting_since = time.time() if name in _AUDIO_CONVERSION else 0.0
         elif event.kind == "file":
+            self.converting_since = 0.0
             self.files.append(data)
             snap.items_done += 1
             snap.item_fraction = 1.0
@@ -254,13 +300,20 @@ class ProgressTracker:
             snap.stage = "Downloading video"
         else:
             snap.stage = "Downloading"
-        if format_id and format_id not in self._parts and total:
+        if format_id and total:
+            # The live size (exact, or yt-dlp's running estimate for fragments) beats the format list's,
+            # which a site often leaves out: a part kept at 0 made the bar read full from the start.
             self._parts[format_id] = total
         done_bytes = sum(self._done_parts.values())
         expected = sum(self._parts.values()) or total
         snap.downloaded = done_bytes + downloaded
-        snap.total = max(expected, snap.downloaded)
-        snap.item_fraction = min(snap.downloaded / snap.total, 0.999) if snap.total else 0.0
+        snap.total = max(expected, snap.downloaded) if expected else 0
+        if snap.total:
+            snap.item_fraction = min(snap.downloaded / snap.total, 0.999)
+        elif isinstance(index, int) and isinstance(count, int) and count > 0:
+            snap.item_fraction = min(index / count, 0.999)  # no size at all: the share of fragments done
+        else:
+            snap.item_fraction = 0.0
 
     def _apply_log(self, text: str) -> None:
         snap = self._snap
@@ -271,6 +324,9 @@ class ProgressTracker:
         if _ARCHIVED in text:
             snap.items_done += 1
             snap.archived += 1
+            skipped = _ARCHIVED_ID.match(text)
+            if skipped:
+                self.archived_ids.append(skipped.group("id"))
             return
         page = _PAGE.search(text)
         if page:

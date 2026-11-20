@@ -15,7 +15,7 @@ _BAR_STYLE = (
     "QProgressBar { background: rgba(255,255,255,0.08); border: none;"
     " border-radius: 3px; }"
     "QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-    " stop:0 #f43f5e, stop:1 #f97316); border-radius: 3px; }"  # the icon gradient (scripts/make_icons.py)
+    " stop:0 #f43f5e, stop:1 #be123c); border-radius: 3px; }"  # the icon gradient (scripts/make_icons.py)
 )
 
 

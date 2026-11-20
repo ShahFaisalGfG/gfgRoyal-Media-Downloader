@@ -237,7 +237,8 @@ Item {
         }
         AppMenuItem {
             text: "Extract audio"
-            enabled: !menu.missing && menu.kind === "video"
+            visible: menu.kind === "video"
+            enabled: !menu.missing
             onTriggered: extractDialog.forVideo(menu.historyId, menu.videoTitle)
         }
         AppMenuSeparator {}

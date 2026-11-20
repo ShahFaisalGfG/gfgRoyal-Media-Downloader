@@ -62,6 +62,8 @@ class DownloadOptions:
     items: str = ""
     live_from_start: bool = False
     wait_for_video: bool = False
+    # Download even what the archive lists as downloaded before ("Download again").
+    ignore_archive: bool = False
 
     def validate(self) -> DownloadOptions:
         """Return self, or raise ValueError naming the first value that can't be used."""

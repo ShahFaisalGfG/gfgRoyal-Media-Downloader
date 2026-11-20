@@ -30,7 +30,7 @@ from gfgmd.core.jobs import JobResult, Runner
 from gfgmd.core.lyrics import Fetch, add_lyrics
 from gfgmd.core.naming import finalize_file
 from gfgmd.core.options import DownloadOptions
-from gfgmd.core.platform import hidden_window_flags
+from gfgmd.core.platform import hidden_window_flags, hide_folder
 from gfgmd.core.progress import Snapshot
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.tools import ToolSet
@@ -75,7 +75,7 @@ class ExtractSpec:
     video: Path
     options: DownloadOptions
     root: Path  # the audio download folder
-    folder: str  # the subfolder of `root` it goes in, mirroring the video's ("YouTube/Single Videos")
+    folder: str  # the subfolder of `root` it goes in, mirroring the video's (a playlist's; "" for the root)
     scratch: Path  # the job's scratch folder, for the cover and the tag list
     item_id: str = ""  # the video's ID on its site, which marks the unfinished file
     title: str = ""
@@ -312,6 +312,7 @@ class AudioExtractor:
         name = f"{audio_stem(spec.video)} [{marker}] (requested-{spec.options.profile}).{extension}"
         staged = spec.incomplete / spec.folder / name
         staged.parent.mkdir(parents=True, exist_ok=True)
+        hide_folder(spec.incomplete)
         with self._lock:
             self._partials.add(str(staged))
         self._set_stage("Extracting audio")

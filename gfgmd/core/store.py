@@ -168,6 +168,9 @@ class Store:
             # Version 2 remembers where playback stopped in each file.
             self._db.executescript("BEGIN;" + _PLAYBACK + "PRAGMA user_version = 2; COMMIT;")
         self._add_columns()
+        # 1.0.0 left records naming jobs it had removed; they belong to no job.
+        self._db.execute("UPDATE history SET job_id = NULL WHERE job_id IS NOT NULL AND job_id NOT IN "
+                         "(SELECT id FROM jobs)")
 
     def _add_columns(self) -> None:
         """Add the columns made after 1.0.0, which 1.0.0 ignores (it reads rows by name)."""
@@ -252,9 +255,14 @@ class Store:
             db.executemany("UPDATE jobs SET position = ? WHERE id = ?", [(i + 1, jid) for i, jid in enumerate(order)])
 
     def delete_jobs(self, job_ids: Iterable[int]) -> None:
-        """Remove jobs (their items go with them)."""
+        """Remove jobs (their items go with them); their files stay in the library under no job.
+
+        SQLite gives a new job the next free number, which can be a removed job's, so a record still
+        naming that job would pass for the new one's file (its Play button, Remove with its files).
+        """
         ids = [(job_id,) for job_id in job_ids]
         with self._transaction() as db:
+            db.executemany("UPDATE history SET job_id = NULL WHERE job_id = ?", ids)
             db.executemany("DELETE FROM jobs WHERE id = ?", ids)
 
     def recover(self) -> list[int]:
@@ -290,6 +298,21 @@ class Store:
     def history_for_job(self, job_id: int) -> list[dict[str, Any]]:
         """The library records of the files a download saved, oldest first."""
         return self._rows("SELECT * FROM history WHERE job_id = ? ORDER BY finished, id", (job_id,))
+
+    def history_of_video(self, site: str, video_ids: Iterable[str], url: str) -> list[dict[str, Any]]:
+        """Library records of one video (by its ID on the site, or its link), newest first."""
+        ids = [video_id for video_id in video_ids if video_id]
+        clauses, params = [], []
+        if ids:
+            clauses.append(f"(site = ? AND video_id IN ({', '.join('?' * len(ids))}))")
+            params += [site, *ids]
+        if url:
+            clauses.append("url = ?")
+            params.append(url)
+        if not clauses:
+            return []
+        return self._rows(f"SELECT * FROM history WHERE {' OR '.join(clauses)} ORDER BY finished DESC, id DESC",
+                          params)
 
     def history_for_path(self, filepath: str) -> dict[str, Any] | None:
         """The library record of a file, if it was downloaded here."""

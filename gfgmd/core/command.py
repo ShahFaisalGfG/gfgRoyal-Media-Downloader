@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Sequence
 
 from gfgmd.core.options import DownloadOptions
-from gfgmd.core.sites import resolve_site, site_by_key
+from gfgmd.core.platform import hide_folder
 from gfgmd.core.sources import CHANNEL_TABS, Source
 from gfgmd.core.tools import ToolSet
 
@@ -98,6 +98,18 @@ class RunPaths:
     def incomplete(self) -> Path:
         """Where partial files live until yt-dlp moves them into the download folder."""
         return self.root / ".incomplete"
+
+    def prepare(self) -> None:
+        """Create the folders a download writes to, hiding the archive and unfinished-file folders."""
+        self.job_dir.mkdir(parents=True, exist_ok=True)
+        for folder in (self.archive.parent, self.incomplete):
+            folder.mkdir(parents=True, exist_ok=True)
+            hide_folder(folder)
+
+    @property
+    def convert_progress(self) -> Path:
+        """Where ffmpeg writes how far an audio conversion has got (yt-dlp reports only its start and end)."""
+        return self.job_dir / "convert.progress"
 
 
 @dataclass(frozen=True)
@@ -226,33 +238,25 @@ def format_sort(options: DownloadOptions) -> str:
 
 
 def folder_template(source: Source) -> str:
-    """The folder under the download root, by link type (the original script's names for YouTube)."""
-    if source.site != "youtube":
-        return _site_folder(source)
-    if source.kind == "playlist":
-        return "%(playlist).100B"
-    if source.kind == "video":
-        return "Single Videos"
-    if source.kind == "short":
-        return "Shorts"
+    """The folder under the download root: the root itself for one video, a folder of its own for several.
+
+    A video, Short, or song goes straight into the root ("."). A playlist, channel, or profile gets a
+    folder named after it, YouTube's as the original script named them. A post or another page gets
+    one when it holds several videos, which yt-dlp then reports as a playlist; with one video it names
+    no playlist and the "." default keeps the file in the root. An empty default would not: the file
+    name would then start with "/" and land at the top of the drive.
+    """
+    if source.kind in ("video", "short"):
+        return "."
     if source.kind == "channel":
         tab = CHANNEL_TABS.get(source.tab, "")
         sub = escape_template(tab) if tab else "%(playlist_title|Videos).100B"
         return f"%(channel,uploader,playlist_uploader|Channel).100B/{sub}"
-    return _site_folder(source)
-
-
-def _site_folder(source: Source) -> str:
-    """Another site's folder: "<Site>/Shorts", "<Site>/Single Videos", "<Site>/<user>", or by playlist."""
-    if source.kind in ("short", "post", "profile"):
-        site = site_by_key(source.site) or resolve_site(source.site)
-        label = escape_template(site.label)
-        if source.kind == "short":
-            return f"{label}/Shorts"
-        if source.kind == "post":
-            return f"{label}/Single Videos"
-        return f"{label}/%(uploader,channel,playlist_uploader,playlist_title|Profile).100B"
-    return "%(extractor_key|Site).60B/%(playlist_title,playlist|Single Videos).100B"
+    if source.kind == "playlist" and source.site == "youtube":
+        return "%(playlist).100B"
+    if source.kind == "profile":
+        return "%(uploader,channel,playlist_uploader,playlist_title|Profile).100B"
+    return "%(playlist_title,playlist|.).100B"
 
 
 def output_template(source: Source, options: DownloadOptions) -> str:
@@ -370,7 +374,7 @@ def download_command(url: str, source: Source, options: DownloadOptions, tools: 
         "--continue",
         "--part",
         "--no-overwrites",
-        "--download-archive", str(paths.archive),
+        *([] if options.ignore_archive else ["--download-archive", str(paths.archive)]),
         "--paths", str(root),
         "--paths", f"temp:{paths.incomplete}",
         "--output", output_template(source, options),
@@ -378,6 +382,10 @@ def download_command(url: str, source: Source, options: DownloadOptions, tools: 
         "--concurrent-fragments", str(options.fragments),
     ]
     command += media_args(source, options)
+    if options.kind == "audio":
+        # ffmpeg's own progress, written as it converts; forward slashes, since yt-dlp splits these
+        # arguments like a shell, and quotes for the spaces in the app's data folder.
+        command += ["--postprocessor-args", f'ExtractAudio+ffmpeg_o:-progress "{paths.convert_progress.as_posix()}"']
     command += network_args(options)
     command += auth_args(auth)
     if options.items:

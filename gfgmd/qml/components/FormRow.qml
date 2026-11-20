@@ -11,10 +11,8 @@ GridLayout {
     property string hint: ""
     property int labelWidth: 170
     // Narrow rows stack the label above the control. The 60 px gap between the two thresholds
-    // stops the row from flipping back and forth as its own width settles. The choice waits until
-    // the layout pass is over (Qt.callLater): a grid passes its rows through small in-between widths
-    // while it lays them out, and stacking on those changed the layout, which passed through them
-    // again, forever (the Options panel froze in two columns).
+    // stops the row from flipping back and forth as its own width settles, and the choice waits
+    // until the layout pass is over (Qt.callLater) so it is made on the settled width.
     property bool stacked: false
     function _restack() {
         if (!row.stacked && row.width > 0 && row.width < 420) row.stacked = true
@@ -63,6 +61,11 @@ GridLayout {
     RowLayout {
         id: slot
         Layout.fillWidth: !row.stacked || row._labelAbove
+        // A layout's widest is its children's widest, so a control that can't stretch (a switch, a
+        // row of check boxes) would cap the whole row at label plus control. The grid couldn't widen
+        // the row, it stacked as if narrow, stacking let it widen, and it unstacked again, without
+        // end (the Options panel blinked, and froze before the choice waited for the layout pass).
+        Layout.maximumWidth: Number.POSITIVE_INFINITY
         Layout.alignment: Qt.AlignTop
         spacing: Theme.spaceSm
     }

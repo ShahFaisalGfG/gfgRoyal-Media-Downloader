@@ -3,8 +3,8 @@ splash logo, the readme logo, and the .ico for the exe and the installers.
 
 The app shares the gfgRoyal icon family: a rounded tile with a diagonal gradient and a bold white
 symbol, no text, so the icon stays recognisable at 16 px. Each app has its own colours and symbol;
-the downloader keeps the rose-to-orange of its portfolio card and draws a play triangle with a
-download arrow below it.
+the downloader's gradient ends in the app's rose accent (Theme.accentFill), and its symbol is a
+rounded play triangle with a round download badge on its corner.
 
 Run from any folder:  python scripts/make_icons.py
 """
@@ -16,13 +16,14 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QRectF, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QImageWriter, QLinearGradient, QPainter, QPainterPath  # noqa: E402
+from PySide6.QtGui import (QColor, QGuiApplication, QImage, QImageWriter, QLinearGradient, QPainter,  # noqa: E402
+                           QPainterPath, QPen)
 
 # Resolved from this script's location (scripts/), so it runs from any working directory.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ICON_DIR = os.path.join(_REPO_ROOT, "gfgmd", "assets", "icons")
 os.makedirs(ICON_DIR, exist_ok=True)
-TOP, BOTTOM = "#f43f5e", "#f97316"  # rose to orange
+TOP, BOTTOM = "#f43f5e", "#be123c"  # rose to the app's accent, so the icon matches its buttons
 PNGS = {
     "Square44x44Logo.targetsize-16.png": 16,
     "Square44x44Logo.targetsize-20.png": 20,
@@ -54,38 +55,69 @@ def draw_tile(p: QPainter, size: float, top: str, bottom: str) -> None:
     p.fillPath(path, grad)
 
 
-def draw_symbol(p: QPainter, s: float) -> None:
-    """A white play triangle with a download arrow and its tray line beneath it.
+def _round_pen(color: QColor, width: float) -> QPen:
+    pen = QPen(color, width)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    return pen
 
-    Below 32 px only the play triangle and arrow are drawn, larger, so the symbol stays readable.
+
+def draw_play(p: QPainter, cx: float, cy: float, height: float) -> None:
+    """A white play triangle with rounded corners, centred by eye on (cx, cy).
+
+    The corners come from a round-joined stroke around a smaller triangle, so they stay round at
+    every size. A triangle's visual centre sits left of its box's centre, so it is drawn a little left.
     """
+    corner = height * 0.12
+    inner = height - 3.4 * corner
+    width = inner * 0.92
+    left = cx - width * 0.42
+    path = QPainterPath()
+    path.moveTo(left, cy - inner / 2)
+    path.lineTo(left + width, cy)
+    path.lineTo(left, cy + inner / 2)
+    path.closeSubpath()
     white = QColor("white")
+    p.setPen(_round_pen(white, 2 * corner))
+    p.setBrush(white)
+    p.drawPath(path)
     p.setPen(Qt.PenStyle.NoPen)
-    small = s < 32
-    # Play triangle, upper half.
-    play = QPainterPath()
-    left, top = s * (0.36 if small else 0.38), s * (0.20 if small else 0.18)
-    height = s * (0.36 if small else 0.30)
-    play.moveTo(left, top)
-    play.lineTo(left + height * 0.9, top + height / 2)
-    play.lineTo(left, top + height)
-    play.closeSubpath()
-    p.fillPath(play, white)
-    # Download arrow: a shaft and a head pointing down.
-    shaft_w = s * (0.11 if small else 0.08)
-    shaft_top = top + height + s * 0.04
-    head_top = s * (0.66 if small else 0.62)
-    p.fillRect(QRectF(s / 2 - shaft_w / 2, shaft_top, shaft_w, head_top - shaft_top), white)
-    head = QPainterPath()
-    half = s * (0.17 if small else 0.14)
-    head.moveTo(s / 2 - half, head_top)
-    head.lineTo(s / 2 + half, head_top)
-    head.lineTo(s / 2, head_top + half * 1.05)
-    head.closeSubpath()
-    p.fillPath(head, white)
-    if not small:
-        # The tray line the arrow lands on.
-        p.fillRect(QRectF(s * 0.28, s * 0.80, s * 0.44, s * 0.055), white)
+
+
+def draw_symbol(p: QPainter, s: float) -> None:
+    """A rounded play triangle with a white download badge on its lower right.
+
+    The badge sits in a ring of the tile's darker colour, so it reads as a badge, not part of the
+    triangle. Up to 24 px the badge is larger and its arrow bolder and shorter, so it stays readable.
+    """
+    small = s <= 24
+    draw_play(p, s * 0.45, s * 0.45, s * (0.52 if small else 0.50))
+    centre = QPointF(s * 0.70, s * 0.70)
+    radius = s * (0.20 if small else 0.17)
+    p.setBrush(QColor(BOTTOM))
+    gap = s * (0.03 if small else 0.035)
+    p.drawEllipse(centre, radius + gap, radius + gap)
+    p.setBrush(QColor("white"))
+    p.drawEllipse(centre, radius, radius)
+    if s <= 20:
+        # A few pixels wide, strokes blur together: a solid triangle pointing down reads as the arrow.
+        head = QPainterPath()
+        half = radius * 0.58
+        head.moveTo(centre.x() - half, centre.y() - half * 0.55)
+        head.lineTo(centre.x() + half, centre.y() - half * 0.55)
+        head.lineTo(centre.x(), centre.y() + half * 0.75)
+        head.closeSubpath()
+        p.fillPath(head, QColor(BOTTOM))
+        return
+    # The arrow: a shaft and an open head, round-capped, in the tile's colour.
+    p.setPen(_round_pen(QColor(BOTTOM), s * (0.075 if small else 0.045)))
+    shaft_top = centre.y() - radius * (0.38 if small else 0.48)
+    tip = centre.y() + radius * (0.42 if small else 0.45)
+    head = radius * (0.40 if small else 0.42)
+    p.drawLine(QPointF(centre.x(), shaft_top), QPointF(centre.x(), tip))
+    p.drawPolyline([QPointF(centre.x() - head, tip - head * 0.95), QPointF(centre.x(), tip),
+                    QPointF(centre.x() + head, tip - head * 0.95)])
+    p.setPen(Qt.PenStyle.NoPen)
 
 
 def render(size: int) -> QImage:
