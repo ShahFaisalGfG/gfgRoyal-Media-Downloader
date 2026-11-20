@@ -44,6 +44,11 @@ AppWindow {
         function onSaveFinished(ok, message) { if (message.length > 0) prefsToast.show(message) }
         function onOptimizeFinished(message) { optimizeResult.text = message }
     }
+    // While this window is the one in use, the app's notices show here (the main window shows them otherwise).
+    Connections {
+        target: appController
+        function onNotice(message) { if (prefsWin.active) prefsToast.show(message) }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -67,16 +72,18 @@ AppWindow {
                     padding: Theme.spaceSm
                     focus: true
                     focusPolicy: Qt.TabFocus
-                    Accessible.role: Accessible.List
+                    Accessible.role: Accessible.PageTabList
                     Accessible.name: "Preference sections"
                     // The arrow keys are keyboard use too, so they bring up the ring.
                     Keys.onUpPressed: {
                         nav.decrementCurrentIndex()
                         navBox.focusReason = Qt.TabFocusReason
+                        navBox.Accessible.announce(prefsWin.sections[nav.currentIndex].name)
                     }
                     Keys.onDownPressed: {
                         nav.incrementCurrentIndex()
                         navBox.focusReason = Qt.TabFocusReason
+                        navBox.Accessible.announce(prefsWin.sections[nav.currentIndex].name)
                     }
 
                     contentItem: ListView {
@@ -98,6 +105,9 @@ AppWindow {
                                 navBox.forceActiveFocus(Qt.MouseFocusReason)
                             }
                             Accessible.name: navItem.modelData.name
+                            Accessible.role: Accessible.PageTab
+                            Accessible.selectable: true
+                            Accessible.selected: navItem.highlighted
 
                             contentItem: RowLayout {
                                 spacing: Theme.spaceSm
@@ -107,6 +117,7 @@ AppWindow {
                                     color: navItem.highlighted ? Theme.accent : Theme.textMuted
                                 }
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     text: navItem.modelData.name
                                     font.family: Theme.fontFamily
@@ -167,7 +178,7 @@ AppWindow {
 
                         SettingRow {
                             label: "Start with Windows"
-                            hint: "Starts in the tray so subscriptions keep being checked. Works in the installed app."
+                            hint: "Starts in the tray so subscriptions keep being checked. Needs the installed version of the app."
                             AppSwitch { checked: prefsWin.v("startup.start_with_windows"); accessibleName: "Start with Windows"; onToggled: prefsWin.save("startup.start_with_windows", checked) }
                         }
                         SettingRow {
@@ -261,7 +272,7 @@ AppWindow {
                         }
                         SettingRow {
                             label: "Parts at once"
-                            hint: "Fragments of one video fetched in parallel. Automatic is 8; Optimize measures your connection."
+                            hint: "How many pieces of one video download at the same time. Automatic is 8; Optimize for this PC finds the fastest."
                             fillControl: true
                             StyledComboBox {
                                 Layout.fillWidth: true
@@ -297,6 +308,7 @@ AppWindow {
                             Accessible.name: "Speed test progress"
                         }
                         Text {
+                            textFormat: Text.PlainText
                             id: optimizeResult
                             Layout.fillWidth: true
                             visible: text.length > 0
@@ -307,7 +319,7 @@ AppWindow {
                         }
                         SettingRow {
                             label: "Attempts"
-                            hint: "Temporary failures (a dropped connection) are retried with growing waits up to five minutes. 0 keeps trying until the download finishes or you stop it."
+                            hint: "After a temporary problem (a dropped connection) the app tries again, waiting longer each time, up to five minutes. 0 keeps trying until the download finishes or you stop it."
                             StyledSpinBox {
                                 from: 0
                                 to: 1000
@@ -343,26 +355,26 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Video"
-                        description: "The starting choices for video presets and the Options panel."
+                        description: "The starting choices in Download options. The Download button uses the preset next to it, which sets its own quality and file type."
                         iconName: "video"
 
                         SettingRow {
-                            label: "Container"
+                            label: "File type"
                             fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.container; value: prefsWin.v("formats.container"); accessibleName: "Container"; onActivated: prefsWin.save("formats.container", currentValue) }
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.container; value: prefsWin.v("formats.container"); accessibleName: "File type"; onActivated: prefsWin.save("formats.container", currentValue) }
                         }
                         SettingRow {
-                            label: "Codecs"
+                            label: "Compatibility"
                             fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.codec; value: prefsWin.v("formats.codec_profile"); accessibleName: "Codec preference"; onActivated: prefsWin.save("formats.codec_profile", currentValue) }
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.codec; value: prefsWin.v("formats.codec_profile"); accessibleName: "Compatibility"; onActivated: prefsWin.save("formats.codec_profile", currentValue) }
                         }
                         SettingRow {
                             label: "Audio tracks"
-                            hint: "Sites such as YouTube add dubbed languages to some videos. Extra tracks need MP4 or MKV."
+                            hint: "Sites such as YouTube add dubbed languages to some videos. Extra languages need MP4 or MKV."
                             fillControl: true
                             StyledComboBox {
                                 Layout.fillWidth: true
-                                // "Every language" needs a video's own list, so it's offered in the Options panel only.
+                                // "Every language" needs a video's own list, so it's offered in Download options only.
                                 model: prefsController.options.audioTracks.slice(0, 2)
                                 value: prefsWin.v("formats.audio_tracks") === "original" ? "original" : "languages"
                                 accessibleName: "Audio tracks"
@@ -372,11 +384,12 @@ AppWindow {
                         SettingRow {
                             visible: prefsWin.v("formats.audio_tracks") !== "original"
                             label: "Extra audio languages"
-                            hint: "Language codes, comma separated, such as es, pt-BR. A video without them keeps its original track."
+                            hint: "Short language codes separated by commas, such as es (Spanish), pt-BR. A video without them keeps only its original language."
                             fillControl: true
                             StyledTextField {
                                 Layout.fillWidth: true
                                 placeholderText: "es, fr"
+                                accessibleName: "Extra audio languages"
                                 text: prefsWin.v("formats.audio_langs").join(", ")
                                 onEditingFinished: prefsWin.save("formats.audio_langs",
                                     text.split(",").map(code => code.trim()).filter(code => code.length > 0))
@@ -391,14 +404,15 @@ AppWindow {
                             visible: prefsWin.v("formats.subtitles") === "sidecar" || prefsWin.v("formats.subtitles") === "both"
                             label: "Subtitle files"
                             fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.subtitleFormat; value: prefsWin.v("formats.subtitle_format"); accessibleName: "Subtitle file format"; onActivated: prefsWin.save("formats.subtitle_format", currentValue) }
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.subtitleFormat; value: prefsWin.v("formats.subtitle_format"); accessibleName: "Subtitle file type"; onActivated: prefsWin.save("formats.subtitle_format", currentValue) }
                         }
                         SettingRow {
                             label: "Subtitle languages"
-                            hint: "Comma separated; en.* is every English variant."
+                            hint: "Short language codes separated by commas, without spaces: en.* is every kind of English."
                             fillControl: true
                             StyledTextField {
                                 Layout.fillWidth: true
+                                accessibleName: "Subtitle languages"
                                 text: prefsWin.v("formats.subtitle_langs")
                                 onEditingFinished: if (text.trim().length > 0) prefsWin.save("formats.subtitle_langs", text.trim())
                             }
@@ -408,19 +422,20 @@ AppWindow {
                             AppSwitch { checked: prefsWin.v("formats.auto_subtitles"); accessibleName: "Automatic captions"; onToggled: prefsWin.save("formats.auto_subtitles", checked) }
                         }
                         SettingRow {
-                            label: "Embed the thumbnail (the cover, for audio)"
-                            AppSwitch { checked: prefsWin.v("formats.embed_thumbnail"); accessibleName: "Embed the thumbnail"; onToggled: prefsWin.save("formats.embed_thumbnail", checked) }
+                            label: "Put the thumbnail in the file (the cover, for songs)"
+                            AppSwitch { checked: prefsWin.v("formats.embed_thumbnail"); accessibleName: "Put the thumbnail in the file"; onToggled: prefsWin.save("formats.embed_thumbnail", checked) }
                         }
                         SettingRow {
-                            label: "Embed details (title, uploader, date)"
-                            AppSwitch { checked: prefsWin.v("formats.embed_metadata"); accessibleName: "Embed details"; onToggled: prefsWin.save("formats.embed_metadata", checked) }
+                            label: "Put the title, uploader, and date in the file"
+                            AppSwitch { checked: prefsWin.v("formats.embed_metadata"); accessibleName: "Put the details in the file"; onToggled: prefsWin.save("formats.embed_metadata", checked) }
                         }
                         SettingRow {
-                            label: "Embed chapters"
-                            AppSwitch { checked: prefsWin.v("formats.embed_chapters"); accessibleName: "Embed chapters"; onToggled: prefsWin.save("formats.embed_chapters", checked) }
+                            label: "Put chapter marks in the file"
+                            AppSwitch { checked: prefsWin.v("formats.embed_chapters"); accessibleName: "Put chapter marks in the file"; onToggled: prefsWin.save("formats.embed_chapters", checked) }
                         }
                         SettingRow {
                             label: "SponsorBlock (YouTube)"
+                            hint: "Cut or mark sponsor messages and reminders that SponsorBlock's community has tagged."
                             fillControl: true
                             StyledComboBox { Layout.fillWidth: true; model: prefsController.options.sponsorblock; value: prefsWin.v("formats.sponsorblock"); accessibleName: "SponsorBlock"; onActivated: prefsWin.save("formats.sponsorblock", currentValue) }
                         }
@@ -438,7 +453,12 @@ AppWindow {
                                     onToggled: {
                                         var list = prefsWin.v("formats.sponsorblock_categories").filter(code => code !== modelData.code)
                                         if (checked) list.push(modelData.code)
-                                        if (list.length > 0) prefsWin.save("formats.sponsorblock_categories", list)
+                                        if (list.length > 0) {
+                                            prefsWin.save("formats.sponsorblock_categories", list)
+                                        } else {
+                                            checked = true
+                                            prefsToast.show("Keep at least one kind of segment ticked, or turn SponsorBlock off.")
+                                        }
                                     }
                                 }
                             }
@@ -453,7 +473,7 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Audio"
-                        description: "The starting choices for audio presets and the Options panel."
+                        description: "The starting choices in Download options. The Download button uses the preset next to it, which sets its own format and quality."
                         iconName: "audio"
 
                         SettingRow {
@@ -464,28 +484,28 @@ AppWindow {
                         SettingRow {
                             visible: prefsController.losslessAudio.indexOf(prefsWin.v("formats.audio_format")) < 0
                             label: "Quality"
-                            hint: "Sites stream audio at about 128-256 kbps; a higher bitrate keeps all of it but can't add detail. "
-                                + "M4A and Opus keep the site's own stream unchanged when it already is one."
+                            hint: "Higher numbers sound better and make bigger files; above 256 the sound can't get better than the site's. "
+                                + "M4A and Opus keep the site's sound as it is when they can."
                             fillControl: true
                             StyledComboBox { Layout.fillWidth: true; model: prefsController.options.audioQuality; value: prefsWin.v("formats.audio_quality"); accessibleName: "Audio quality"; onActivated: prefsWin.save("formats.audio_quality", currentValue) }
                         }
                         SettingRow {
                             label: "Cover"
-                            hint: "The video's thumbnail becomes the song's cover (beside the file for WAV)."
+                            hint: "The video's thumbnail becomes the song's cover (WAV songs get it as a picture next to the file)."
                             fillControl: true
                             StyledComboBox { Layout.fillWidth: true; model: prefsController.options.cover; value: prefsWin.v("formats.cover"); accessibleName: "Cover shape"; onActivated: prefsWin.save("formats.cover", currentValue) }
                         }
                         SettingRow {
                             label: "Lyrics"
-                            hint: "Saves timed lyrics (a .lrc file the players show line by line) from the site's captions."
+                            hint: "Saves lyrics that the player shows line by line as the song plays, from the site's captions."
                             AppSwitch { checked: prefsWin.v("formats.lyrics"); accessibleName: "Save lyrics"; onToggled: prefsWin.save("formats.lyrics", checked) }
                         }
                         SettingRow {
                             visible: prefsWin.v("formats.lyrics")
                             label: "Look up lyrics online"
-                            hint: "When a song has no captions, asks LRCLIB (lrclib.net, a free lyrics database) by title, "
-                                + "artist, album, and length. Only lyrics timed to the same length are used."
-                            AppSwitch { checked: prefsWin.v("formats.lyrics_online"); accessibleName: "Look up lyrics on LRCLIB"; onToggled: prefsWin.save("formats.lyrics_online", checked) }
+                            hint: "When a song has no captions, asks LRCLIB, a free online lyrics service, using the title, "
+                                + "artist, album, and length. Only lyrics that match the song's length are used."
+                            AppSwitch { checked: prefsWin.v("formats.lyrics_online"); accessibleName: "Look up lyrics online"; onToggled: prefsWin.save("formats.lyrics_online", checked) }
                         }
                     }
                 }
@@ -500,7 +520,7 @@ AppWindow {
                         iconName: "globe"
 
                         SettingRow {
-                            label: "Speed limit (KB/s)"
+                            label: "Speed limit (kilobytes per second)"
                             hint: "The total for all downloads; 0 is no limit. Live recordings are never slowed."
                             StyledSpinBox {
                                 from: 0
@@ -512,6 +532,7 @@ AppWindow {
                             }
                         }
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: "Limits by time of day (for example, slower during work hours):"
                             font.family: Theme.fontFamily
@@ -527,8 +548,9 @@ AppWindow {
                                 required property int index
                                 Layout.fillWidth: true
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
-                                    text: windowRow.modelData.start + " to " + windowRow.modelData.end + ": " + windowRow.modelData.limit_kib + " KB/s"
+                                    text: windowRow.modelData.start + " to " + windowRow.modelData.end + ": " + windowRow.modelData.limit_kib + " kilobytes per second"
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontBody
                                     color: Theme.text
@@ -549,9 +571,17 @@ AppWindow {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: Theme.spaceSm
-                            StyledTextField { id: windowStart; Layout.preferredWidth: 80; placeholderText: "09:00"; toolTipText: "From (24-hour time)" }
-                            StyledTextField { id: windowEnd; Layout.preferredWidth: 80; placeholderText: "18:00"; toolTipText: "Until (24-hour time); may pass midnight" }
+                            StyledTextField { id: windowStart; Layout.preferredWidth: 80; placeholderText: "09:00"; accessibleName: "Limit from"; toolTipText: "From (24-hour time)" }
+                            StyledTextField { id: windowEnd; Layout.preferredWidth: 80; placeholderText: "18:00"; accessibleName: "Limit until"; toolTipText: "Until (24-hour time); may pass midnight" }
                             StyledSpinBox { id: windowLimit; from: 16; to: 1048576; stepSize: 128; value: 512; Accessible.name: "Limit in kilobytes per second" }
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "KB/s"
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontCaption
+                                color: Theme.textMuted
+                                Accessible.ignored: true
+                            }
                             AppButton {
                                 text: "Add"
                                 iconName: "add"
@@ -559,7 +589,7 @@ AppWindow {
                                 onClicked: {
                                     var clock = /^([01]\d|2[0-3]):[0-5]\d$/
                                     if (!clock.test(windowStart.text) || !clock.test(windowEnd.text) || windowStart.text === windowEnd.text) {
-                                        prefsToast.show("Times must look like 09:00 and differ.")
+                                        prefsToast.show("Type both times like 09:00 (24-hour), and make them different.")
                                         return
                                     }
                                     var list = prefsWin.v("network.limit_windows").slice()
@@ -571,34 +601,36 @@ AppWindow {
                             }
                         }
                         SettingRow {
-                            label: "Start the queue at"
-                            hint: "Holds new downloads until this time once (24-hour, such as 02:00); empty starts at once."
+                            label: "Start downloads at"
+                            hint: "Downloads wait until this time once (24-hour, such as 02:00). Leave empty to start right away."
                             fillControl: true
                             StyledTextField {
                                 Layout.fillWidth: true
                                 text: prefsWin.v("schedule.queue_start")
-                                placeholderText: "Start at once"
+                                placeholderText: "Start right away"
+                                accessibleName: "Start downloads at"
                                 onEditingFinished: {
                                     var value = text.trim()
                                     if (value === "" || /^([01]\d|2[0-3]):[0-5]\d$/.test(value)) prefsWin.save("schedule.queue_start", value)
-                                    else prefsToast.show("The time must look like 02:00.")
+                                    else prefsToast.show("Type the time like 02:00 (24-hour).")
                                 }
                             }
                         }
                         SettingRow {
                             label: "Proxy"
-                            hint: "http://, https://, or socks5://host:port; empty connects directly."
+                            hint: "Only if your network needs one, such as http://proxy:8080. Leave empty to connect directly."
                             fillControl: true
                             StyledTextField {
                                 Layout.fillWidth: true
                                 text: prefsWin.v("network.proxy")
                                 placeholderText: "No proxy"
+                                accessibleName: "Proxy"
                                 onEditingFinished: prefsWin.save("network.proxy", text.trim())
                             }
                         }
                         SettingRow {
                             label: "Connect over IPv4 only"
-                            hint: "Helps when IPv6 is slow or blocked."
+                            hint: "Try this if downloads are slow or fail to connect."
                             AppSwitch { checked: prefsWin.v("network.force_ipv4"); accessibleName: "Connect over IPv4 only"; onToggled: prefsWin.save("network.force_ipv4", checked) }
                         }
                     }
@@ -614,9 +646,9 @@ AppWindow {
                         iconName: "bell"
 
                         SettingRow {
-                            label: "Check new subscriptions"
+                            label: "How often new subscriptions are checked"
                             fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.interval; value: prefsWin.v("subscriptions.interval_hours"); accessibleName: "Check interval"; onActivated: prefsWin.save("subscriptions.interval_hours", currentValue) }
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.interval; value: prefsWin.v("subscriptions.interval_hours"); accessibleName: "How often new subscriptions are checked"; onActivated: prefsWin.save("subscriptions.interval_hours", currentValue) }
                         }
                         SettingRow {
                             label: "Download new uploads automatically"
@@ -632,19 +664,19 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Tools"
-                        description: "yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube's player challenges. The app keeps its own copies current; sites change often, and a fresh yt-dlp keeps up."
+                        description: "The app downloads and converts with three free tools: yt-dlp, FFmpeg, and Deno. It keeps its own copies up to date, since sites change often."
                         iconName: "repair"
 
                         SettingRow {
-                            label: "Source"
+                            label: "Where the tools come from"
                             fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.toolSource; value: prefsWin.v("tools.source"); accessibleName: "Tool source"; onActivated: prefsWin.save("tools.source", currentValue) }
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.toolSource; value: prefsWin.v("tools.source"); accessibleName: "Where the tools come from"; onActivated: prefsWin.save("tools.source", currentValue) }
                         }
                         SettingRow {
-                            label: "yt-dlp releases"
+                            label: "Download tool updates"
                             fillControl: true
                             visible: prefsWin.v("tools.source") === "managed"
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.toolChannel; value: prefsWin.v("tools.channel"); accessibleName: "yt-dlp release channel"; onActivated: prefsWin.save("tools.channel", currentValue) }
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.toolChannel; value: prefsWin.v("tools.channel"); accessibleName: "Download tool updates"; onActivated: prefsWin.save("tools.channel", currentValue) }
                         }
                         SettingRow {
                             label: "Update the tools automatically"
@@ -662,6 +694,7 @@ AppWindow {
                                     Layout.fillWidth: true
                                     text: prefsWin.v(customRow.modelData[1])
                                     placeholderText: "C:\\Tools\\" + customRow.modelData[0].toLowerCase() + ".exe"
+                                    accessibleName: customRow.modelData[0] + " program file"
                                     onEditingFinished: prefsWin.save(customRow.modelData[1], text.trim())
                                 }
                             }
@@ -679,9 +712,10 @@ AppWindow {
                                     color: toolRow.modelData.origin === "missing" ? Theme.danger : Theme.success
                                 }
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     text: toolRow.modelData.label + "  " + (toolRow.modelData.version || "")
-                                        + "  ·  " + ({"managed": "the app's copy", "path": "on PATH", "custom": "your location", "missing": "not found"})[toolRow.modelData.origin]
+                                        + "  ·  " + ({"managed": "kept up to date by the app", "path": "installed on this PC", "custom": "where you chose", "missing": "not found"})[toolRow.modelData.origin]
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontBody
                                     color: Theme.text
@@ -703,8 +737,8 @@ AppWindow {
                             Layout.fillWidth: true
                             spacing: Theme.spaceSm
                             visible: prefsWin.v("tools.source") === "managed"
-                            AppButton { text: "Check for updates"; iconName: "sync"; enabled: !toolsController.busy; onClicked: toolsController.checkUpdates() }
-                            AppButton { text: toolsController.ready ? "Update all" : "Download tools"; iconName: "download"; enabled: !toolsController.busy && toolsController.canInstall; onClicked: toolsController.ready ? toolsController.updateAll() : toolsController.installMissing() }
+                            AppButton { text: "Check for tool updates"; iconName: "sync"; enabled: !toolsController.busy; onClicked: toolsController.checkUpdates() }
+                            AppButton { text: toolsController.ready ? "Update tools" : "Download tools"; iconName: "download"; enabled: !toolsController.busy && toolsController.canInstall; onClicked: toolsController.ready ? toolsController.updateAll() : toolsController.installMissing() }
                             AppButton { kind: "ghost"; iconName: "folderOpen"; toolTipText: "Open the tools folder"; onClicked: toolsController.openFolder() }
                         }
                         ProgressBar {
@@ -717,6 +751,7 @@ AppWindow {
                             Accessible.name: "Tool download progress"
                         }
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             visible: text.length > 0
                             text: toolsController.stage
@@ -736,8 +771,8 @@ AppWindow {
                         Layout.rightMargin: Theme.spaceLg
                         title: "Updates"
                         description: updateController.canSelfUpdate
-                            ? "The app asks GitHub at most once a day whether a newer version is out. The request carries only the app's name and version. An update installs only after its publisher signature and checksums match."
-                            : "This copy runs from an unpacked folder, so it can't replace itself. The app still tells you when a new version is out, with a link to download it."
+                            ? "The app asks GitHub at most once a day whether a newer version is out. The request carries only the app's name and version. An update installs only after the app confirms it came from the publisher and wasn't changed."
+                            : "This copy can't update itself because it isn't the installed version. The app still tells you when a new version is out, with a link to download it."
                         iconName: "sync"
 
                         SettingRow {
@@ -748,7 +783,7 @@ AppWindow {
                         SettingRow {
                             visible: updateController.canSelfUpdate
                             label: "Install updates automatically"
-                            hint: "Downloads in the background and installs when you quit. Not on a metered connection."
+                            hint: "Downloads in the background and installs when you quit. Waits while you're on mobile data or another limited connection."
                             AppSwitch { checked: prefsController.autoInstallUpdates; accessibleName: "Install updates automatically"; onToggled: prefsController.saveSettings({ "updates.auto_install": checked }) }
                         }
                         RowLayout {
@@ -762,6 +797,7 @@ AppWindow {
                                 onClicked: updateController.checkNow()
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 visible: text !== ""
                                 text: updateController.message
@@ -777,7 +813,7 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Logging"
-                        description: "Off by default. Logs stay on this PC and never contain sign-in cookies."
+                        description: "Off by default. Logs stay on this PC and never contain your sign-ins."
                         iconName: "info"
 
                         SettingRow {
@@ -785,7 +821,7 @@ AppWindow {
                             AppSwitch { checked: prefsWin.v("advanced.enable_logs"); accessibleName: "Save logs to a file"; onToggled: prefsWin.save("advanced.enable_logs", checked) }
                         }
                         SettingRow {
-                            label: "Detail"
+                            label: "How much to save"
                             fillControl: true
                             enabled: prefsWin.v("advanced.enable_logs")
                             StyledComboBox { Layout.fillWidth: true; model: prefsController.options.logLevel; value: prefsWin.v("advanced.log_level"); accessibleName: "Log detail"; onActivated: prefsWin.save("advanced.log_level", currentValue) }
@@ -819,10 +855,7 @@ AppWindow {
                     kind: "ghost"
                     text: "Reset to defaults"
                     toolTipText: "Every preference goes back to its default; saved presets, downloads, and sign-ins stay"
-                    onClicked: {
-                        prefsController.resetDefaults()
-                        appController.previewTheme(prefsController.theme)
-                    }
+                    onClicked: resetDialog.open()
                 }
                 Item { Layout.fillWidth: true }
                 AppButton {
@@ -831,6 +864,29 @@ AppWindow {
                     onClicked: prefsWin.close()
                 }
             }
+        }
+    }
+
+    AppDialog {
+        id: resetDialog
+        title: "Reset every preference?"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        defaultButton: Dialog.Cancel
+        width: 420
+        onAccepted: {
+            prefsController.resetDefaults()
+            appController.previewTheme(prefsController.theme)
+            prefsToast.show("Every preference is back to its default.")
+        }
+        Component.onCompleted: resetDialog.standardButton(Dialog.Ok).text = "Reset"
+        Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            text: "Folders, quality, speed limits, the proxy, and the start time go back to their defaults. Your presets, downloads, library, subscriptions, and sign-ins stay."
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            color: Theme.text
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -856,6 +912,8 @@ AppWindow {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        FocusScroll { flickable: section }
 
         ColumnLayout {
             id: column

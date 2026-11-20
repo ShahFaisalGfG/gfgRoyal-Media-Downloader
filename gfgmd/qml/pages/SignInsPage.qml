@@ -9,7 +9,7 @@ import "../components"
 
 // Sign in to sites so their private, members-only, and age-restricted videos (and Instagram or
 // Facebook posts) can download. Sign-ins stay encrypted on this PC; each download receives only
-// its own site's cookies, and only for as long as it runs.
+// its own site's sign-in, and only for as long as it runs.
 //
 // Sign in opens the site in the user's default browser (in a window of its own, on a profile of its
 // own); Done closes that window and saves the sign-in. Other ways to sign in are under "Other ways".
@@ -21,6 +21,7 @@ Item {
 
     function otherWays(siteKey, label) {
         methodDialog.siteKey = siteKey
+        methodDialog.siteLabel = label
         methodDialog.title = "Sign in to " + label
         methodDialog.open()
     }
@@ -31,10 +32,11 @@ Item {
         spacing: Theme.spaceLg
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: "Signing in lets the app download what a site shows only to your account. Your sign-in is "
                 + "saved encrypted for your Windows account on this PC, never sent anywhere else, and each "
-                + "download gets only its own site's cookies. Sign out here at any time."
+                + "download gets only the sign-in for its own site. Sign out here at any time."
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.textMuted
@@ -48,6 +50,7 @@ Item {
                 id: otherSite
                 Layout.fillWidth: true
                 placeholderText: "Another site: paste a link or type its address (example.com)"
+                accessibleName: "Another site's link or address"
                 onAccepted: addButton.clicked()
             }
             AppButton {
@@ -75,6 +78,12 @@ Item {
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             Accessible.role: Accessible.List
             Accessible.name: "Sites"
+            // Enter signs the current site in (again), as its main button does.
+            Keys.onReturnPressed: {
+                var row = signInsController.model.get(view.currentIndex)
+                if (row.siteKey !== undefined && !row.busy && !row.windowOpen && signInsController.browsers.length > 0)
+                    signInsController.openBrowserWindow(row.siteKey, "")
+            }
 
             delegate: Rectangle {
                 id: site
@@ -94,6 +103,8 @@ Item {
                 height: siteColumn.implicitHeight + 2 * Theme.spaceSm
                 radius: Theme.radius
                 color: siteHover.hovered || ListView.isCurrentItem ? Theme.surfaceHover : "transparent"
+                border.width: ListView.isCurrentItem && view.activeFocus ? 2 : 0
+                border.color: Theme.focusRing
                 Accessible.role: Accessible.ListItem
                 Accessible.name: site.label + ", " + site.statusText
                 HoverHandler { id: siteHover }
@@ -121,6 +132,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: 3
                             Text {
+                                textFormat: Text.PlainText
                                 text: site.label
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontBody
@@ -128,6 +140,7 @@ Item {
                                 color: Theme.text
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 text: [site.statusText, site.methodText, site.detail].filter(p => p.length > 0).join("  ·  ")
                                 font.family: Theme.fontFamily
@@ -142,7 +155,7 @@ Item {
                             kind: "ghost"
                             text: "Refresh"
                             iconName: "refresh"
-                            toolTipText: "Read the sign-in from its browser profile again (no window opens)"
+                            toolTipText: "Pick up the sign-in again from that browser (no window opens)"
                             onClicked: signInsController.refresh(site.siteKey)
                         }
                         AppButton {
@@ -173,7 +186,7 @@ Item {
                             kind: "ghost"
                             compact: true
                             iconName: "more"
-                            toolTipText: "Other ways to sign in (another browser, the companion extension, Firefox, a cookies file)"
+                            toolTipText: "Other ways to sign in (another browser, the browser extension, Firefox, or a file saved from your browser)"
                             onClicked: page.otherWays(site.siteKey, site.label)
                         }
                         AppButton {
@@ -217,6 +230,7 @@ Item {
     AppDialog {
         id: methodDialog
         property string siteKey: ""
+        property string siteLabel: ""
         property string method: "browser"
         standardButtons: Dialog.Ok | Dialog.Cancel
         defaultButton: Dialog.Ok
@@ -253,6 +267,7 @@ Item {
                     accessibleName: "Browser"
                 }
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: "A separate window opens on the site's sign-in page. Sign in, then click Done here."
                     font.family: Theme.fontFamily
@@ -263,17 +278,18 @@ Item {
             }
             RadioButton {
                 checked: methodDialog.method === "extension"
-                text: "From your browser with the companion extension"
+                text: "From your browser, with the app's browser extension"
                 font.family: Theme.fontFamily
                 onClicked: methodDialog.method = "extension"
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.leftMargin: Theme.spaceXl
                 Layout.fillWidth: true
                 visible: methodDialog.method === "extension"
-                text: "Open the site signed in, click the extension's button, and choose Sign this site in. "
-                    + "Works in Chrome, Edge, Opera, and Brave; for YouTube, a private window keeps the sign-in "
-                    + "from changing while you browse."
+                text: "Open the site in your browser while signed in, click the extension's button, and choose "
+                    + "Sign " + methodDialog.siteLabel + " in to the app. Works in Chrome, Edge, Opera, Brave, and Vivaldi; "
+                    + "for YouTube, sign in from a private window so browsing YouTube later doesn't end the app's sign-in."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted
@@ -294,16 +310,17 @@ Item {
             }
             RadioButton {
                 checked: methodDialog.method === "file"
-                text: "Import a cookies.txt file"
+                text: "Import a sign-in file from your browser"
                 font.family: Theme.fontFamily
                 onClicked: methodDialog.method = "file"
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.leftMargin: Theme.spaceXl
                 Layout.fillWidth: true
                 visible: methodDialog.method === "file"
-                text: "A Netscape-format file exported from your browser. Only this site's cookies are kept, "
-                    + "encrypted; the app then offers to move the original file to the Recycle Bin."
+                text: "A cookies.txt file saved by a browser extension. Only this site's sign-in is kept, "
+                    + "protected on this PC; the app then offers to move the original file to the Recycle Bin."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted
@@ -314,8 +331,8 @@ Item {
 
     FileDialog {
         id: cookiesDialog
-        title: "Choose a cookies.txt file"
-        nameFilters: ["Cookies files (*.txt)", "All files (*)"]
+        title: "Choose the sign-in file (cookies.txt)"
+        nameFilters: ["Sign-in files (*.txt)", "All files (*)"]
         onAccepted: signInsController.importFile(methodDialog.siteKey, appController.localPath(selectedFile.toString()))
     }
 
@@ -330,15 +347,19 @@ Item {
     AppDialog {
         id: deleteOriginal
         property string path: ""
-        title: "Move the cookies file to the Recycle Bin?"
+        title: "Move the sign-in file to the Recycle Bin?"
         standardButtons: Dialog.Yes | Dialog.No
         defaultButton: Dialog.Yes
         width: 440
         onAccepted: signInsController.deleteOriginal(deleteOriginal.path)
+        Component.onCompleted: {
+            deleteOriginal.standardButton(Dialog.Yes).text = "Move to Recycle Bin"
+            deleteOriginal.standardButton(Dialog.No).text = "Keep it"
+        }
         Text {
+            textFormat: Text.PlainText
             width: parent.width
-            text: "The app keeps its own encrypted copy. The original file gives access to your account to "
-                + "anyone who reads it."
+            text: "The app keeps its own protected copy. Anyone who opens the original file can use your account."
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.text

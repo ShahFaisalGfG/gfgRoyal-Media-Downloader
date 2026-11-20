@@ -6,6 +6,7 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 
 import "../components"
+import "../components/ListMenu.js" as ListMenu
 
 // Channels and playlists the app watches: their new uploads download on a schedule while the app
 // runs (it keeps running in the tray). Import from YouTube Takeout, or back up and restore.
@@ -40,7 +41,7 @@ Item {
                 kind: "ghost"
                 text: "Import"
                 iconName: "import"
-                toolTipText: "Subscribe from YouTube Takeout's subscriptions.csv or from this app's export"
+                toolTipText: "Subscribe from a YouTube subscriptions export (Google Takeout) or a file saved by this app"
                 onClicked: importDialog.open()
             }
             AppButton {
@@ -66,6 +67,23 @@ Item {
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             Accessible.role: Accessible.List
             Accessible.name: "Subscriptions"
+            // Space turns watching on or off, Enter checks now, and the Menu key or Shift+F10 (a context-menu
+            // request on Windows) opens the menu at the row.
+            Keys.onSpacePressed: {
+                var row = subscriptionsController.model.get(view.currentIndex)
+                if (row.subId !== undefined) subscriptionsController.setEnabled(row.subId, !row.active)
+            }
+            Keys.onReturnPressed: {
+                var row = subscriptionsController.model.get(view.currentIndex)
+                if (row.subId !== undefined && !row.checking) subscriptionsController.checkNow(row.subId)
+            }
+            ContextMenu.onRequested: function (position) {
+                var index = ListMenu.rowFor(view, position)
+                if (index < 0) return
+                view.currentIndex = index
+                var row = subscriptionsController.model.get(index)
+                if (row.subId !== undefined) subMenu.openFor(row.subId, row.url, row.autoDownload, view.currentItem)
+            }
 
             delegate: Rectangle {
                 id: sub
@@ -80,6 +98,7 @@ Item {
                 required property string lastText
                 required property string nextText
                 required property string resultText
+                required property bool failed
                 required property int newCount
                 required property bool checking
 
@@ -87,6 +106,8 @@ Item {
                 height: 72
                 radius: Theme.radius
                 color: subHover.hovered || ListView.isCurrentItem ? Theme.surfaceHover : "transparent"
+                border.width: ListView.isCurrentItem && view.activeFocus ? 2 : 0
+                border.color: Theme.focusRing
                 Accessible.role: Accessible.ListItem
                 Accessible.name: sub.title + ", " + sub.resultText
                 HoverHandler { id: subHover }
@@ -107,6 +128,7 @@ Item {
                         Layout.fillWidth: true
                         spacing: 3
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: sub.title
                             font.family: Theme.fontFamily
@@ -116,12 +138,17 @@ Item {
                             elide: Text.ElideRight
                         }
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
-                            text: [sub.site, sub.intervalText, "checked " + sub.lastText, "next " + sub.nextText,
+                            text: [sub.site, sub.intervalText,
+                                   sub.lastText === "Never" ? "not checked yet" : "checked " + sub.lastText,
+                                   sub.nextText === "Off" ? "not checking"
+                                       : sub.nextText === "Never" ? "next check soon" : "next check " + sub.nextText,
                                    sub.checking ? "Checking..." : sub.resultText].filter(p => p.length > 0).join("  ·  ")
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontCaption
-                            color: sub.resultText.startsWith("Check failed") ? Theme.danger : Theme.textMuted
+                            color: sub.failed
+                                ? Theme.danger : Theme.textMuted
                             elide: Text.ElideRight
                         }
                     }
@@ -129,7 +156,7 @@ Item {
                         visible: sub.newCount > 0 && !sub.autoDownload
                         text: "Download " + sub.newCount + " new"
                         iconName: "download"
-                        toolTipText: "Queue the new uploads this subscription found"
+                        toolTipText: "Add the new uploads this subscription found to Downloads"
                         onClicked: subscriptionsController.downloadNew(sub.subId)
                     }
                     BusyIndicator { visible: sub.checking; running: visible; implicitWidth: 24; implicitHeight: 24 }
@@ -169,11 +196,11 @@ Item {
         property int subId: -1
         property string url: ""
         property bool auto: true
-        function openFor(subId, url, auto) {
+        function openFor(subId, url, auto, at) {
             subMenu.subId = subId
             subMenu.url = url
             subMenu.auto = auto
-            subMenu.popup()
+            subMenu.openAt(at || null)
         }
         AppMenuItem { text: "Open in browser"; onTriggered: appController.openUrl(subMenu.url) }
         AppMenuItem { text: "Copy link"; onTriggered: appController.copyText(subMenu.url) }
@@ -202,7 +229,16 @@ Item {
         standardButtons: Dialog.Ok | Dialog.Cancel
         defaultButton: Dialog.Ok
         width: Math.min(page.width - 2 * Theme.spaceXl, 520)
+        // Set while the dialog opens again over a link it couldn't take, which stays for fixing.
+        property bool _again: false
+        Component.onCompleted: addDialog.standardButton(Dialog.Ok).text = "Subscribe"
         onOpened: {
+            if (addDialog._again) {
+                addDialog._again = false
+                link.selectInput()
+                return
+            }
+            link.errorText = ""
             link.text = ""
             link.selectInput()
             interval.value = prefsController.value("subscriptions.interval_hours")
@@ -211,6 +247,14 @@ Item {
             auto.checked = prefsController.value("subscriptions.auto_download")
         }
         onAccepted: {
+            var problem = subscriptionsController.linkProblem(link.text)
+            if (problem.length > 0) {
+                link.errorText = problem
+                addDialog._again = true
+                // Opened again once this close is done; opening it from here is ignored while it closes.
+                Qt.callLater(function () { addDialog.open() })
+                return
+            }
             var preset = prefsController.preset(presetBox.currentValue)
             subscriptionsController.add(link.text, preset, interval.currentValue, existing.checked, auto.checked)
         }
@@ -223,6 +267,7 @@ Item {
                 Layout.fillWidth: true
                 label: "Channel or playlist link"
                 placeholderText: "https://www.youtube.com/@channel"
+                onTextChanged: link.errorText = ""
             }
             FormRow {
                 Layout.fillWidth: true

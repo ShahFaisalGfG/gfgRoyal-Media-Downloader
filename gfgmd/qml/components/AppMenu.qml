@@ -18,6 +18,14 @@ Menu {
         menu.width = Math.min(Math.max(widest + menu.leftPadding + menu.rightPadding, 180), menu.maxWidth)
     }
 
+    // Open at a row (from the keyboard: the Menu key or Shift+F10), or at the mouse when `item` is null.
+    function openAt(item) {
+        if (item)
+            menu.popup(item, Theme.spaceXl, item.height / 2)
+        else
+            menu.popup()
+    }
+
     // Texts can change while the menu is closed (openFor() fills them in), so the width is
     // measured each time it opens.
     onAboutToShow: menu._fitWidth()

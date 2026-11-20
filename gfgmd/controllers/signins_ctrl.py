@@ -45,12 +45,14 @@ from gfgmd.utils.logging import write_log
 
 ROLES = ("siteKey", "label", "status", "statusText", "method", "methodText", "detail", "busy", "canRefresh", "known",
          "windowOpen", "library")
-_METHOD_TEXT = {"browser": "Browser window", "extension": "Companion extension", "firefox": "Firefox profile",
-                "file": "Cookies file"}
+_METHOD_TEXT = {"browser": "Browser window", "extension": "Browser extension", "firefox": "Firefox",
+                "file": "Imported file"}
 # Failures that mean a sign-in doesn't work (as opposed to a network hiccup during the check).
 _SIGNED_OUT = {"auth_required", "cookies_stale", "private_signin", "bot_check", "removed"}
 # A stale browser-window sign-in is re-read by itself at most this often per site.
 AUTO_REFRESH_SECONDS = 600
+# Far larger than any browser's cookies.txt export, so a bigger file is something else.
+_MAX_IMPORT_BYTES = 8 * 1024 * 1024
 
 
 class SignInsController(QObject):
@@ -106,8 +108,8 @@ class SignInsController(QObject):
             text = "https://" + text
         try:
             check_url(text)
-        except ValueError as error:
-            self.notice.emit(str(error))
+        except ValueError:
+            self.notice.emit("Type a site address, such as example.com, or paste a link from the site.")
             return ""
         host = text.split("://", 1)[1].split("/", 1)[0].split(":")[0]
         site = resolve_site(host)
@@ -122,10 +124,17 @@ class SignInsController(QObject):
         site = self._site(site_key)
         path = Path(file_path)
         try:
-            if path.stat().st_size > 8 * 1024 * 1024:
-                raise ValueError("That file is too large to be a cookies file")
-            cookies = import_cookies(path.read_text(encoding="utf-8-sig", errors="replace"), site)
-        except (OSError, ValueError) as error:
+            if path.stat().st_size > _MAX_IMPORT_BYTES:
+                self.notice.emit("That file is too large to be a sign-in file saved from a browser.")
+                return
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError as error:
+            write_log(f"Reading the sign-in file {path} failed: {error}", "critical")
+            self.notice.emit("That file couldn't be opened. Check that it still exists, then try again.")
+            return
+        try:
+            cookies = import_cookies(text, site)
+        except ValueError as error:  # its message says what the file lacks, in the user's words
             self.notice.emit(str(error))
             return
         self._save(site, cookies, "file")
@@ -135,7 +144,7 @@ class SignInsController(QObject):
     def deleteOriginal(self, path: str) -> None:
         """Move an imported cookies file to the Recycle Bin (it gives access to the account)."""
         if to_recycle_bin([path]):
-            self.notice.emit("The original cookies file is in the Recycle Bin.")
+            self.notice.emit("The sign-in file is in the Recycle Bin.")
 
     @Slot(str, str)
     def useFirefox(self, site_key: str, profile: str) -> None:
@@ -164,7 +173,8 @@ class SignInsController(QObject):
         try:
             process = open_window(browser, self._profile(site.key, browser.key), site.login_url)
         except SignInError as error:
-            self.notice.emit(str(error))
+            write_log(f"Opening the {site.label} sign-in window failed: {error}", "critical")
+            self.notice.emit(f"{browser.label} couldn't be opened. Try another browser under Other ways.")
             return
         self._windows[site.key] = (process, browser)
         self._watch.start()
@@ -215,13 +225,17 @@ class SignInsController(QObject):
                 close_window(process, browser, profile)
             return read_cookies(browser, profile)
 
+        # The reason is in the log already (the task runner writes it).
+        unreadable = (f"The app couldn't read your sign-in from {browser.label}. Close any windows opened for "
+                      "this sign-in, then try again.")
         self._runner.start(read, on_done=lambda cookies, s=site, b=browser: self._browser_done(s, b, cookies),
-                           on_error=lambda message, k=site_key: self._fail(k, message))
+                           on_error=lambda _message, k=site_key: self._fail(k, unreadable))
 
     def _browser_done(self, site: Site, browser: Browser, cookies: list[Cookie]) -> None:
         mine = drop_expired(for_site(cookies, site))
         if not signed_in(mine, site):
-            self._fail(site.key, f"No {site.label} sign-in was found in the window. Sign in, then close it.")
+            self._fail(site.key, f"The app found no {site.label} sign-in. Click Sign in, sign in to the site, "
+                                 "then click Done.")
             return
         self._save(site, mine, "browser", browser.key)
 
@@ -231,7 +245,7 @@ class SignInsController(QObject):
         account = self._context.store.account_for_site(site_key)
         browser = next((b for b in self._browsers if account and b.key == account["browser"]), None)
         if account is None or account["method"] != "browser" or browser is None:
-            self.notice.emit("This sign-in can be renewed by signing in again.")
+            self.notice.emit("To renew this sign-in, sign in again.")
             return
         self._read_browser(site_key, browser)
 
@@ -257,7 +271,8 @@ class SignInsController(QObject):
         site = self._site(site_key)
         mine = drop_expired(for_site(cookies, site))
         if not signed_in(mine, site):
-            self.notice.emit(f"The extension sent no {site.label} sign-in. Sign in to the site first.")
+            self.notice.emit(f"The browser extension sent no {site.label} sign-in. Sign in to {site.label} "
+                             "in your browser, then try again.")
             return
         self._save(site, mine, "extension")
 
@@ -270,8 +285,8 @@ class SignInsController(QObject):
             self._context.store.delete_account(account["id"])
         for browser in self._browsers:
             shutil.rmtree(self._profile(site_key, browser.key), ignore_errors=True)
-        self.notice.emit(f"Signed out of {self._site(site_key).label} on this PC. Signing out on the site "
-                         "itself also ends the session there.")
+        self.notice.emit(f"Signed out of {self._site(site_key).label} on this PC. To sign out everywhere, "
+                         "also sign out on the site.")
         self._sync()
 
     # ── Shared ────────────────────────────────────────────────────────────
@@ -283,7 +298,7 @@ class SignInsController(QObject):
             self._context.vault.save(account_id, cookies)
         except (OSError, SecretError) as error:
             write_log(f"Saving the {site.label} sign-in failed: {error}", "critical")
-            self._fail(site.key, f"The sign-in couldn't be saved: {error}")
+            self._fail(site.key, "The sign-in couldn't be saved on this PC. Try again.")
             return
         if site.check_url:
             self._check(site, account_id)
@@ -335,7 +350,8 @@ class SignInsController(QObject):
             if account is not None:
                 self._context.store.update_account(account["id"], status="ok")
             self.notice.emit(f"Signed in to {site.label}." if works else
-                             f"Signed in to {site.label}. It couldn't be checked now; downloads will tell.")
+                             f"Signed in to {site.label}. The app couldn't test it right now; your next "
+                             "download will show whether it works.")
             self.signedIn.emit(site.key)
         self._sync()
 
@@ -363,13 +379,13 @@ class SignInsController(QObject):
             stored = account["method"] == "firefox" or self._context.vault.exists(account["id"])
             status = "expired" if expired or not stored else "ok"
             text = "Sign in again" if status == "expired" else "Signed in"
-            parts = [f"Since {datetime.fromtimestamp(account['refreshed']).strftime('%d %b %Y')}"]
+            parts = [f"Saved {datetime.fromtimestamp(account['refreshed']).strftime('%d %b %Y')}"]
             if account["expires"]:
                 parts.append(f"expires {datetime.fromtimestamp(account['expires']).strftime('%d %b %Y')}")
             check = self._checks.get(site.key)
             if check is not None and check[0] is not None:
-                parts.append(f"{'works' if check[0] else 'refused'} (checked "
-                             f"{datetime.fromtimestamp(check[1]).strftime('%H:%M')})")
+                result = "working" if check[0] else "not accepted by the site"
+                parts.append(f"{result} (checked at {datetime.fromtimestamp(check[1]).strftime('%H:%M')})")
             detail = ", ".join(parts)
         if site.key in self._windows:
             text = "Sign in in the browser window, then click Done"

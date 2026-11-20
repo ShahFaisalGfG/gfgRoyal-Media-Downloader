@@ -43,7 +43,7 @@ async function main(): Promise<void> {
         downloadButton.disabled = true;
         const reply = await ask(downloadMessage([tab.url]));
         downloadButton.disabled = false;
-        setStatus(reply.ok ? 'ok' : 'error', reply.ok ? 'Sent to the app. It downloads with your default preset.' : reply.message ?? NOT_INSTALLED);
+        setStatus(reply.ok ? 'ok' : 'error', reply.ok ? 'Sent to the app. It downloads with your usual choices.' : reply.message ?? NOT_INSTALLED);
       },
     },
   });
@@ -58,14 +58,14 @@ async function main(): Promise<void> {
         const permissions: Browser.permissions.Permissions = { permissions: ['cookies'], origins: originPatterns(site) };
         // Asked on this click and dropped again afterwards: the extension never keeps cookie access.
         if (!(await browser.permissions.request(permissions))) {
-          setStatus('error', `Signing in needs permission to read ${site.label}’s cookies once.`);
+          setStatus('error', `To sign in, allow the extension to read your ${site.label} sign-in. It asks each time and keeps no access.`);
           return;
         }
         signinButton.disabled = true;
         try {
           const cookies = await siteCookies(tabId, site.cookieDomains);
           if (cookies.length === 0) {
-            setStatus('error', `No ${site.label} cookies here. Sign in to ${site.label} in this tab first.`);
+            setStatus('error', `You aren’t signed in to ${site.label} here. Sign in to ${site.label} in this tab first.`);
             return;
           }
           const reply = await ask(signinMessage(site.key, cookies));
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
 
   const tip =
     site?.key === 'youtube'
-      ? 'For YouTube, sign in from a private window, send the sign-in, then close that window, so YouTube doesn’t change the session while you browse. Allow the extension in private windows first.'
+      ? 'For YouTube, sign in from a private window, send the sign-in, then close that window, so browsing YouTube later doesn’t end the app’s sign-in. Allow the extension in private windows first.'
       : 'The app keeps the sign-in encrypted on this PC and uses it only for this site’s downloads.';
 
   app.replaceChildren(

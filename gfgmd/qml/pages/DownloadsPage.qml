@@ -4,11 +4,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import QtQml.Models
 
 import "../components"
+import "../components/ListMenu.js" as ListMenu
 
 // Paste a link and press Download, or the arrow on its right to choose formats and videos first. Below,
-// the queue: every download with its progress, its buttons, and a menu of everything else.
+// the queue: every download with its progress, its buttons, and a menu of everything else; a playlist
+// lists its videos under it, each with how it is doing.
 Item {
     id: page
 
@@ -37,23 +40,27 @@ Item {
 
     // ── Picking several downloads ────────────────────────────────────────
 
-    // Bumped as the list changes, so the selection bar's buttons re-check the picked rows.
-    property int rowsRevision: 0
-    readonly property var _rows: { page.rowsRevision; return page.allRows() }
-
-    function allRows() {
-        var rows = []
-        for (var i = 0; i < queueController.model.count; ++i) rows.push(queueController.model.get(i))
-        return rows
+    // Downloads are picked, not the videos listed under a playlist. The list changes four times a
+    // second while downloading, so the selection is checked only when rows leave it.
+    function jobIds(from, to) {
+        var ids = []
+        var first = from === undefined ? 0 : from
+        var last = to === undefined ? queueController.model.count - 1 : to
+        for (var i = first; i <= last; ++i) {
+            var row = queueController.model.get(i)
+            if (row.rowType === "job") ids.push(row.jobId)
+        }
+        return ids
     }
     function selectRange(index) {
         var from = Math.min(selection.anchor < 0 ? index : selection.anchor, index)
         var to = Math.max(selection.anchor < 0 ? index : selection.anchor, index)
-        selection.addRange(page._rows.slice(from, to + 1).map(row => row.jobId))
+        selection.addRange(page.jobIds(from, to))
     }
-    // True when any picked download allows this ("canPause", "canResume", "canRetry").
-    function anyPicked(flag) {
-        return page._rows.some(row => row[flag] === true && selection.contains(row.jobId))
+    // What the picked downloads allow, asked again as the queue changes.
+    readonly property var picked: {
+        queueController.runningCount  // re-read on every change of the queue
+        return selection.count > 0 ? queueController.pickedFlags(selection.ids) : ({})
     }
     function applyToPicked(action) {
         queueController.applyToJobs(action, selection.ids)
@@ -62,15 +69,18 @@ Item {
     ListSelection { id: selection }
 
     Connections {
-        target: queueController
-        function onChanged() {
-            page.rowsRevision += 1
-            selection.keep(page._rows.map(row => row.jobId))
-        }
+        target: queueController.model
+        function onRowsRemoved() { if (selection.count > 0) selection.keep(page.jobIds()) }
+        function onModelReset() { if (selection.count > 0) selection.keep(page.jobIds()) }
     }
 
     function focusLink() {
         linkField.selectInput()
+    }
+
+    // Play one saved video of a playlist, with the playlist's other saved videos for Previous and Next.
+    function playFrom(jobId, path) {
+        playerController.playFrom(path, queueController.savedFiles(jobId))
     }
 
     function pasteLink() {
@@ -87,7 +97,7 @@ Item {
     // The download options read one link: the one in the box.
     function showOptions() {
         if (linkField.text.length === 0) page.pasteLink()
-        var text = linkField.text
+        var text = linkField.links.length > 0 ? linkField.links[0] : ""
         if (text.length === 0) {
             appController.notice("Paste a link first, then open its download options.")
             return
@@ -124,8 +134,9 @@ Item {
                 id: linkField
                 Layout.fillWidth: true
                 placeholderText: "Paste a link to a video, playlist, or channel"
-                toolTipText: "YouTube and every other site yt-dlp supports. Press Enter to download with the chosen preset."
+                toolTipText: "Works with YouTube and many other sites. Press Enter to download with the choice on the right."
                 onAccepted: page.download()
+                onNotLink: appController.notice("The copied text isn't a link. Copy the link from your browser's address bar.")
                 input.Keys.onEscapePressed: linkField.clear()
             }
             StyledComboBox {
@@ -133,7 +144,7 @@ Item {
                 model: prefsController.presets
                 value: page.presetId
                 accessibleName: "Preset"
-                toolTipText: "How the Download button saves: the type, quality, and container"
+                toolTipText: "What the Download button saves: video or audio, its quality, and the file type"
                 onActivated: prefsController.saveSettings({"downloads.preset": currentValue})
             }
             // Download with the preset, or open the cap for this link's download options.
@@ -145,6 +156,7 @@ Item {
                     : "Get the download tools first"
                 capToolTipText: "Download options: pick the quality, format, subtitles, and which videos (Ctrl+Shift+O)"
                 capOpen: page.optionsShown
+                capAccessibleName: page.optionsShown ? "Close the download options" : "Open the download options"
                 onClicked: page.download()
                 onCapClicked: page.toggleOptions()
             }
@@ -189,14 +201,15 @@ Item {
             maxHeight: Math.max(240, page.height * 0.62)
             presetId: page.presetId
             onClosed: page.optionsOpen = false
+            onQueued: linkField.clear()
         }
 
         SelectionBar {
             Layout.fillWidth: true
             visible: selection.count > 0
             count: selection.count
-            total: queueView.count
-            onSelectAllRequested: selection.setAll(page._rows.map(row => row.jobId))
+            total: queueController.jobCount
+            onSelectAllRequested: selection.setAll(page.jobIds())
             onClearRequested: selection.clear()
 
             AppButton {
@@ -204,7 +217,7 @@ Item {
                 compact: true
                 text: "Pause"
                 iconName: "pause"
-                enabled: page.anyPicked("canPause")
+                enabled: page.picked.canPause === true
                 toolTipText: "Pause the picked downloads; they continue from where they stopped"
                 onClicked: page.applyToPicked("pause")
             }
@@ -213,7 +226,7 @@ Item {
                 compact: true
                 text: "Resume"
                 iconName: "play"
-                enabled: page.anyPicked("canResume")
+                enabled: page.picked.canResume === true
                 onClicked: page.applyToPicked("resume")
             }
             AppButton {
@@ -221,7 +234,7 @@ Item {
                 compact: true
                 text: "Try again"
                 iconName: "refresh"
-                enabled: page.anyPicked("canRetry")
+                enabled: page.picked.canRetry === true
                 toolTipText: "Try the picked failed or finished downloads again"
                 onClicked: page.applyToPicked("retry")
             }
@@ -231,17 +244,19 @@ Item {
                 text: "Remove"
                 iconName: "delete"
                 toolTipText: "Take the picked downloads off the list (Delete)"
-                onClicked: page.removeJobs(selection.ids, selection.count + " downloads")
+                onClicked: page.removeJobs(selection.ids, selection.count === 1 ? "1 download" : selection.count + " downloads")
             }
         }
 
         // Above the list it acts on: finished downloads leave it, and the Library keeps their files.
         RowLayout {
             Layout.fillWidth: true
+            Layout.preferredHeight: Theme.controlHeight + Theme.spaceSm
             visible: selection.count === 0 && queueController.finishedCount > 0
             spacing: Theme.spaceSm
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: queueController.finishedCount === 1 ? "1 finished download" : queueController.finishedCount + " finished downloads"
                 font.family: Theme.fontFamily
@@ -275,52 +290,106 @@ Item {
             Accessible.role: Accessible.List
             Accessible.name: "Downloads"
 
-            // Ctrl+A picks every download, Ctrl+Space the current one, and Esc lets go of them.
+            // Ctrl+A picks every download, Ctrl+Space the current one, and Esc lets go of them. On a
+            // playlist, Right shows its videos and Left hides them (from one of them, too).
             Keys.onPressed: function (event) {
+                var current = queueController.model.get(queueView.currentIndex)
                 if (event.matches(StandardKey.SelectAll)) {
-                    selection.setAll(page._rows.map(row => row.jobId))
+                    selection.setAll(page.jobIds())
                     event.accepted = true
                 } else if (event.key === Qt.Key_Space && (event.modifiers & Qt.ControlModifier)) {
-                    var current = queueController.model.get(queueView.currentIndex)
-                    if (current.jobId !== undefined) selection.toggle(current.jobId, queueView.currentIndex)
+                    if (current.rowType === "job") selection.toggle(current.jobId, queueView.currentIndex)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Escape && selection.count > 0) {
                     selection.clear()
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Right && current.rowType === "job" && current.entryCount > 0) {
+                    queueController.setExpanded(current.jobId, true)
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Left && current.jobId !== undefined
+                           && (current.rowType === "entry" || current.expanded)) {
+                    var jobId = current.jobId
+                    queueController.setExpanded(jobId, false)
+                    queueView.currentIndex = queueController.model.rowOf("j" + jobId)
                     event.accepted = true
                 }
             }
             Keys.onSpacePressed: {
                 var row = queueController.model.get(queueView.currentIndex)
-                if (row.canPause) queueController.pause(row.jobId)
-                else if (row.canResume || row.canRetry) queueController.resume(row.jobId)
+                if (row.rowType === "entry") {
+                    if (row.lastFile) page.playFrom(row.jobId, row.lastFile)
+                } else if (row.canPause) queueController.pause(row.jobId)
+                else if (row.canRetry) queueController.retry(row.jobId)
+                else if (row.canResume) queueController.resume(row.jobId)
             }
             Keys.onDeletePressed: {
                 if (selection.count > 0) {
-                    page.removeJobs(selection.ids, selection.count + " downloads")
+                    page.removeJobs(selection.ids, selection.count === 1 ? "1 download" : selection.count + " downloads")
                     return
                 }
                 var row = queueController.model.get(queueView.currentIndex)
-                if (row.jobId !== undefined) page.removeJob(row.jobId, row.title)
+                if (row.rowType === "job") page.removeJob(row.jobId, row.title)
             }
-            Keys.onMenuPressed: {
+            // The Menu key and Shift+F10 (a context-menu request on Windows) open the current row's menu.
+            ContextMenu.onRequested: function (position) {
+                var index = ListMenu.rowFor(queueView, position)
+                if (index < 0) return
+                queueView.currentIndex = index
+                queueView.openMenu()
+            }
+            // The current row's menu, opened at the row.
+            function openMenu() {
                 var row = queueController.model.get(queueView.currentIndex)
-                if (row.jobId !== undefined) jobMenu.openFor(row.jobId)
+                if (row.rowType === "job") jobMenu.openFor(row.jobId, queueView.currentItem)
+                else if (row.rowType === "entry") entryMenu.openFor(row, queueView.currentItem)
             }
 
-            delegate: JobItem {
-                id: jobRow
-                width: queueView.width
-                current: ListView.isCurrentItem
-                selected: selection.contains(jobRow.jobId)
-                selecting: selection.count > 0
-                onSelectToggled: function (jobId, index) { selection.toggle(jobId, index) }
-                onRangeRequested: function (index) { page.selectRange(index) }
-                onMenuRequested: function (jobId) { jobMenu.openFor(jobId) }
-                onItemsRequested: function (jobId, title) { itemsDialog.show(jobId, title) }
-                onFixRequested: function (jobId, action) {
-                    if (action === "signin") page.openSignIns()
-                    else if (action === "choose_folder") { folderDialog.jobId = jobId; folderDialog.open() }
-                    else toolsController.updateAll()
+            delegate: DelegateChooser {
+                role: "rowType"
+
+                DelegateChoice {
+                    roleValue: "job"
+
+                    JobItem {
+                        id: jobRow
+                        width: queueView.width
+                        current: ListView.isCurrentItem
+                        selected: selection.contains(jobRow.jobId)
+                        selecting: selection.count > 0
+                        onSelectToggled: function (jobId, index) { selection.toggle(jobId, index) }
+                        onRangeRequested: function (index) { page.selectRange(index) }
+                        onMenuRequested: function (jobId) { jobMenu.openFor(jobId) }
+                        onExpandToggled: function (jobId, expanded) { queueController.setExpanded(jobId, expanded) }
+                        onPlayAllRequested: function (jobId) {
+                            var files = queueController.savedFiles(jobId)
+                            if (files.length > 0) playerController.playFrom(files[0], files)
+                        }
+                        onFixRequested: function (jobId, action) {
+                            if (action === "signin") page.openSignIns()
+                            else if (action === "choose_folder") {
+                                folderDialog.jobId = jobId
+                                folderDialog.audio = jobRow.kind === "audio"
+                                folderDialog.open()
+                            }
+                            else {
+                                toolsController.updateAll()
+                                appController.notice("Updating the download tools. Downloads that needed them try again when it's done.")
+                            }
+                        }
+                    }
+                }
+                DelegateChoice {
+                    roleValue: "entry"
+
+                    EntryItem {
+                        id: entryRow
+                        width: queueView.width
+                        current: ListView.isCurrentItem
+                        onMenuRequested: function (jobId, itemId) {
+                            entryMenu.openFor(queueController.model.get(entryRow.index))
+                        }
+                        onPlayRequested: function (jobId, path) { page.playFrom(jobId, path) }
+                    }
                 }
             }
 
@@ -341,13 +410,10 @@ Item {
         property var row: ({})
         readonly property bool hasLink: (jobMenu.row.url || "").length > 0
 
-        function openFor(jobId) {
+        function openFor(jobId, at) {
             jobMenu.jobId = jobId
-            for (var i = 0; i < queueController.model.count; ++i) {
-                var row = queueController.model.get(i)
-                if (row.jobId === jobId) { jobMenu.row = row; break }
-            }
-            jobMenu.popup()
+            jobMenu.row = queueController.model.get(queueController.model.rowOf("j" + jobId))
+            jobMenu.openAt(at || null)
         }
 
         AppMenuItem { text: "Open folder"; onTriggered: appController.openPath(jobMenu.row.folder) }
@@ -363,7 +429,13 @@ Item {
         AppMenuSeparator {}
         AppMenuItem { text: "Pause"; enabled: jobMenu.row.canPause === true; onTriggered: queueController.pause(jobMenu.jobId) }
         AppMenuItem { text: "Resume"; enabled: jobMenu.row.canResume === true; onTriggered: queueController.resume(jobMenu.jobId) }
-        AppMenuItem { text: "Try again"; enabled: jobMenu.row.canRetry === true; onTriggered: queueController.retry(jobMenu.jobId) }
+        AppMenuItem {
+            // On a finished download it fetches only what was skipped (a private video, one that kept failing).
+            text: jobMenu.row.jobState === "done"
+                ? "Try the skipped " + (jobMenu.row.kind === "audio" ? "songs" : "videos") + " again" : "Try again"
+            enabled: jobMenu.row.canRetry === true
+            onTriggered: queueController.retry(jobMenu.jobId)
+        }
         AppMenuItem {
             text: "Download again"
             enabled: jobMenu.row.canRedownload === true
@@ -421,6 +493,7 @@ Item {
             spacing: Theme.spaceSm
 
             Text {
+                textFormat: Text.PlainText
                 id: removeName
                 Layout.fillWidth: true
                 visible: !removeDialog.many  // the title already counts them
@@ -433,6 +506,7 @@ Item {
                 elide: Text.ElideRight
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: {
                     var unfinished = !removeDialog.many
@@ -463,6 +537,7 @@ Item {
                 font.pixelSize: Theme.fontBody
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: deleteFiles.visible
                 text: removeDialog.savedFiles === 1 ? "You can restore it from the Recycle Bin; its captions and lyrics go with it."
@@ -475,66 +550,50 @@ Item {
         }
     }
 
-    AppDialog {
-        id: itemsDialog
-        property var items: []
-        function show(jobId, title) {
-            itemsDialog.title = title
-            itemsDialog.items = queueController.items(jobId)
-            itemsDialog.open()
-        }
-        standardButtons: Dialog.Close
-        defaultButton: Dialog.Close
-        width: Math.min(page.width - 2 * Theme.spaceXl, 640)
+    // A playlist video's menu: play it, find it, or open its page.
+    AppMenu {
+        id: entryMenu
+        property var row: ({})
+        readonly property string file: entryMenu.row.lastFile || ""
+        readonly property string link: entryMenu.row.url || ""
 
-        ListView {
-            width: parent.width
-            implicitHeight: Math.min(contentHeight, 420)
-            clip: true
-            model: itemsDialog.items
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-            delegate: RowLayout {
-                id: itemRow
-                required property var modelData
-                width: ListView.view.width
-                spacing: Theme.spaceSm
-                Text {
-                    Layout.preferredWidth: 36
-                    text: itemRow.modelData.index
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontCaption
-                    color: Theme.textMuted
-                    horizontalAlignment: Text.AlignRight
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: itemRow.modelData.title
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    color: Theme.text
-                    elide: Text.ElideRight
-                }
-                StatusBadge {
-                    text: itemRow.modelData.state === "done" ? "Saved"
-                        : itemRow.modelData.state === "skipped" ? (itemRow.modelData.message || "Skipped") : "Waiting"
-                    iconName: itemRow.modelData.state === "done" ? "completed"
-                        : itemRow.modelData.state === "skipped" ? "skip" : "clock"
-                    tone: itemRow.modelData.state === "done" ? "success"
-                        : itemRow.modelData.state === "skipped" ? "warning" : "neutral"
-                }
-            }
+        function openFor(row, at) {
+            entryMenu.row = row
+            entryMenu.openAt(at || null)
+        }
+
+        AppMenuItem {
+            text: "Play"
+            enabled: entryMenu.file.length > 0
+            onTriggered: page.playFrom(entryMenu.row.jobId, entryMenu.file)
+        }
+        AppMenuItem {
+            text: "Show in folder"
+            enabled: entryMenu.file.length > 0
+            onTriggered: appController.revealFile(entryMenu.file)
+        }
+        AppMenuSeparator {}
+        AppMenuItem { text: "Copy link"; enabled: entryMenu.link.length > 0; onTriggered: appController.copyText(entryMenu.link) }
+        AppMenuItem {
+            text: "Open link in browser"
+            enabled: entryMenu.link.length > 0
+            onTriggered: appController.openUrl(entryMenu.link)
         }
     }
 
+    // A download that couldn't save picks another folder: it becomes the folder for its type (as in
+    // Preferences), and the download goes on there.
     FolderDialog {
         id: folderDialog
         property int jobId: -1
-        title: "Choose the download folder"
+        property bool audio: false
+        title: folderDialog.audio ? "Choose the audio folder" : "Choose the video folder"
         onAccepted: {
             var path = appController.localPath(selectedFolder.toString())
             if (path.length > 0) {
-                prefsController.saveSettings({"downloads.folder": path})
+                prefsController.saveSettings(folderDialog.audio ? {"downloads.audio_folder": path} : {"downloads.folder": path})
                 if (folderDialog.jobId >= 0) queueController.moveToFolder(folderDialog.jobId, path)
+                appController.notice((folderDialog.audio ? "Songs" : "Videos") + " now save in " + path + ".")
             }
         }
     }

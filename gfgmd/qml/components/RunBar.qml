@@ -47,6 +47,7 @@ Rectangle {
             spacing: Theme.spaceXs
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: bar._status
                 font.family: Theme.fontFamily
@@ -76,7 +77,7 @@ Rectangle {
             visible: queueController.holdText.length > 0
             text: "Start now"
             iconName: "play"
-            toolTipText: "Start the queue now instead of at " + queueController.holdText
+            toolTipText: "Start downloading now instead of at " + queueController.holdText
             onClicked: queueController.startNow()
         }
 
@@ -102,7 +103,7 @@ Rectangle {
             text: queueController.paused ? "Resume all" : "Pause all"
             iconName: queueController.paused ? "play" : "pause"
             toolTipText: queueController.paused
-                ? "Resume the queue and every paused download (Ctrl+Shift+P)"
+                ? "Resume every paused download (Ctrl+Shift+P)"
                 : "Pause every download; each continues from where it stopped (Ctrl+Shift+P)"
             onClicked: queueController.paused ? queueController.resumeAll() : queueController.pauseAll()
         }

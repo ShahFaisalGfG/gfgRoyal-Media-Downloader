@@ -84,15 +84,15 @@ class FormatDefaults:
     HEIGHTS = [height for _, height in HEIGHT_OPTIONS]
     CONTAINER_OPTIONS = [
         ("MP4 (plays everywhere)", "mp4"),
-        ("MKV (keeps every codec)", "mkv"),
-        ("WebM", "webm"),
+        ("MKV (keeps everything)", "mkv"),
+        ("WebM (for web browsers)", "webm"),
     ]
     CONTAINERS = [code for _, code in CONTAINER_OPTIONS]
     # Balanced is the original script's order: resolution first, then HLS and H.264/AAC at that resolution.
     CODEC_OPTIONS = [
-        ("Compatible (H.264 and AAC first)", "compatible"),
-        ("Balanced (resolution first, then H.264)", "balanced"),
-        ("Best quality (AV1 and VP9 allowed)", "best"),
+        ("Plays everywhere (recommended)", "compatible"),
+        ("Balanced (highest resolution first)", "balanced"),
+        ("Best quality (not for older devices)", "best"),
     ]
     CODEC_PROFILES = [code for _, code in CODEC_OPTIONS]
     # Which audio tracks a video keeps. Sites such as YouTube offer dubbed tracks next to the original.
@@ -105,12 +105,12 @@ class FormatDefaults:
     # yt-dlp's --audio-format names; "best" keeps the site's own audio without converting it.
     AUDIO_OPTIONS = [
         ("MP3 (plays everywhere)", "mp3"),
-        ("M4A (AAC)", "m4a"),
+        ("M4A (Apple devices)", "m4a"),
         ("Opus", "opus"),
-        ("OGG (Vorbis)", "vorbis"),
-        ("FLAC (lossless)", "flac"),
-        ("WAV (lossless, uncompressed)", "wav"),
-        ("Original (no conversion)", "best"),
+        ("OGG", "vorbis"),
+        ("FLAC (full quality, larger files)", "flac"),
+        ("WAV (full quality, very large files)", "wav"),
+        ("Original (as the site sends it)", "best"),
     ]
     AUDIO_FORMATS = [code for _, code in AUDIO_OPTIONS]
     # Formats where a bitrate means nothing: lossless ones, and the site's own stream.
@@ -137,20 +137,20 @@ class FormatDefaults:
     COVER_SHAPES = [code for _, code in COVER_OPTIONS]
     SUBTITLE_OPTIONS = [
         ("No subtitles", "none"),
-        ("Embed in the video", "embed"),
+        ("Inside the video", "embed"),
         ("Separate files", "sidecar"),
-        ("Embed and keep files", "both"),
+        ("Inside the video and as files", "both"),
     ]
     SUBTITLE_MODES = [code for _, code in SUBTITLE_OPTIONS]
     SUBTITLE_FORMAT_OPTIONS = [
         ("SRT (most players)", "srt"),
-        ("WebVTT", "vtt"),
+        ("VTT (web players)", "vtt"),
     ]
     SUBTITLE_FORMATS = [code for _, code in SUBTITLE_FORMAT_OPTIONS]
     SPONSORBLOCK_OPTIONS = [
         ("Off", "off"),
-        ("Mark segments as chapters", "mark"),
-        ("Cut segments out", "remove"),
+        ("Mark sponsor parts as chapters", "mark"),
+        ("Cut sponsor parts out", "remove"),
     ]
     SPONSORBLOCK_MODES = [code for _, code in SPONSORBLOCK_OPTIONS]
     SPONSORBLOCK_CATEGORIES = [
@@ -180,7 +180,7 @@ class PresetDefaults:
          "audio_quality": 320},
         {"id": "audio-m4a", "label": "Audio, M4A 256 kbps", "kind": "audio", "audio_format": "m4a",
          "audio_quality": 256},
-        {"id": "audio-flac", "label": "Audio, FLAC lossless", "kind": "audio", "audio_format": "flac"},
+        {"id": "audio-flac", "label": "Audio, FLAC full quality", "kind": "audio", "audio_format": "flac"},
     ]
     IDS = [preset["id"] for preset in BUILT_IN]
 
@@ -238,14 +238,14 @@ class ToolDefaults:
     """Where yt-dlp, FFmpeg, and Deno come from, and which yt-dlp releases to follow."""
 
     SOURCE_OPTIONS = [
-        ("Managed by the app (recommended)", "managed"),
-        ("Programs on PATH", "path"),
-        ("Custom locations", "custom"),
+        ("Kept up to date by the app (recommended)", "managed"),
+        ("Programs already installed on this PC", "path"),
+        ("Programs I choose", "custom"),
     ]
     SOURCES = [code for _, code in SOURCE_OPTIONS]
     CHANNEL_OPTIONS = [
-        ("Stable releases", "stable"),
-        ("Nightly builds (fixes arrive sooner)", "nightly"),
+        ("Stable (recommended)", "stable"),
+        ("Early fixes (updated daily, less tested)", "nightly"),
     ]
     CHANNELS = [code for _, code in CHANNEL_OPTIONS]
 
@@ -332,6 +332,8 @@ def get_default_settings() -> Dict[str, Any]:
         "tray": {
             "close_to_tray": True,
             "start_minimized": False,
+            # The first close to the tray says the app is still running there; said once.
+            "told_running": False,
         },
         "startup": {"start_with_windows": False},
         "advanced": {

@@ -10,7 +10,9 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QSystemTrayIcon
 
+from gfgmd.config.defaults import AppInfo
 from gfgmd.utils.logging import write_log
+from gfgmd.utils.settings import load_settings, save_settings
 
 SHOW_MS = 10_000
 
@@ -31,6 +33,17 @@ class Notifier(QObject):
         self._tray = tray
         if tray is not None:
             tray.messageClicked.connect(self._clicked)
+
+    def tell_once_in_tray(self) -> None:
+        """The first time the window closes to the tray, say the app goes on running there."""
+        settings = load_settings()
+        tray = settings.setdefault("tray", {})
+        if tray.get("told_running") or not settings.get("notifications", {}).get("enabled", True):
+            return
+        tray["told_running"] = True
+        save_settings(settings)
+        self.notify(f"{AppInfo.APP_NAME} is still running",
+                    "Downloads and subscription checks go on in the tray. Right-click its icon to quit.")
 
     def notify(self, title: str, body: str, path: str = "") -> None:
         """Show a message; `path` is revealed in File Explorer when the message is clicked."""

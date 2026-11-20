@@ -3,11 +3,14 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml.Models
 
 import "../components"
+import "../components/ListMenu.js" as ListMenu
 
 // Everything downloaded, newest first: search, filter by type and site, play, show in folder,
-// download again, or move files to the Recycle Bin.
+// download again, or move files to the Recycle Bin. A playlist's or channel's files make one group
+// row that opens into them, in the playlist's order.
 Item {
     id: page
 
@@ -18,9 +21,14 @@ Item {
         selection.clear()  // picked rows the new filters hide would be acted on unseen
         libraryController.setFilters(search.text, page.kindFilter, page.siteFilter)
     }
-    // Play in the built-in players; the list as filtered gives them Previous and Next.
-    function play(path) {
-        playerController.playFrom(path, libraryController.playlist())
+    // Play in the built-in players; the list as filtered gives them Previous and Next, or, for a file
+    // inside a playlist group, the rest of that playlist in order.
+    function play(path, groupKey) {
+        playerController.playFrom(path, groupKey ? libraryController.groupPaths(groupKey) : libraryController.playlist())
+    }
+    function playGroup(groupKey) {
+        var list = libraryController.groupPaths(groupKey)
+        if (list.length > 0) playerController.playFrom(list[0], list)
     }
     // Songs first (the audio bar plays them in a row), unless the list shows only videos.
     function playAll() {
@@ -38,15 +46,38 @@ Item {
         var from = Math.min(selection.anchor < 0 ? index : selection.anchor, index)
         var to = Math.max(selection.anchor < 0 ? index : selection.anchor, index)
         var ids = []
-        for (var i = from; i <= to; ++i) ids.push(libraryController.model.get(i).historyId)
+        for (var i = from; i <= to; ++i) {
+            var row = libraryController.model.get(i)
+            if (row.rowType === "group") ids = ids.concat(libraryController.groupIds(row.groupKey))
+            else ids.push(row.historyId)
+        }
         selection.addRange(ids)
+    }
+    // A group is picked when all its files are; its mark picks or lets go of them together.
+    function groupPicked(groupKey) {
+        var ids = libraryController.groupIds(groupKey)
+        return ids.length > 0 && ids.every(id => selection.contains(id))
+    }
+    function toggleGroup(groupKey, index) {
+        var ids = libraryController.groupIds(groupKey)
+        if (page.groupPicked(groupKey)) selection.drop(ids)
+        else selection.addRange(ids)
+        selection.anchor = index
     }
     function selectAll() {
         selection.setAll(libraryController.allIds())
     }
-    function removePicked() {
-        libraryController.remove(selection.ids)
+    // Take files off the library (they stay on disk), asking first when it is more than one.
+    function removeFiles(ids) {
+        if (ids.length > 1) {
+            removeDialog.ask(ids)
+            return
+        }
+        libraryController.remove(ids)
         selection.clear()
+    }
+    function removePicked() {
+        page.removeFiles(selection.ids)
     }
 
     ListSelection { id: selection }
@@ -73,7 +104,8 @@ Item {
                 id: search
                 Layout.fillWidth: true
                 placeholderText: "Search titles, channels, and file names"
-                toolTipText: "Show downloads whose title, uploader, or file name contains this text"
+                accessibleName: "Search the library"
+                toolTipText: "Show files whose title, uploader, or file name contains this text"
                 onTextChanged: filterTimer.restart()
             }
             StyledComboBox {
@@ -90,7 +122,7 @@ Item {
                 model: libraryController.siteOptions
                 value: page.siteFilter
                 accessibleName: "Site"
-                toolTipText: "Show downloads from one site"
+                toolTipText: "Show files from one site"
                 onActivated: { page.siteFilter = currentValue; page.applyFilters() }
             }
             AppButton {
@@ -111,8 +143,9 @@ Item {
         Timer { id: filterTimer; interval: 250; onTriggered: page.applyFilters() }
 
         Text {
+            textFormat: Text.PlainText
             visible: selection.count === 0
-            text: libraryController.total + (libraryController.total === 1 ? " download" : " downloads")
+            text: libraryController.total + (libraryController.total === 1 ? " file" : " files")
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption
             color: Theme.textMuted
@@ -139,7 +172,7 @@ Item {
                 compact: true
                 text: "Extract audio"
                 iconName: "audio"
-                toolTipText: "Save the picked videos' sound as songs (songs among them are left out)"
+                toolTipText: "Save the picked videos' audio as songs (songs among them are left out)"
                 onClicked: extractDialog.forVideos(selection.ids, selection.count === 1 ? "1 file" : selection.count + " files")
             }
             AppButton {
@@ -175,142 +208,91 @@ Item {
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             Accessible.role: Accessible.List
             Accessible.name: "Library"
-            Keys.onReturnPressed: page.play(libraryController.model.get(view.currentIndex).path)
+            // The Menu key and Shift+F10 (a context-menu request on Windows) open the current row's menu, at the row.
+            ContextMenu.onRequested: function (position) {
+                var index = ListMenu.rowFor(view, position)
+                if (index < 0) return
+                view.currentIndex = index
+                var current = libraryController.model.get(index)
+                if (current.rowType === "group")
+                    groupMenu.openFor(current.groupKey, current.title, current.kind, current.path, view.currentItem)
+                else if (current.historyId !== undefined)
+                    menu.openFor(current.historyId, current.url, current.missing, current.kind, current.title, view.currentItem)
+            }
+            // Enter plays (a group, all of it); Right opens a group and Left closes it (from a file in it, too).
+            Keys.onReturnPressed: {
+                var row = libraryController.model.get(view.currentIndex)
+                if (row.rowType === "group") page.playGroup(row.groupKey)
+                else if (row.path) page.play(row.path, row.groupKey)
+            }
             Keys.onDeletePressed: {
                 if (selection.count > 0) {
                     page.removePicked()
                     return
                 }
                 var row = libraryController.model.get(view.currentIndex)
-                libraryController.remove([row.historyId])
+                if (row.rowType === "group") page.removeFiles(libraryController.groupIds(row.groupKey))
+                else if (row.historyId !== undefined) page.removeFiles([row.historyId])
             }
             // Ctrl+A picks every file the filters show, Ctrl+Space the current one, and Esc lets go.
             Keys.onPressed: function (event) {
+                var current = libraryController.model.get(view.currentIndex)
                 if (event.matches(StandardKey.SelectAll)) {
                     page.selectAll()
                     event.accepted = true
                 } else if (event.key === Qt.Key_Space && (event.modifiers & Qt.ControlModifier)) {
-                    var current = libraryController.model.get(view.currentIndex)
-                    if (current.historyId !== undefined) selection.toggle(current.historyId, view.currentIndex)
+                    if (current.rowType === "group") page.toggleGroup(current.groupKey, view.currentIndex)
+                    else if (current.historyId !== undefined) selection.toggle(current.historyId, view.currentIndex)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Escape && selection.count > 0) {
                     selection.clear()
                     event.accepted = true
+                } else if (event.key === Qt.Key_Right && current.rowType === "group" && !current.expanded) {
+                    libraryController.setExpanded(current.groupKey, true)
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Left && current.groupKey && (current.rowType === "file" || current.expanded)) {
+                    var key = current.groupKey
+                    libraryController.setExpanded(key, false)
+                    view.currentIndex = libraryController.model.rowOf("g:" + key)
+                    event.accepted = true
                 }
             }
 
-            delegate: Rectangle {
-                id: record
-                required property int index
-                required property int historyId
-                required property string title
-                required property string uploader
-                required property string site
-                required property string kind
-                required property string path
-                required property string fileName
-                required property string sizeText
-                required property string dateText
-                required property string durationText
-                required property string qualityText
-                required property string url
-                required property bool missing
-                required property string thumbnail
-                required property string format
+            delegate: DelegateChooser {
+                role: "rowType"
 
-                readonly property bool selected: selection.contains(record.historyId)
+                DelegateChoice {
+                    roleValue: "group"
 
-                width: view.width
-                height: 68
-                radius: Theme.radius
-                color: record.selected ? Theme.accentSoft
-                    : rowHover.hovered || ListView.isCurrentItem ? Theme.surfaceHover : "transparent"
-                border.width: ListView.isCurrentItem && view.activeFocus ? 2 : 0
-                border.color: Theme.focusRing
-                Accessible.role: Accessible.ListItem
-                Accessible.name: record.title + (record.kind === "audio" ? ", audio" : ", video")
-                    + (record.missing ? ", file moved or deleted" : "")
-                HoverHandler { id: rowHover }
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.spaceSm
-                    anchors.rightMargin: Theme.spaceSm
-                    spacing: Theme.spaceMd
-
-                    Thumb {
-                        Layout.preferredWidth: 88
-                        Layout.preferredHeight: 50
-                        source: record.thumbnail
-                        kind: record.kind
-                        label: record.format
-                        opacity: record.missing ? 0.5 : 1
-
-                        SelectMark {
-                            checked: record.selected
-                            shown: selection.count > 0 || rowHover.hovered
-                            itemName: record.title
-                            onToggled: selection.toggle(record.historyId, record.index)
-                        }
-                    }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 3
-                        Text {
-                            Layout.fillWidth: true
-                            text: record.title
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontBody
-                            font.weight: Font.DemiBold
-                            color: record.missing ? Theme.textMuted : Theme.text
-                            elide: Text.ElideRight
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            text: record.missing ? "Moved or deleted: " + record.fileName
-                                : [record.uploader, record.site, record.qualityText, record.durationText, record.sizeText,
-                                   record.dateText].filter(part => part.length > 0).join("  ·  ")
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontCaption
-                            color: record.missing ? Theme.warning : Theme.textMuted
-                            elide: Text.ElideRight
-                        }
-                    }
-                    AppButton {
-                        visible: !record.missing
-                        kind: "ghost"
-                        compact: true
-                        iconName: "play"
-                        toolTipText: "Play here (Enter)"
-                        onClicked: page.play(record.path)
-                    }
-                    AppButton {
-                        visible: !record.missing
-                        kind: "ghost"
-                        compact: true
-                        iconName: "folderOpen"
-                        toolTipText: "Show in folder"
-                        onClicked: appController.revealFile(record.path)
-                    }
-                    AppButton {
-                        kind: "ghost"
-                        compact: true
-                        iconName: "more"
-                        toolTipText: "More actions"
-                        onClicked: menu.openFor(record.historyId, record.url, record.missing, record.kind, record.title)
+                    LibraryGroupItem {
+                        id: groupRow
+                        width: view.width
+                        current: ListView.isCurrentItem
+                        selected: { selection.ids; return page.groupPicked(groupRow.groupKey) }
+                        selecting: selection.count > 0
+                        onExpandToggled: function (groupKey, expanded) { libraryController.setExpanded(groupKey, expanded) }
+                        onPlayAllRequested: function (groupKey) { page.playGroup(groupKey) }
+                        onMenuRequested: function (groupKey, title, kind, folder) { groupMenu.openFor(groupKey, title, kind, folder) }
+                        onSelectToggled: function (groupKey, index) { page.toggleGroup(groupKey, index) }
+                        onRangeRequested: function (index) { page.selectRange(index) }
                     }
                 }
-                MouseArea {
-                    anchors.fill: parent
-                    z: -1
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: function (mouse) {
-                        view.currentIndex = record.index
-                        if (mouse.button === Qt.RightButton) menu.openFor(record.historyId, record.url, record.missing, record.kind, record.title)
-                        else if (mouse.modifiers & Qt.ControlModifier) selection.toggle(record.historyId, record.index)
-                        else if (mouse.modifiers & Qt.ShiftModifier) page.selectRange(record.index)
+                DelegateChoice {
+                    roleValue: "file"
+
+                    LibraryFileItem {
+                        id: fileRow
+                        width: view.width
+                        current: ListView.isCurrentItem
+                        selected: selection.contains(fileRow.historyId)
+                        selecting: selection.count > 0
+                        onPlayRequested: function (path, groupKey) { page.play(path, groupKey) }
+                        onMenuRequested: function (historyId, url, missing, kind, title) {
+                            menu.openFor(historyId, url, missing, kind, title)
+                        }
+                        onSelectToggled: function (historyId, index) { selection.toggle(historyId, index) }
+                        onRangeRequested: function (index) { page.selectRange(index) }
                     }
-                    onDoubleClicked: if (!record.missing) page.play(record.path)
                 }
             }
 
@@ -318,7 +300,7 @@ Item {
                 anchors.centerIn: parent
                 visible: view.count === 0
                 iconName: "library"
-                title: search.text.length > 0 || page.kindFilter || page.siteFilter ? "No downloads match" : "No downloads yet"
+                title: search.text.length > 0 || page.kindFilter || page.siteFilter ? "No files match" : "No files yet"
                 text: search.text.length > 0 || page.kindFilter || page.siteFilter ? "Try other search words or filters."
                     : "Finished downloads appear here, newest first."
             }
@@ -332,13 +314,13 @@ Item {
         property bool missing: false
         property string kind: ""
         property string videoTitle: ""
-        function openFor(historyId, url, missing, kind, title) {
+        function openFor(historyId, url, missing, kind, title, at) {
             menu.historyId = historyId
             menu.url = url
             menu.missing = missing
             menu.kind = kind
             menu.videoTitle = title
-            menu.popup()
+            menu.openAt(at || null)
         }
         AppMenuItem {
             text: "Open in another player"
@@ -365,7 +347,67 @@ Item {
         }
     }
 
+    // A playlist's or channel's group: play it, find its folder, extract its videos' sound, or let it go.
+    AppMenu {
+        id: groupMenu
+        property string groupKey: ""
+        property string groupTitle: ""
+        property string kind: ""
+        property string folder: ""
+        function openFor(groupKey, title, kind, folder, at) {
+            groupMenu.groupKey = groupKey
+            groupMenu.groupTitle = title
+            groupMenu.kind = kind
+            groupMenu.folder = folder
+            groupMenu.openAt(at || null)
+        }
+        AppMenuItem { text: "Play all"; onTriggered: page.playGroup(groupMenu.groupKey) }
+        AppMenuItem { text: "Open folder"; onTriggered: appController.openPath(groupMenu.folder) }
+        AppMenuItem {
+            text: "Extract audio"
+            visible: groupMenu.kind === "video"
+            onTriggered: extractDialog.forVideos(libraryController.groupIds(groupMenu.groupKey), groupMenu.groupTitle)
+        }
+        AppMenuSeparator {}
+        AppMenuItem {
+            text: "Remove from the library (keep the files)"
+            onTriggered: libraryController.remove(libraryController.groupIds(groupMenu.groupKey))
+        }
+        AppMenuItem {
+            text: "Move the files to the Recycle Bin"
+            danger: true
+            onTriggered: deleteDialog.ask(libraryController.groupIds(groupMenu.groupKey))
+        }
+    }
+
     ExtractAudioDialog { id: extractDialog }
+
+    AppDialog {
+        id: removeDialog
+        property var ids: []
+        function ask(ids) {
+            removeDialog.ids = ids
+            removeDialog.open()
+        }
+        title: "Remove " + removeDialog.ids.length + " files from the library?"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        defaultButton: Dialog.Ok
+        width: 420
+        onAccepted: {
+            libraryController.remove(removeDialog.ids)
+            selection.clear()
+        }
+        Component.onCompleted: removeDialog.standardButton(Dialog.Ok).text = "Remove"
+        Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            text: "They leave the library's list; the files stay where they are on your PC."
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            color: Theme.text
+            wrapMode: Text.WordWrap
+        }
+    }
 
     AppDialog {
         id: deleteDialog
@@ -383,7 +425,9 @@ Item {
             libraryController.deleteFiles(deleteDialog.ids)
             selection.clear()
         }
+        Component.onCompleted: deleteDialog.standardButton(Dialog.Yes).text = "Move to Recycle Bin"
         Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: deleteDialog.ids.length > 1
                 ? "The files, with their captions and lyrics, go to the Recycle Bin, where you can restore them, and leave the library."

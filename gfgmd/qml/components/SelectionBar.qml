@@ -34,6 +34,7 @@ Rectangle {
             onClicked: bar.clearRequested()
         }
         Text {
+            textFormat: Text.PlainText
             text: bar.count + " selected"
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody

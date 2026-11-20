@@ -3,23 +3,43 @@ import QtQuick
 
 // The link box. A paste button sits inside it while it is empty. Only characters a link can hold
 // get in: spaces, tabs, line breaks, invisible characters, and " < > \ ^ ` { | } are dropped as
-// they are typed or pasted, and the caret stays where it was. Pasting several links at once keeps
-// the first in the box and the rest beside it as "+N more"; `links` hands over all of them.
+// they are typed or pasted, and the caret stays where it was. Pasted text keeps only its links:
+// the first in the box and the rest beside it as "+N more" (`links` hands over all of them); text
+// with no link in it is refused (`notLink`) instead of being squeezed into one word. A bare
+// "youtube.com/watch?v=..." gets its https:// in front.
 StyledTextField {
     id: field
 
+    // The text pasted held no link (a sentence copied by mistake).
+    signal notLink()
+
     // The other links of a paste, downloaded with the one in the box.
     property var extraLinks: []
-    readonly property var links: field.text.length > 0 ? [field.text].concat(field.extraLinks) : []
+    // The box's link (with https:// in front when typed bare), then the rest of a paste.
+    readonly property var links: field.text.length > 0 ? [field._asLink(field.text) || field.text].concat(field.extraLinks) : []
+    // The box's text before the latest change, put back when a paste held no link.
+    property string _previous: ""
 
-    // Put text in the box: its links (the first in the box, the rest as extras), else the text
-    // itself without the characters a link can't hold.
+    // Put text in the box: its links (the first in the box, the rest as extras). Text with no link
+    // in it leaves the box as it was and says so; one word is kept, as the start of a typed link.
     function setLinks(text) {
         var words = String(text).split(/\s+/).map(word => field._clean(word)).filter(word => word.length > 0)
-        var found = words.filter(word => /^https?:\/\//i.test(word))
+        var found = words.map(word => field._asLink(word)).filter(word => word.length > 0)
+        if (found.length === 0 && words.length > 1) {
+            field.notLink()
+            return false
+        }
         field.extraLinks = found.slice(1)
         field.text = found.length > 0 ? found[0] : words.join("")
         field.input.cursorPosition = field.text.length
+        return true
+    }
+    // A word as a link: as it is with http(s)://, with https:// in front when it looks like a site's
+    // address and path ("youtu.be/abc"), else "".
+    function _asLink(word) {
+        if (/^https?:\/\//i.test(word)) return word
+        if (/^[a-z0-9-]+(\.[a-z0-9-]+)+\/\S/i.test(word)) return "https://" + word
+        return ""
     }
     function pasteClipboard() {
         field.setLinks(appController.clipboardText())
@@ -40,18 +60,29 @@ StyledTextField {
             var text = field.input.text
             if (text.length === 0) {
                 field.extraLinks = []
+                field._previous = ""
                 return
             }
             var clean = field._clean(text)
-            if (clean === text) return
-            // Several links arrived at once (a paste): keep them apart instead of gluing them together.
-            if (text.split(/\s+/).filter(word => /^https?:\/\//i.test(word)).length > 1) {
-                field.setLinks(text)
+            if (clean === text) {
+                field._previous = text
+                return
+            }
+            // Text with spaces or line breaks arrived at once (a paste): keep only its links, never
+            // glue its words into one; with no link in it, the box stays as it was.
+            if (/\S\s+\S/.test(text.trim())) {
+                var before = field._previous
+                if (!field.setLinks(text)) {
+                    field.input.text = before
+                    field.input.cursorPosition = before.length
+                }
+                field._previous = field.input.text
                 return
             }
             var caret = field._clean(text.slice(0, field.input.cursorPosition)).length
             field.input.text = clean
             field.input.cursorPosition = caret
+            field._previous = clean
         }
     }
 

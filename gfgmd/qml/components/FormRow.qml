@@ -37,6 +37,7 @@ GridLayout {
         spacing: 2
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.preferredWidth: 1
             text: row.label
@@ -47,6 +48,7 @@ GridLayout {
             Accessible.ignored: true
         }
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.preferredWidth: 1
             visible: row.hint.length > 0

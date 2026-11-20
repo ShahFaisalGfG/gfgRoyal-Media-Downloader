@@ -57,6 +57,11 @@ class DictListModel(QAbstractListModel):
         """A copy of every row."""
         return [dict(row) for row in self._rows]
 
+    @Slot("QVariant", result=int)
+    def rowOf(self, key: Any) -> int:
+        """The row index of a key, or -1 (for QML)."""
+        return self.row_of(key)
+
     def row_of(self, key: Any) -> int:
         """The row index of a key, or -1."""
         return self._index.get(key, -1)

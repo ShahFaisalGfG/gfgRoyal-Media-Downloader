@@ -7,8 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-from gfgmd.controllers.queue_ctrl import QueueController, _running_values
+from gfgmd.controllers.queue_ctrl import QueueController
+from gfgmd.controllers.queue_rows import entry_key, job_key, running_values
 from gfgmd.core import extract, naming
+from gfgmd.core.naming import group_of
 from gfgmd.core.extract import VideoProbe
 from gfgmd.core.progress import Snapshot
 from gfgmd.core.runner import run_to_completion
@@ -94,7 +96,18 @@ def test_bad_links_are_reported_not_queued(qapp, queue, context):
     queue.notice.connect(notices.append)
     assert queue.addLinks("not a link\nftp://x/y", "video-best-mp4") == 0
     assert context.store.jobs() == []
-    assert notices and "skipped" in notices[0]
+    assert notices and notices[0].startswith("4 links couldn't be added.")  # split at spaces and line breaks
+
+
+def test_text_without_a_link_says_so_and_bare_links_get_https(qapp, queue, context):
+    """Words copied by mistake read as "isn't a link"; "fake.test/ok" is taken as the link box takes it."""
+    notices = []
+    queue.notice.connect(notices.append)
+    queue.pauseAll()
+    assert queue.addLinks("just some words", "video-best-mp4") == 0
+    assert notices[-1] == "The copied text isn't a link. Copy the link from your browser's address bar."
+    assert queue.addLinks("fake.test/ok", "video-best-mp4") == 1
+    assert context.store.jobs()[0]["url"] == "https://fake.test/ok"
 
 
 def test_sign_in_needed_then_retry_after_sign_in(qapp, queue, context):
@@ -131,6 +144,34 @@ def test_pause_resume_and_cancel_a_running_download(qapp, queue, context):
     assert wait_for(qapp, lambda: states(context) == ["cancelled"])
 
 
+def test_a_stronger_stop_reason_is_kept(qapp):
+    """Pause all after Cancel, or a restart after Pause, doesn't change what the download becomes."""
+    from gfgmd.controllers.queue_ctrl import _Running
+    running = _Running(1, "archive", "youtube", False)
+    running.stop("cancel")
+    running.stop("pause_all")
+    running.stop("shutdown")
+    assert running.stop_reason == "cancel"
+    paused = _Running(2, "archive", "youtube", False)
+    paused.stop("pause")
+    paused.stop("restart")
+    assert paused.stop_reason == "pause"
+    paused.stop("remove")
+    assert paused.stop_reason == "remove"
+
+
+def test_quitting_keeps_a_paused_download_paused(qapp, context, fake_ytdlp):
+    """A download paused just before the app quits is still paused at the next start, not queued."""
+    controller = QueueController(context, ToolManager(context), Notifier(lambda: None, lambda path: None),
+                                 runner=lambda c, o, s: run_to_completion(fake_ytdlp + c[1:], o, s))
+    controller.addLinks("https://fake.test/slow", "video-best-mp4")
+    assert wait_for(qapp, lambda: controller.runningCount == 1)
+    job_id = context.store.jobs()[0]["id"]
+    controller.pause(job_id)
+    controller.shutdown()
+    assert context.store.job(job_id)["state"] == "paused"
+
+
 def test_concurrency_limit_and_shared_archive(qapp, queue, context):
     settings = get_default_settings()
     settings["downloads"]["folder"] = str(Path(context.store.path).parent / "Downloads")
@@ -153,14 +194,74 @@ def test_when_done_countdown(qapp, queue, context):
     assert queue.whenDone == "nothing"
 
 
+def test_when_done_waits_while_a_download_is_paused(qapp, queue, context):
+    """Pausing the last download (or Pause all) is not the queue finishing: no countdown."""
+    countdowns = []
+    queue.whenDoneCountdown.connect(countdowns.append)
+    queue.setWhenDone("sleep")
+    queue.addLinks("https://fake.test/slow", "video-best-mp4")
+    assert wait_for(qapp, lambda: queue.runningCount == 1)
+    job_id = context.store.jobs()[0]["id"]
+    queue.pause(job_id)
+    assert wait_for(qapp, lambda: states(context) == ["paused"] and queue.runningCount == 0)
+    wait_for(qapp, lambda: bool(countdowns), timeout=1.5)
+    assert countdowns == []
+    queue.cancelWhenDone()
+
+
+def test_downloads_that_needed_the_tools_try_again_once_updated(qapp, queue, context):
+    notices = []
+    queue.notice.connect(notices.append)
+    queue.pauseAll()
+    job_id = context.store.add_job("https://fake.test/ok", "generic", "https://fake.test/ok", "fake.test",
+                                   {"kind": "video"}, str(Path(context.store.path).parent / "D"), state="failed")
+    context.store.update_job(job_id, action="update_tools", error_key="extractor_broken")
+    queue.retry_after_tools()
+    assert context.store.job(job_id)["state"] == "queued" and context.store.job(job_id)["action"] == ""
+    assert notices and "trying again" in notices[-1]
+
+
+def test_quit_when_done_is_handed_to_the_app(qapp, queue):
+    """Quit after the countdown asks the app to quit (past the window's close-to-tray), never the PC."""
+    asked = []
+    queue.quitRequested.connect(lambda: asked.append(True))
+    queue.setWhenDone("quit")
+    with patch("gfgmd.controllers.queue_ctrl.power.perform") as power:
+        queue.performWhenDone()
+    assert asked == [True] and not power.called and queue.whenDone == "nothing"
+
+
+def test_download_again_keeps_the_files_type(qapp, queue, context):
+    """A song downloaded again stays a song in its format, an MKV stays an MKV, whatever the preset."""
+    queue.pauseAll()
+    queue.download_again("https://fake.test/ok", "audio", "flac")
+    queue.download_again("https://fake.test/flaky", "video", "mkv")
+    song, video = (json.loads(job["options_json"]) for job in context.store.jobs())
+    assert (song["kind"], song["audio_format"], song["ignore_archive"]) == ("audio", "flac", True)
+    assert (video["kind"], video["container"]) == ("video", "mkv")
+
+
 def test_interrupted_jobs_resume_on_start(qapp, context, fake_ytdlp):
+    """They start at once, not at the queue's first tick 15 seconds later."""
     job_id = context.store.add_job("https://fake.test/ok", "generic", "https://fake.test/ok", "fake.test",
                                    {"kind": "video"}, str(Path(context.store.path).parent / "D"), state="running")
     notifier = Notifier(lambda: None, lambda path: None)
     controller = QueueController(context, ToolManager(context), notifier,
                                  runner=lambda c, o, s: run_to_completion(fake_ytdlp + c[1:], o, s))
     try:
-        assert wait_for(qapp, lambda: context.store.job(job_id)["state"] == "done")
+        assert wait_for(qapp, lambda: context.store.job(job_id)["state"] == "done", timeout=8.0)
+    finally:
+        controller.shutdown()
+
+
+def test_sign_in_copies_left_by_a_crash_are_removed_at_start(qapp, context):
+    """Whatever a run left in the run folder (cookie copies above all) goes when the queue starts."""
+    left = context.run_root / "7-1700000000"
+    left.mkdir(parents=True)
+    (left / "cookies.txt").write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    controller = QueueController(context, ToolManager(context), Notifier(lambda: None, lambda path: None))
+    try:
+        assert context.run_root.is_dir() and list(context.run_root.iterdir()) == []
     finally:
         controller.shutdown()
 
@@ -265,7 +366,7 @@ def test_the_same_video_again_plays_the_file_already_downloaded(qapp, queue, con
     assert queue.model.get(1)["canRedownload"] is True
     queue.downloadAgain(again["id"])
     assert wait_for(qapp, lambda: states(context) == ["done", "done"] and len(context.store.history()) == 2)
-    assert context.store.job(again["id"])["message"] == "1 file saved"
+    assert context.store.job(again["id"])["message"] == "1 video saved"
     # Try again goes back to the archive's rule.
     queue.retry(again["id"])
     assert wait_for(qapp, lambda: context.store.job(again["id"])["message"] == "Already downloaded")
@@ -280,21 +381,21 @@ def test_a_video_whose_file_is_gone_downloads_again(qapp, queue, context):
     queue.addLinks("https://fake.test/ok", "video-best-mp4")
     assert wait_for(qapp, lambda: states(context) == ["done", "done"] and first.exists())
     again = context.store.jobs()[1]
-    assert again["message"] == "1 file saved" and queue.model.get(1)["lastFile"] == str(first)
+    assert again["message"] == "1 video saved" and queue.model.get(1)["lastFile"] == str(first)
     # The file took its old name back, so its library record is the new download's.
     assert [record["job_id"] for record in context.store.history()] == [again["id"]]
 
 
 def test_the_list_shows_how_far_a_conversion_has_got():
     """Converting shows its own share done and time left, not the finished download's speed."""
-    snap = Snapshot(stage="Converting", downloaded=12_000_000, total=12_000_000, convert_fraction=0.45, eta=10,
-                    overall=0.999, item_count=1)
-    values = _running_values(snap)
-    assert values["progress"] == 0.45 and values["statusText"] == "Converting"
-    assert values["detail"] == "45%  ·  11.4 MB downloaded  ·  0:10 left"
+    snap = Snapshot(stage="Converting to MP3", downloaded=12_000_000, total=12_000_000, convert_fraction=0.45,
+                    eta=10, overall=0.999, item_count=1, phase="post")
+    values = running_values(snap)
+    assert values["progress"] == 0.45 and values["statusText"] == "Converting to MP3"
+    assert values["detail"] == "45%  ·  11.4 MB downloaded  ·  about 10 seconds left"
     # Without ffmpeg's progress (merging, or a conversion not started yet) the bar sweeps.
-    assert _running_values(Snapshot(stage="Merging", downloaded=5, speed=900.0))["progress"] == -1.0
-    assert "/s" not in _running_values(Snapshot(stage="Merging", downloaded=5, speed=900.0))["detail"]
+    merging = Snapshot(stage="Putting the video together", downloaded=5, speed=900.0, phase="post")
+    assert running_values(merging)["progress"] == -1.0 and "/s" not in running_values(merging)["detail"]
 
 
 def test_finished_downloads_leave_the_list_when_the_app_closes(qapp, context, fake_ytdlp):
@@ -372,7 +473,7 @@ def test_actions_on_several_downloads_at_once(qapp, queue, context):
     with patch.object(recycle_module, "to_recycle_bin", return_value=True):
         queue.applyToJobs("remove_saved", ids)
     assert context.store.jobs() == [] and context.store.history() == []
-    assert notices[-1] == "Moved 3 file(s) to the Recycle Bin."
+    assert notices[-1] == "Moved 3 files to the Recycle Bin."
     queue.applyToJobs("unknown", ids)  # ignored
 
 
@@ -392,3 +493,82 @@ def test_extract_audio_of_several_library_files_leaves_songs_out(qapp, queue, co
     jobs = context.store.jobs()
     assert [job["input_path"] for job in jobs] == [str(video)]
 
+
+
+# ── Playlists in the list ──
+
+def rows_of(queue) -> list[dict]:
+    return [queue.model.get(i) for i in range(queue.model.count)]
+
+
+def test_a_playlist_shows_its_videos_and_each_lands_in_the_library(qapp, queue, context):
+    saved = []
+    queue.fileSaved.connect(lambda history_id, path: saved.append(path))
+    queue.addLinks("https://fake.test/listed", "video-best-mp4")
+    assert wait_for(qapp, lambda: states(context) == ["done"] and len(saved) == 3)
+    job = context.store.jobs()[0]
+    rows = rows_of(queue)
+    assert [row["rowType"] for row in rows] == ["job", "entry", "entry", "entry"]
+    assert rows[0]["entryCount"] == 3 and rows[0]["expanded"] is True and rows[0]["detail"] == "3 videos saved"
+    assert [(row["number"], row["title"], row["statusText"]) for row in rows[1:]] == [
+        (1, "First", "Saved"), (2, "Second", "Saved"), (3, "Third", "Saved")]
+    assert rows[1]["lastFile"] == saved[0] and rows[1]["thumbnail"].endswith("/aaaaaaaaaaa/hq.jpg")
+    records = sorted(context.store.history(), key=lambda record: record["position"])
+    assert [record["position"] for record in records] == [1, 2, 3]
+    assert {record["group_title"] for record in records} == {"Fake List"}
+    assert queue.savedFiles(job["id"]) == [row["lastFile"] for row in rows[1:]]  # Play's order
+    queue.setExpanded(job["id"], False)
+    assert [row["rowType"] for row in rows_of(queue)] == ["job"]
+
+
+def test_a_stalled_video_waits_while_the_rest_download(qapp, context, fake_ytdlp):
+    def runner(command, on_line, stop):
+        return run_to_completion(fake_ytdlp + command[1:], on_line, stop)
+    notifier = Notifier(lambda: None, lambda path: None)
+    notifier.attach(None)
+    queue = QueueController(context, ToolManager(context), notifier, runner=runner, stall_seconds=1.0)
+    try:
+        queue.addLinks("https://fake.test/stall", "video-best-mp4")
+        job_id = context.store.jobs()[0]["id"]
+        assert wait_for(qapp, lambda: context.store.item_counts(job_id).get("deferred") == 1)
+        assert queue.model.get(queue.model.row_of(entry_key(job_id, "bbbbbbbbbbb")))["statusText"] == \
+            "Waiting for its server"
+        assert wait_for(qapp, lambda: states(context) == ["done"])
+        assert context.store.item_counts(job_id) == {"done": 3}
+        assert queue.model.get(queue.model.row_of(job_key(job_id)))["progress"] == 1.0
+    finally:
+        queue.shutdown()
+
+
+def test_a_subscriptions_new_uploads_are_one_download(qapp, queue, context):
+    from gfgmd.core.sources import source_from_url
+    queue.pauseAll()
+    source = source_from_url("https://www.youtube.com/playlist?list=PLabcdefghijklmnop")
+    uploads = [{"id": video_id, "title": f"Upload {video_id[:3]}", "url": f"https://fake.test/batch/{video_id}",
+                "thumbnail": ""} for video_id in ("aaaaaaaaaaa", "bbbbbbbbbbb")]
+    options = queue._preset_options("video-best-mp4")
+    assert queue.add_subscription_items(uploads, source, options, 1, None, title="Mix", url="https://youtu.be/mix",
+                                        folder="Mix: Best of") == 2
+    job = context.store.jobs()[0]
+    assert (job["title"], job["batch"], job["folder"], job["items_total"]) == ("Mix: 2 videos", 1, "Mix: Best of", 2)
+    queue.resumeAll()
+    assert wait_for(qapp, lambda: states(context) == ["done"])
+    assert {Path(record["filepath"]).parent.name for record in context.store.history()} == {"Mix_ Best of"}
+    assert context.store.item_counts(job["id"]) == {"done": 2}
+
+
+def test_picked_flags_say_what_the_selection_allows(qapp, queue, context):
+    queue.pauseAll()
+    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    job_id = context.store.jobs()[0]["id"]
+    assert queue.pickedFlags([job_id]) == {"canPause": True, "canResume": False, "canRetry": False}
+    queue.pause(job_id)
+    assert queue.pickedFlags([job_id]) == {"canPause": False, "canResume": True, "canRetry": False}
+
+
+def test_files_are_grouped_by_their_playlist_folder(tmp_path):
+    root = tmp_path / "Videos"
+    assert group_of(root / "Clip.mp4", root) == ("", "")
+    key, title = group_of(root / "Channel" / "Videos" / "Clip.mp4", root)
+    assert key == str(root / "Channel" / "Videos").casefold() and title == "Channel · Videos"
+    assert group_of(tmp_path / "Elsewhere" / "Clip.mp4", root) == ("", "")

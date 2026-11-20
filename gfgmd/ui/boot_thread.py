@@ -5,6 +5,8 @@
 # the modules load is only possible when they are imported after the splash is visible, here, off
 # the GUI thread.
 
+import traceback
+
 from PySide6.QtCore import QThread, Signal
 
 
@@ -13,17 +15,17 @@ class BootThread(QThread):
 
     stage_changed = Signal(str, int)
     boot_ready = Signal()
-    boot_failed = Signal(str)
+    boot_failed = Signal(str)  # what went wrong, with the traceback, for the log
 
     def run(self) -> None:
         """Load the download engine and the controllers, then signal that the window can be built."""
         try:
-            self.stage_changed.emit("Loading the download engine...", 35)
+            self.stage_changed.emit("Starting up...", 35)
             import gfgmd.core.jobs  # noqa: F401
             import gfgmd.core.analyze  # noqa: F401
             import gfgmd.core.store  # noqa: F401
 
-            self.stage_changed.emit("Preparing the interface...", 75)
+            self.stage_changed.emit("Almost ready...", 75)
             import gfgmd.controllers.app_ctrl  # noqa: F401
             import gfgmd.controllers.prefs_ctrl  # noqa: F401
             import gfgmd.controllers.queue_ctrl  # noqa: F401
@@ -35,5 +37,5 @@ class BootThread(QThread):
             import gfgmd.controllers.update_ctrl  # noqa: F401
 
             self.boot_ready.emit()
-        except Exception as error:  # reported (and logged) by the window's start-up, which quits
-            self.boot_failed.emit(f"{type(error).__name__}: {error}")
+        except Exception:  # reported (and logged) by the window's start-up, which quits
+            self.boot_failed.emit(f"Loading the app's modules failed:\n{traceback.format_exc().rstrip()}")

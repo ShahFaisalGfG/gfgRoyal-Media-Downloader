@@ -3,7 +3,7 @@
 # A thin surface over settings.json. QML reads any value with value("section.key"), binding to
 # `revision` so it re-reads after every save; saveSettings applies dotted-key updates in one write.
 # settingsChanged lets the app re-apply side effects (Start with Windows, the queue's limits); this
-# controller never performs those itself. It also runs "Optimize for this PC" for fragments.
+# controller never performs those itself. It also runs "Optimize for this PC" for Parts at once.
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from gfgmd.utils.format import format_bytes
 from gfgmd.utils.logging import clear_logs, get_logs_dir, write_log
 from gfgmd.utils.settings import get_default_settings, load_settings, save_settings
 
-_NOT_SAVED = "Couldn't save the preferences file, so the previous preferences are still in use."
+_NOT_SAVED = "Couldn't save your preferences, so the previous ones are still in use."
 
 
 def _options(pairs: list[tuple[str, Any]]) -> list[dict[str, Any]]:
@@ -250,14 +250,20 @@ class PrefsController(QObject):
 
     @Slot(str)
     def startOptimize(self, url: str) -> None:
-        """Measure 4, 8, and 16 fragments on a video, then keep the fastest as the fragment setting."""
+        """Measure 4, 8, and 16 parts at once on a video, then keep the fastest as the Parts at once setting."""
         if self._optimizing:
             return
         try:
             source_from_url(url)
+        except ValueError as error:
+            write_log(f"The speed test link was refused: {error}", "general")
+            self.optimizeFinished.emit("Paste a link to one video to test with.")
+            return
+        try:
             tools = self._context.tools()
-        except (ValueError, RuntimeError) as error:
-            self.optimizeFinished.emit(str(error))
+        except RuntimeError as error:
+            write_log(f"The speed test couldn't find the download tools: {error}", "critical")
+            self.optimizeFinished.emit("The download tools aren't installed yet. Get them in the Tools section.")
             return
         self._optimizing = True
         self._optimize_step = (0, 0)
@@ -280,18 +286,20 @@ class PrefsController(QObject):
         self._optimize_timer.stop()
         self.optimizeChanged.emit()
         if self._optimize_stop.is_set() or not speeds or max(speeds.values()) <= 0:
-            self.optimizeFinished.emit("The test stopped before it could measure a speed.")
+            self.optimizeFinished.emit("The speed test stopped before it could measure anything.")
             return
         best = pick_fastest(speeds, DownloadDefaults.AUTO_FRAGMENTS)
-        summary = ", ".join(f"{count}: {format_bytes(int(speed))}/s" for count, speed in sorted(speeds.items()))
+        summary = ", ".join(f"{count} parts: {format_bytes(int(speed))}/s" for count, speed in sorted(speeds.items()))
         self.saveSettings({"downloads.fragments": 0 if best == DownloadDefaults.AUTO_FRAGMENTS else best})
-        self.optimizeFinished.emit(f"Fastest here: {best} fragments ({summary}).")
+        self.optimizeFinished.emit(f"Fastest here: {best} parts at once ({summary}). Saved.")
 
-    def _optimize_failed(self, message: str) -> None:
+    def _optimize_failed(self, _message: str) -> None:
+        """The test raised; the task runner has logged why, so the user gets what to do instead."""
         self._optimizing = False
         self._optimize_timer.stop()
         self.optimizeChanged.emit()
-        self.optimizeFinished.emit(f"The speed test failed: {message}")
+        self.optimizeFinished.emit("The speed test couldn't finish. Check the link and your internet connection, "
+                                   "then try again.")
 
     def shutdown(self) -> None:
         self._optimize_stop.set()

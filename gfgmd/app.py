@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 from typing import Any, Optional, cast
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QMetaObject, QSize
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QWindow
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -28,6 +29,9 @@ from gfgmd.utils.single_instance import LaunchRequest, SingleInstance, hold_app_
 _SELF_TEST_FLAG = "--self-test"
 _LINKS_MODE = "links"
 _SIGNIN_MODE = "signin"
+# What the start-up failure dialog says; the details go to the log.
+_START_FAILED = ("Some of the app's files are missing or damaged. Install the newest version of the app, "
+                 "then try again.")
 # Images loaded outside QML; the self-test checks they are bundled.
 SPLASH_LOGO = "gfgmd/assets/icons/Square310x310Logo.scale-100.png"
 WINDOW_ICONS = {size: f"gfgmd/assets/icons/Square44x44Logo.targetsize-{size}.png" for size in (16, 32, 48, 256)}
@@ -104,14 +108,16 @@ class _Startup:
             queue_ctrl.fileSaved.connect(library_ctrl.file_saved)
             queue_ctrl.filesRemoved.connect(library_ctrl.reload)
             queue_ctrl.signInNeeded.connect(lambda site: app_ctrl.notice.emit(
-                f"A download needs you to sign in to {context.site(site).label}; open Sign-ins."))
+                f"A download needs you to sign in to {context.site(site).label}. Open Sign-ins to sign in."))
             # A stale browser-window sign-in is re-read quietly first; it often still works.
             queue_ctrl.signInNeeded.connect(signins_ctrl.autoRefresh)
             signins_ctrl.signedIn.connect(queue_ctrl.retrySignIn)
             signins_ctrl.signedIn.connect(analyze_ctrl.signedIn)
-            library_ctrl.redownloadRequested.connect(
-                lambda url: queue_ctrl.download_again(url, str(load_settings().get("downloads", {}).get("preset", ""))))
+            library_ctrl.redownloadRequested.connect(queue_ctrl.download_again)
+            queue_ctrl.quitRequested.connect(self._quit_now)
             tools_ctrl.toolsReady.connect(queue_ctrl.refresh_settings)
+            tools_ctrl.toolsReady.connect(queue_ctrl.retry_after_tools)
+            app_ctrl.closedToTray.connect(notifier.tell_once_in_tray)
             for source in (queue_ctrl, analyze_ctrl, library_ctrl, subs_ctrl, signins_ctrl, tools_ctrl, player_ctrl):
                 source.notice.connect(app_ctrl.notice)
 
@@ -131,7 +137,7 @@ class _Startup:
             engine.addImportPath(qml_dir)
             engine.load(os.path.join(qml_dir, "main.qml"))
             if not engine.rootObjects():
-                self._on_failed("The user interface failed to load.")
+                self._on_failed("main.qml didn't load; the QML engine reported errors.")
                 return
 
             self._root = cast(QWindow, engine.rootObjects()[0])
@@ -160,9 +166,8 @@ class _Startup:
             update_ctrl.start()
             tools_ctrl.refresh()
             self._splash.close()
-        except Exception as error:  # the start-up boundary: anything here would leave no window
-            write_log(f"Startup error: {error}", "critical", force=True)
-            self._on_failed(f"The window couldn't be built: {error}")
+        except Exception:  # the start-up boundary: anything here would leave no window
+            self._on_failed(f"The window couldn't be built:\n{traceback.format_exc().rstrip()}")
 
     def _build_tray(self, notifier: Any) -> None:
         """Create the tray icon and its menu, when a tray is available."""
@@ -184,7 +189,7 @@ class _Startup:
             ("Resume all downloads", queue.resumeAll),
             ("Check subscriptions now", subs.checkAll),
             None,
-            ("Quit", self._app.quit),
+            ("Quit", self._quit_from_tray),
         ]
         for entry in entries:
             if entry is None:
@@ -224,11 +229,32 @@ class _Startup:
         self._root.raise_()
         self._root.requestActivate()
 
+    def _quit_now(self) -> None:
+        """Quit, past the window's close-to-tray: Qt asks each window to close first, and the main
+        window only hides when its own close button is used."""
+        if self._root is not None:
+            self._root.setProperty("_quitting", True)
+        self._app.quit()
+
+    def _quit_from_tray(self) -> None:
+        """The tray's Quit: as Ctrl+Q in the window, asking first while downloading (the window comes
+        forward for that question)."""
+        if self._root is None:
+            self._quit_now()
+            return
+        if self._controllers["queueController"].runningCount:
+            self._show_window()
+        QMetaObject.invokeMethod(self._root, "quitApp")
+
     def _download_clipboard(self) -> None:
         text = QGuiApplication.clipboard().text().strip()
-        queue = self._controllers["queueController"]
-        if not text or not queue.addLinks(text, str(load_settings().get("downloads", {}).get("preset", ""))):
-            self._controllers["appController"].notice.emit("The clipboard has no link to download.")
+        if not text:
+            self._controllers["appController"].notice.emit(
+                "There's no copied link. Copy a link to a video or song, then try again.")
+            return
+        # The queue says itself when a link in the text can't be added, so nothing more is said here.
+        self._controllers["queueController"].addLinks(
+            text, str(load_settings().get("downloads", {}).get("preset", "")))
 
     def _on_launch_request(self, mode: str, values: list[str]) -> None:
         """A later launch, the command-line tool, or the companion extension handed something over."""
@@ -245,6 +271,8 @@ class _Startup:
         """Offer to download a copied link (Preferences > General > Watch the clipboard)."""
         if not load_settings().get("clipboard", {}).get("watch", False):
             return
+        if QGuiApplication.clipboard().ownsClipboard():
+            return  # the app's own Copy link (or a copy from its link box) isn't offered back
         text = QGuiApplication.clipboard().text().strip()
         if not text or text == self._last_clipboard or "\n" in text or len(text) > 2048:
             return
@@ -274,11 +302,11 @@ class _Startup:
             self._controllers["queueController"].refresh_settings()
         self._applied = current
 
-    def _on_failed(self, message: str) -> None:
-        """Log the failure, show it, and quit instead of hanging silently."""
-        write_log(f"Startup failed: {message}", "critical", force=True)
+    def _on_failed(self, detail: str) -> None:
+        """Log what went wrong, tell the user what to do, and quit instead of hanging silently."""
+        write_log(f"Startup failed: {detail}", "critical", force=True)
         self._splash.close()
-        QMessageBox.critical(None, AppInfo.APP_NAME, f"{AppInfo.APP_NAME} couldn't start:\n\n{message}")
+        QMessageBox.critical(None, AppInfo.APP_NAME, f"{AppInfo.APP_NAME} couldn't start.\n\n{_START_FAILED}")
         self._app.exit(-1)
 
     def shutdown(self) -> None:

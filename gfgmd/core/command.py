@@ -9,6 +9,8 @@ Every command:
 
 from __future__ import annotations
 
+import re
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -18,7 +20,11 @@ from gfgmd.core.platform import hide_folder
 from gfgmd.core.sources import CHANNEL_TABS, Source
 from gfgmd.core.tools import ToolSet
 
+# The start of the lines the app asks yt-dlp to print. Each run uses its own random one (run_marker),
+# so a site's title that yt-dlp prints in its messages can't pass for one of them.
 MARKER = "@@gfgr:"
+# The archive file of a Download again, in the job's folder (see RunPaths.session_archive).
+SESSION_ARCHIVE = "session-archive.txt"
 # More links than this go through a batch file, which keeps the command line short.
 MAX_INLINE_URLS = 50
 # --match-filters entries beyond this are dropped; the skipped items then fail fast and are skipped again.
@@ -27,17 +33,17 @@ MAX_SKIP_FILTERS = 200
 _ITEM_FIELDS = ("id,extractor_key,title,uploader,channel,duration,live_status,playlist_title,"
                 "playlist_index,n_entries,format_id,webpage_url,thumbnail,release_timestamp")
 _FILE_FIELDS = ("id,extractor_key,title,filepath,height,width,vcodec,acodec,webpage_url,duration,uploader,"
-                "channel,playlist_title,thumbnail,artist,creator,track,album")
+                "channel,playlist_title,playlist_index,thumbnail,artist,creator,track,album")
 _ENTRY_FIELDS = ("id,url,title,duration,live_status,availability,release_timestamp,timestamp,"
                  "playlist_index,ie_key,channel,uploader")
 _DOWNLOAD_PROGRESS = (
-    "download:" + MARKER + 'dl {"p":%(progress.{status,downloaded_bytes,total_bytes,total_bytes_estimate,'
+    'dl {"p":%(progress.{status,downloaded_bytes,total_bytes,total_bytes_estimate,'
     'speed,eta,fragment_index,fragment_count,tmpfilename,filename,elapsed})j,'
     '"i":%(info.{id,format_id,vcodec,acodec,playlist_index,is_live})j}'
 )
-_POSTPROCESS_PROGRESS = (
-    "postprocess:" + MARKER + 'pp {"p":%(progress.{status,postprocessor})j,"i":%(info.{id,filepath})j}'
-)
+_POSTPROCESS_PROGRESS = 'pp {"p":%(progress.{status,postprocessor})j,"i":%(info.{id,filepath})j}'
+# Characters a Windows folder name can't hold, and control characters.
+_UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _STAGES = {"video", "after_move", "playlist", "before_dl", "pre_process", "after_filter", "post_process"}
 # Each order ranks "lang" before any audio field, so the audio track in the video's original language
 # wins over dubbed ones. yt-dlp always ranks its own "ie_pref" first, which keeps watermarked TikTok
@@ -49,20 +55,27 @@ SORT_PROFILES = {
 }
 # Audio-only downloads: the original language, then the highest bitrate and sample rate.
 AUDIO_SORT = "lang,abr,asr"
+# The best audio that isn't YouTube's "stable volume" copy (format IDs ending "-drc"), whose squeezed
+# loudness range spoils music; the plain "ba" after it still takes one when nothing else is offered.
+FULL_AUDIO = "ba[format_id!*=drc]"
 _AUDIO_SELECTORS = {
-    "mp3": "ba[acodec^=mp3]/ba/b",
-    "m4a": "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b",
-    "opus": "ba[acodec^=opus]/ba/b",
-    "vorbis": "ba[acodec^=vorbis]/ba/b",
-    "flac": "ba/b",
-    "wav": "ba/b",
-    "best": "ba/b",
+    "mp3": f"ba[acodec^=mp3]/{FULL_AUDIO}/ba/b",
+    "m4a": f"ba[ext=m4a][format_id!*=drc]/ba[ext=m4a]/ba[acodec^=mp4a]/{FULL_AUDIO}/ba/b",
+    "opus": f"ba[acodec^=opus][format_id!*=drc]/ba[acodec^=opus]/{FULL_AUDIO}/ba/b",
+    "vorbis": f"ba[acodec^=vorbis]/{FULL_AUDIO}/ba/b",
+    "flac": f"{FULL_AUDIO}/ba/b",
+    "wav": f"{FULL_AUDIO}/ba/b",
+    "best": f"{FULL_AUDIO}/ba/b",
 }
 # A centre crop to a square, for covers. The single quotes keep ffmpeg from reading the commas
 # inside the expressions as filter separators.
 SQUARE_CROP = "crop='if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'"
 # yt-dlp splits these arguments like a shell, so the single quotes reach ffmpeg.
 SQUARE_COVER = f'ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -qmin 1 -qscale:v 1 -vf "{SQUARE_CROP}"'
+# What a music video's title says about the video, not the song: "(Official Video)", "[Lyrics]",
+# "(HD)", "(4K Remaster)". Songs leave it out of their title tag and file name; "(Live)" and
+# "(Remix)" stay, as they name the song.
+MUSIC_TITLE_NOISE = r"(?i)\s*[(\[](?:official\s+(?:music\s+|lyrics?\s+)?(?:video|audio|visuali[sz]er|m/?v)(?:\s+hd)?|(?:lyrics?|music)\s+video|with\s+lyrics|lyrics|audio|visuali[sz]er|m/?v|hd|hq|[48]k|(?:[48]k\s+|hd\s+)?remaster(?:ed)?(?:\s+\d{4})?)[)\]]"
 # Channel names that aren't the artist: YouTube Music's "<Artist> - Topic" and "<Artist>VEVO".
 ARTIST_SUFFIX = r"( - Topic|VEVO)$"
 # Facebook titles reels "9.9K views · 340 reactions | <caption>"; the counts don't belong in a file name.
@@ -111,6 +124,17 @@ class RunPaths:
         """Where ffmpeg writes how far an audio conversion has got (yt-dlp reports only its start and end)."""
         return self.job_dir / "convert.progress"
 
+    @property
+    def session_archive(self) -> Path:
+        """The videos a Download again saved so far, so a pause, a restart, or a retry doesn't fetch
+        them a second time; the queue clears it when Download again starts over."""
+        return self.job_dir / SESSION_ARCHIVE
+
+    @property
+    def lists(self) -> Path:
+        """Where yt-dlp writes each playlist's details, with its videos, before downloading them."""
+        return self.job_dir / "lists"
+
 
 @dataclass(frozen=True)
 class Auth:
@@ -123,6 +147,12 @@ class Auth:
 def escape_template(text: str) -> str:
     """A literal for a yt-dlp output template ("%" is its field marker)."""
     return text.replace("%", "%%")
+
+
+def folder_name(text: str) -> str:
+    """A name Windows accepts for one folder: no path separators or reserved characters, at most 100 long."""
+    cleaned = _UNSAFE_NAME.sub("_", text).strip().rstrip(". ")
+    return cleaned[:100].rstrip(". ") or "Downloads"
 
 
 def print_arg(stage: str, template: str) -> list[str]:
@@ -221,11 +251,11 @@ def _with_audio(video: str, combined: str, options: DownloadOptions) -> str:
     The original-language track comes from the "lang" sort; each chosen language adds its own best
     track. When a video lacks one of them, the next alternative keeps just the original.
     """
-    plain = f"{video}+ba/{combined}"
+    plain = f"{video}+{FULL_AUDIO}/{video}+ba/{combined}"
     if not options.multi_audio:
         return plain
-    extra = "".join(f"+ba[language^={code}]" for code in options.audio_langs)
-    return f"{video}+ba{extra}/{plain}"
+    extra = "".join(f"+ba[language^={code}][format_id!*=drc]" for code in options.audio_langs)
+    return f"{video}+{FULL_AUDIO}{extra}/{plain}"
 
 
 def format_sort(options: DownloadOptions) -> str:
@@ -259,10 +289,15 @@ def folder_template(source: Source) -> str:
     return "%(playlist_title,playlist|.).100B"
 
 
-def output_template(source: Source, options: DownloadOptions) -> str:
-    """The staged file name: title, ID, and requested profile, renamed to a clean name afterwards."""
+def output_template(source: Source, options: DownloadOptions, folder: str = "") -> str:
+    """The staged file name: title, ID, and requested profile, renamed to a clean name afterwards.
+
+    `folder` names the folder outright instead of from the video's details (a playlist subscription's
+    new uploads, downloaded one link at a time, carry no playlist name).
+    """
     prefix = _FILENAME_PREFIX[options.filename_style]
-    return f"{folder_template(source)}/{prefix}%(title).100B [%(id).64B] (requested-{options.profile}).%(ext)s"
+    where = escape_template(folder_name(folder)) if folder else folder_template(source)
+    return f"{where}/{prefix}%(title).100B [%(id).64B] (requested-{options.profile}).%(ext)s"
 
 
 def media_args(source: Source, options: DownloadOptions) -> list[str]:
@@ -301,7 +336,9 @@ def cuts_segments(source: Source, options: DownloadOptions) -> bool:
 
 def _audio_args(source: Source, options: DownloadOptions) -> list[str]:
     """Extraction, bitrate, cover, metadata, and lyrics captions for an audio download."""
-    args = ["--extract-audio", "--audio-format", options.audio_format]
+    # Before anything reads the title: the file name and the tags both take the song's own.
+    args = ["--extract-audio", "--audio-format", options.audio_format,
+            "--replace-in-metadata", "title", MUSIC_TITLE_NOISE, ""]
     if not options.lossless_audio:
         args += ["--audio-quality", f"{options.audio_quality}K"]
     if options.embed_thumbnail:
@@ -339,18 +376,36 @@ def _subtitle_args(options: DownloadOptions) -> list[str]:
     return args
 
 
-def structured_output_args(journal: Path) -> list[str]:
+def playlist_list_args(lists: Path) -> list[str]:
+    """Have yt-dlp write each playlist's details, with every video in it, before the first download.
+
+    Only the playlist file is written: the empty "infojson" template leaves out one per video, and
+    --no-clean-info-json keeps the list of videos, which cleaning would drop. yt-dlp announces the file
+    with "[info] Writing playlist metadata as JSON to: <path>" (read in progress.py). A channel's tabs
+    each get a file of their own, so the name carries the title as well as the ID.
+    """
+    template = escape_template(str(lists)) + "/%(id).40B %(title).60B.%(ext)s"
+    return ["--write-info-json", "--no-clean-info-json", "--no-embed-info-json",
+            "--output", "infojson:", "--output", f"pl_infojson:{template}"]
+
+
+def run_marker() -> str:
+    """A marker for one run's lines, which no site can know in advance."""
+    return f"@@gfgr-{secrets.token_hex(8)}:"
+
+
+def structured_output_args(journal: Path, marker: str = MARKER) -> list[str]:
     """Progress, item, and finished-file lines the app parses, plus yt-dlp's own file journal."""
     file_line = f"%(.{{{_FILE_FIELDS}}})j"
     return [
         "--progress",
         "--progress-delta", "0.5",
         "--no-simulate",
-        "--progress-template", _DOWNLOAD_PROGRESS,
-        "--progress-template", _POSTPROCESS_PROGRESS,
-        *print_arg("video", f"{MARKER}item %(.{{{_ITEM_FIELDS}}})j"),
-        *print_arg("video", f"{MARKER}parts %(requested_formats.:.{{format_id,vcodec,acodec,filesize,filesize_approx}})j"),
-        *print_arg("after_move", f"{MARKER}file {file_line}"),
+        "--progress-template", f"download:{marker}{_DOWNLOAD_PROGRESS}",
+        "--progress-template", f"postprocess:{marker}{_POSTPROCESS_PROGRESS}",
+        *print_arg("video", f"{marker}item %(.{{{_ITEM_FIELDS}}})j"),
+        *print_arg("video", f"{marker}parts %(requested_formats.:.{{format_id,vcodec,acodec,filesize,filesize_approx}})j"),
+        *print_arg("after_move", f"{marker}file {file_line}"),
         "--print-to-file", f"after_move:{file_line}", escape_template(str(journal)),
     ]
 
@@ -364,8 +419,14 @@ def skip_filter(skip_ids: Sequence[str]) -> list[str]:
 
 
 def download_command(url: str, source: Source, options: DownloadOptions, tools: ToolSet, paths: RunPaths,
-                     auth: Auth | None = None, skip_ids: Sequence[str] = ()) -> list[str]:
-    """One download attempt: resumable, archived, and reporting progress as JSON lines."""
+                     auth: Auth | None = None, skip_ids: Sequence[str] = (), urls: Sequence[str] = (),
+                     folder: str = "", marker: str = MARKER) -> list[str]:
+    """One download attempt: resumable, archived, and reporting progress as JSON lines.
+
+    `urls`, when given, are downloaded in place of `url` (a subscription's new uploads); over
+    MAX_INLINE_URLS they go through a batch file the caller writes (see url_args). `folder` names the
+    folder outright (see output_template). `marker` starts the lines the app reads (see run_marker).
+    """
     root = paths.root
     command = base_args(tools, paths.cache_dir) + retry_args() + [
         "--yes-playlist" if source.is_collection else "--no-playlist",
@@ -374,10 +435,12 @@ def download_command(url: str, source: Source, options: DownloadOptions, tools: 
         "--continue",
         "--part",
         "--no-overwrites",
-        *([] if options.ignore_archive else ["--download-archive", str(paths.archive)]),
+        # Downloading again past the archive still keeps one, for this run only, so a restart after a
+        # stall doesn't fetch what the run already saved.
+        "--download-archive", str(paths.session_archive if options.ignore_archive else paths.archive),
         "--paths", str(root),
         "--paths", f"temp:{paths.incomplete}",
-        "--output", output_template(source, options),
+        "--output", output_template(source, options, folder),
         "--http-chunk-size", "8M",
         "--concurrent-fragments", str(options.fragments),
     ]
@@ -395,9 +458,9 @@ def download_command(url: str, source: Source, options: DownloadOptions, tools: 
     if options.wait_for_video:
         command += ["--wait-for-video", "15-120"]
     command += skip_filter(skip_ids)
-    command += structured_output_args(paths.journal)
-    command += ["--", url]
-    return command
+    command += structured_output_args(paths.journal, marker)
+    command += playlist_list_args(paths.lists)
+    return command + (url_args(urls, paths.job_dir)[0] if urls else ["--", url])
 
 
 def analyze_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None = None,
@@ -417,11 +480,13 @@ def analyze_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None
 
 def check_command(urls: Sequence[str], tools: ToolSet, archive: Path, cache_dir: Path, job_dir: Path,
                   auth: Auth | None = None, newest: int = 60,
-                  options: DownloadOptions | None = None) -> tuple[list[str], str]:
+                  options: DownloadOptions | None = None, marker: str = MARKER,
+                  whole: bool = False) -> tuple[list[str], str]:
     """List a subscription's newest uploads that aren't in its archive, without downloading.
 
     Channel tabs are newest first, so the scan stops at the first archived item; yt-dlp then exits
-    with status 101, which means success here. Returns (command, batch file text or "").
+    with status 101, which means success here. A playlist (`whole`) is read to its end, up to
+    `newest` entries: its new videos are usually added last. Returns (command, batch file text or "").
     """
     command = base_args(tools, cache_dir) + [
         "--flat-playlist",
@@ -429,11 +494,10 @@ def check_command(urls: Sequence[str], tools: ToolSet, archive: Path, cache_dir:
         "--yes-playlist",
         "--playlist-items", f"1:{max(newest, 1)}",
         "--download-archive", str(archive),
-        "--break-on-existing",
-        "--break-per-input",
+        *(() if whole else ("--break-on-existing", "--break-per-input")),
         "--sleep-requests", "1",
-        *print_arg("video", f"{MARKER}entry %(.{{{_ENTRY_FIELDS}}})j"),
-        *print_arg("playlist", f"{MARKER}pl %(.{{id,title,uploader,channel,webpage_url,extractor_key}})j"),
+        *print_arg("video", f"{marker}entry %(.{{{_ENTRY_FIELDS}}})j"),
+        *print_arg("playlist", f"{marker}pl %(.{{id,title,uploader,channel,webpage_url,extractor_key}})j"),
     ]
     if options is not None:
         command += network_args(options)

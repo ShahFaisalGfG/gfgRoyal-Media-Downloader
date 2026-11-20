@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from gfgmd.core.command import RunPaths, download_command
+from gfgmd.core.command import RunPaths, download_command, run_marker
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import ProgressTracker
 from gfgmd.core.runner import ProcessRunner
@@ -42,8 +42,9 @@ def measure_once(url: str, fragments: int, tools: ToolSet, cache: Path, seconds:
     try:
         options = DownloadOptions(fragments=fragments).validate()
         paths = RunPaths(folder, folder / "archive.txt", folder / "job", cache)
-        command = download_command(url, source_from_url(url), options, tools, paths)
-        tracker = ProgressTracker()
+        marker = run_marker()
+        command = download_command(url, source_from_url(url), options, tools, paths, marker=marker)
+        tracker = ProgressTracker(marker=marker)
         runner = ProcessRunner(command, tracker.feed)
         runner.start()
         started = time.monotonic()

@@ -73,13 +73,20 @@ def video_quality(video: Path, ffprobe: str) -> int:
 
 
 def inside_root(path: Path, root: Path) -> bool:
-    """True when `path` resolves inside `root`, so a rename can never leave the download folder."""
+    """True when `path` resolves inside `root`, so a rename can never leave the download folder.
+
+    The text is compared first, so a path elsewhere (a network share a site's title named) is never
+    opened to resolve it; then links are followed, so none leads out of the folder.
+    """
+    def under(child: str, base: str) -> bool:
+        return os.path.normcase(child).startswith(os.path.normcase(base).rstrip("\\/") + os.sep)
+
+    if not under(os.path.abspath(str(path)), os.path.abspath(str(root))):
+        return False
     try:
-        resolved = path.resolve()
-        base = root.resolve()
+        return under(str(path.resolve()), str(root.resolve()))
     except OSError:
         return False
-    return os.path.normcase(str(resolved)).startswith(os.path.normcase(str(base)) + os.sep)
 
 
 def clean_stem(staged_stem: str) -> str:
@@ -105,7 +112,7 @@ def finalize_file(staged: Path, root: Path, ffprobe: str, label_quality: bool) -
     The quality label is read from the file itself, so a 1080p request that was only offered at
     720p ends in "(720p)". A file outside `root`, or one without the staged marker, is left alone.
     """
-    if not staged.is_file() or not inside_root(staged, root):
+    if not inside_root(staged, root) or not staged.is_file():
         return staged
     extension = staged.suffix[1:].lower()
     stem = clean_stem(staged.stem)
@@ -125,8 +132,11 @@ def finalize_file(staged: Path, root: Path, ffprobe: str, label_quality: bool) -
     for sidecar in sidecars:
         rest = sidecar.name[len(staged.stem):]  # ".en.srt", ".jpg"
         destination = folder / f"{new_stem}{rest}"
-        if not destination.exists():
-            sidecar.rename(destination)
+        try:
+            if not destination.exists():
+                sidecar.rename(destination)
+        except OSError:
+            continue  # held open (a virus scan, a player): it keeps its old name, the file is saved
     return target
 
 
@@ -185,3 +195,21 @@ def remove_partials(partials: set[str], incomplete: Path) -> int:
                 except OSError:
                     continue
     return removed
+
+
+def group_of(path: Path, root: Path | None) -> tuple[str, str]:
+    """The playlist or channel folder a saved file is in: (key, title), or ("", "") for one in the root.
+
+    The key is the folder's whole path, case-folded as Windows ignores case; the title is its path
+    under the download root, such as "Naseebo Lal" or "Channel · Videos".
+    """
+    if root is None:
+        return "", ""
+    folder = path.parent
+    try:
+        relative = folder.relative_to(root)
+    except ValueError:
+        return "", ""
+    if not relative.parts:
+        return "", ""
+    return str(folder).casefold(), " · ".join(relative.parts)

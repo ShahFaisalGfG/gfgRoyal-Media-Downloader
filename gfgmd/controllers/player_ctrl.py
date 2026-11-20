@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,11 @@ REPEAT_MODES = ("off", "all", "one")
 SPEEDS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
 # Positions this close to either end aren't worth resuming from.
 RESUME_MARGIN = 10.0
+MISSING_FILE = "The file isn't there any more; it may have been moved or deleted."
+# Windows' ERROR_NO_ASSOCIATION: no program is set up to open this kind of file.
+_NO_ASSOCIATION = 1155
+# The language part of a subtitle file's name: "en", "en-US", "es-419", "zh-Hans", "en-orig".
+_LANGUAGE_TAG = re.compile(r"^(?P<language>[A-Za-z]{2,3})(?P<rest>(?:[-_][A-Za-z0-9]+)*)$")
 
 
 def is_audio(path: str) -> bool:
@@ -43,6 +49,49 @@ def is_audio(path: str) -> bool:
 def file_url(path: str) -> str:
     """A file:// URL QML can load."""
     return QUrl.fromLocalFile(path).toString() if path else ""
+
+
+def language_name(code: str) -> str:
+    """A language code as words: "en" -> "English", "es-419" -> "Spanish (Latin America)", "" when unknown.
+
+    YouTube's "-orig" (captions in the video's own language, not translated) reads "(original)";
+    other parts that are neither a script nor a region, such as a caption track's ID, are left out.
+    """
+    match = _LANGUAGE_TAG.fullmatch(code.strip())
+    if match is None:
+        return ""
+    language = QLocale.codeToLanguage(match.group("language"))
+    if language in (QLocale.Language.AnyLanguage, QLocale.Language.C):
+        return ""
+    details = []
+    for part in re.split(r"[-_]", match.group("rest"))[1:]:
+        if part.lower() == "orig":
+            details.append("original")
+        elif len(part) == 4 and part.isalpha():
+            script = QLocale.codeToScript(part)
+            if script != QLocale.Script.AnyScript:
+                details.append(QLocale.scriptToString(script))
+        elif (len(part) == 2 and part.isalpha()) or (len(part) == 3 and part.isdigit()):
+            territory = QLocale.codeToTerritory(part)
+            if territory != QLocale.Country.AnyTerritory:
+                details.append(QLocale.territoryToString(territory))
+    name = QLocale.languageToString(language)
+    return f"{name} ({', '.join(details)})" if details else name
+
+
+def caption_label(tag: str) -> str:
+    """How the subtitle menu names a file saved beside a video, from the part between the video's name
+    and the extension ("en" from "Talk.en.srt"): its language, or "Subtitles" when it names none."""
+    return language_name(tag) or "Subtitles"
+
+
+def _open_failure(error: Exception) -> str:
+    """Why a file couldn't be opened in another player, in plain words (the details go to the log)."""
+    if isinstance(error, FileNotFoundError):
+        return MISSING_FILE
+    if getattr(error, "winerror", None) == _NO_ASSOCIATION:
+        return "Windows has no program set up to play this file."
+    return "Couldn't open the file in another player."
 
 
 class PlayerController(QObject):
@@ -88,7 +137,7 @@ class PlayerController(QObject):
     def playFrom(self, path: str, playlist: list[str]) -> None:
         """Play `path`; the files of its kind in `playlist` (a library view) become Previous and Next."""
         if not path or not os.path.isfile(path):
-            self.notice.emit("The file isn't there any more; it may have been moved or deleted.")
+            self.notice.emit(MISSING_FILE)
             return
         listed = [str(entry) for entry in playlist]
         if path not in listed:
@@ -131,13 +180,24 @@ class PlayerController(QObject):
                 return name
         return f"Track {number}"
 
+    @Slot(str, result=str)
+    def languageName(self, code: str) -> str:
+        """A language code as words for Download options ("es" -> "Spanish"); the code itself when unknown."""
+        return language_name(code) or code
+
     @Slot(str)
     def openInSystem(self, path: str) -> None:
         """Open a file in the program Windows uses for it (when the built-in player can't play it)."""
         try:
             os.startfile(path)  # type: ignore[attr-defined]  # Windows only
         except (AttributeError, OSError) as error:
-            self.notice.emit(f"Couldn't open the file: {error}")
+            write_log(f"Opening {path} in another player failed: {error}", "critical")
+            self.notice.emit(_open_failure(error))
+
+    @Slot(str, str)
+    def logPlaybackError(self, path: str, detail: str) -> None:
+        """Log why a built-in player couldn't play a file; the player shows a plain message instead."""
+        write_log(f"Playing {path} failed: {detail or 'no details from the player'}", "critical")
 
     # ── Preferences ───────────────────────────────────────────────────────
 
@@ -265,9 +325,17 @@ class PlayerController(QObject):
 
     @Property(list, notify=videoChanged)
     def captionFiles(self) -> list[str]:
-        """Names of the subtitle files saved beside the video ("English (en.srt)")."""
+        """The subtitle files saved beside the video, by language ("English", "English (original)").
+
+        Two files of the same language (an SRT and a VTT) get a number, so the menu tells them apart.
+        """
         stem = Path(self._video).stem
-        return [entry.name[len(stem):].lstrip(".") or entry.name for entry in self._video_captions]
+        labels = [caption_label(entry.name[len(stem):-len(entry.suffix)].strip(".")) for entry in self._video_captions]
+        numbered = []
+        for index, label in enumerate(labels):
+            same = labels.count(label)
+            numbered.append(f"{label} {labels[:index + 1].count(label)}" if same > 1 else label)
+        return numbered
 
     @Property(int, notify=videoChanged)
     def captionFile(self) -> int:

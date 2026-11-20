@@ -19,6 +19,7 @@ MenuItem {
     font.pixelSize: Theme.fontBody
 
     contentItem: Text {
+        textFormat: Text.PlainText
         id: label
         text: item.text
         font: item.font

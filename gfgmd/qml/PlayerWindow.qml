@@ -9,7 +9,8 @@ import QtMultimedia
 import "components"
 
 // The video player: its own window, so downloads stay in view. Controls hide while the video plays
-// and the pointer rests; they come back on any movement or key. Playback resumes where it stopped
+// and the pointer rests, unless one of them has keyboard focus; they come back on any movement or
+// key, Tab included. Playback resumes where it stopped
 // last time. Keys: Space or K play/pause, J and L 10 s back and ahead, Left and Right 5 s, Up and
 // Down volume, M mute, F fullscreen (Esc leaves it), C subtitles, [ and ] speed, P and N previous
 // and next, Home and End.
@@ -114,7 +115,11 @@ AppWindow {
                 if (playerController.hasNextVideo) playerController.stepVideo(1)
             }
         }
-        onErrorOccurred: function (error, errorString) { errorBox.text = errorString || "This file can't be played here." }
+        // The player's own error text is for the log; the window says what to do instead.
+        onErrorOccurred: function (error, errorString) {
+            playerController.logPlaybackError(playerWin._path, errorString)
+            errorBox.text = "This video can't be played here. Try opening it in another player."
+        }
         onPlaybackStateChanged: playerWin.showControls()
         // Portrait videos (Shorts, TikToks, Reels) get a portrait window the first time they show.
         onMetaDataChanged: {
@@ -130,7 +135,11 @@ AppWindow {
 
     // Saves the position now and then, so a crash or power cut resumes close to where it stopped.
     Timer { interval: 5000; repeat: true; running: playerWin.playing; onTriggered: playerWin.savePosition() }
-    Timer { id: hideTimer; interval: 2500; onTriggered: if (playerWin.playing && !controls.containsMouse) playerWin.controlsShown = false }
+    Timer {
+        id: hideTimer
+        interval: 2500
+        onTriggered: if (playerWin.playing && !controls.containsMouse && !controls.focusInside) playerWin.controlsShown = false
+    }
 
     // The normal place of the video; in fullscreen the stage moves over the title bar.
     Item { id: normalHolder; anchors.fill: parent }
@@ -169,6 +178,7 @@ AppWindow {
 
         // A subtitle file saved beside the video (embedded tracks are drawn by the video output).
         Text {
+            textFormat: Text.PlainText
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
             anchors.bottomMargin: playerWin.controlsShown ? controls.height + Theme.spaceMd : Theme.spaceXl
@@ -180,7 +190,7 @@ AppWindow {
             font.family: Theme.fontFamily
             font.pixelSize: Math.max(16, Math.round(stage.height / 22))
             font.weight: Font.DemiBold
-            color: "#ffffff"
+            color: Theme.overlayText
             style: Text.Outline
             styleColor: "#000000"
         }
@@ -191,13 +201,14 @@ AppWindow {
             visible: errorBox.text.length > 0
             spacing: Theme.spaceMd
             Text {
+                textFormat: Text.PlainText
                 id: errorBox
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
-                color: "#ffffff"
+                color: Theme.overlayText
             }
             AppButton {
                 Layout.alignment: Qt.AlignHCenter
@@ -211,12 +222,20 @@ AppWindow {
         Rectangle {
             id: controls
             readonly property bool containsMouse: controlsHover.hovered
+            // Keyboard focus on one of the bar's buttons or sliders keeps the bar shown.
+            readonly property bool focusInside: {
+                for (var item = playerWin.activeFocusItem; item; item = item.parent)
+                    if (item === controls) return true
+                return false
+            }
+            onFocusInsideChanged: playerWin.showControls()
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: controlColumn.implicitHeight + 2 * Theme.spaceMd
             opacity: playerWin.controlsShown ? 1 : 0
-            visible: opacity > 0
+            // Visible as soon as it is asked for, before the fade starts, so Tab can reach its controls.
+            visible: playerWin.controlsShown || opacity > 0
             Behavior on opacity { NumberAnimation { duration: 180 } }
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#00000000" }
@@ -269,12 +288,13 @@ AppWindow {
                         onMoved: playerWin.setVolume(value)
                     }
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: playerWin.title
                         elide: Text.ElideRight
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontCaption
-                        color: "#ffffff"
+                        color: Theme.overlayText
                         visible: playerWin.full
                     }
                     Item { Layout.fillWidth: !playerWin.full }
@@ -340,6 +360,8 @@ AppWindow {
             case Qt.Key_P: case Qt.Key_MediaPrevious: playerController.stepVideo(-1); break
             case Qt.Key_Home: player.position = 0; break
             case Qt.Key_End: player.position = Math.max(0, player.duration - 1000); break
+            // Show the hidden controls first, then let Tab move focus into them.
+            case Qt.Key_Tab: case Qt.Key_Backtab: playerWin.showControls(); handled = false; break
             default: handled = false
             }
             if (handled) {
@@ -399,14 +421,17 @@ AppWindow {
         opacity: button.enabled ? 1 : 0.4
         Accessible.role: Accessible.Button
         Accessible.name: button.toolTipText
+        Accessible.checkable: button.checkable
+        Accessible.checked: button.checked
         ToolTip.visible: button.toolTipText.length > 0 && (button.hovered || button.visualFocus)
         ToolTip.text: button.toolTipText
         ToolTip.delay: 500
         background: Rectangle {
             radius: Theme.radius
-            color: button.down ? "#40ffffff" : button.checked ? "#33ffffff" : button.hovered ? "#26ffffff" : "transparent"
+            color: button.down ? Theme.overlayPressed : button.checked ? Theme.overlayChecked
+                : button.hovered ? Theme.overlayHover : "transparent"
             border.width: button.visualFocus ? 2 : 0
-            border.color: "#ffffff"
+            border.color: Theme.overlayText
         }
         contentItem: Item {
             Icon {
@@ -414,9 +439,10 @@ AppWindow {
                 visible: button.text.length === 0
                 name: button.iconName
                 size: Theme.iconLg
-                color: button.checked ? Theme.focusRing : "#ffffff"
+                color: button.checked ? Theme.overlayAccent : Theme.overlayText
             }
             Text {
+                textFormat: Text.PlainText
                 id: label
                 anchors.centerIn: parent
                 visible: button.text.length > 0
@@ -424,7 +450,7 @@ AppWindow {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 font.weight: Font.DemiBold
-                color: "#ffffff"
+                color: Theme.overlayText
             }
         }
         onClicked: playerWin.showControls()

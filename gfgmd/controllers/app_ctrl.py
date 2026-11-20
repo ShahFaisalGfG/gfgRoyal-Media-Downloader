@@ -66,6 +66,8 @@ class AppController(QObject):
     notice = Signal(str)
     # A downloadable link was copied (Preferences > Watch the clipboard); the window offers it.
     clipboardLink = Signal(str)
+    # Emitted by the window when closing it left the app running in the tray.
+    closedToTray = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)

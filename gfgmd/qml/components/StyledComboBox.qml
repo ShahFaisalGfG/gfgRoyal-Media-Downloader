@@ -49,7 +49,7 @@ ComboBox {
     Accessible.description: control.toolTipText
 
     ToolTip.visible: control.toolTipText.length > 0 && !control.popup.visible && (control.hovered || control.visualFocus)
-    ToolTip.text: (control.valueMissing ? "The saved choice \"" + control.value + "\" isn't available here. Pick another.\n" : "")
+    ToolTip.text: (control.valueMissing ? "Your saved choice isn't available any more. Pick another.\n" : "")
         + (control.choiceMissing ? "Required. " : "")
         + control.toolTipText
     ToolTip.delay: 600
@@ -74,6 +74,7 @@ ComboBox {
             cache: false
         }
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             leftPadding: (control.showIcons && !displayRow.showsPlaceholder) ? 0 : 10
             rightPadding: control.indicator.width + 6
@@ -129,6 +130,7 @@ ComboBox {
                 cache: false
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 leftPadding: control.showIcons ? 0 : Theme.spaceSm
                 text: itemRow.modelData[control.textRole]

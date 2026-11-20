@@ -92,3 +92,26 @@ def test_messages_are_answered_and_delivered() -> None:
     assert answers[1] == {"ok": True}
     assert answers[2]["ok"] is False
     assert delivered[0].paths == ("https://vimeo.com/1",)
+
+
+@pytest.mark.parametrize("message, reply", [
+    ({"type": "download", "urls": []}, companion.NO_LINK),
+    ({"type": "download", "urls": ["https://x.com"] * 201}, companion.TOO_MANY_LINKS),
+    ({"type": "download", "urls": ["javascript:alert(1)"]}, companion.BAD_LINK),
+    ({"type": "download", "urls": [5]}, companion.MISMATCH),
+    ({"type": "signin", "site": "../../etc", "cookies": []}, companion.MISMATCH),
+    ({"type": "exec", "command": "calc"}, companion.MISMATCH),
+])
+def test_refusals_are_written_for_the_popup(message: dict, reply: str) -> None:
+    stdin = io.BytesIO(frame(message))
+    out = io.BytesIO()
+    with patch.object(companion, "ALLOWED_ORIGINS", (ORIGIN,)):
+        assert run(["host.exe", ORIGIN], stdin, out) == 0
+    assert replies(out.getvalue()) == [{"ok": False, "message": reply}]
+
+
+def test_a_garbled_message_is_called_a_version_mismatch() -> None:
+    out = io.BytesIO()
+    with patch.object(companion, "ALLOWED_ORIGINS", (ORIGIN,)):
+        assert run(["host.exe", ORIGIN], io.BytesIO(struct.pack("<I", 3) + b"{x}"), out) == 1
+    assert replies(out.getvalue()) == [{"ok": False, "message": companion.MISMATCH}]

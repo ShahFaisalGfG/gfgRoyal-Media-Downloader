@@ -33,7 +33,8 @@ def test_netscape_round_trip() -> None:
 
 
 def test_parse_skips_malformed_lines() -> None:
-    text = "# comment\n\nbad line\n.x.com\tTRUE\t/\tTRUE\tnot-a-number\tn\tv\n.x.com\tTRUE\t/\tFALSE\t5\tok\t1\n"
+    text = ("# comment\n\nbad line\n.x.com\tTRUE\t/\tTRUE\tnot-a-number\tn\tv\n.x.com\tTRUE\t/\tTRUE\t1e400\tinf\tv\n"
+            ".x.com\tTRUE\t/\tFALSE\t5\tok\t1\n")
     assert [cookie.name for cookie in parse_netscape(text)] == ["ok"]
 
 
@@ -43,9 +44,9 @@ def test_import_keeps_only_the_site_and_requires_a_session() -> None:
     expired = Cookie(".youtube.com", "/", "OLD", "x", expires=int(time.time()) - 10)
     cookies = import_cookies(format_netscape([*jar(), expired]), YOUTUBE)
     assert {cookie.name for cookie in cookies} == {"SAPISID", "PREF", "LSID"}
-    with pytest.raises(ValueError, match="signed-in"):
+    with pytest.raises(ValueError, match="saved while signed out of YouTube"):
         import_cookies(format_netscape([jar()[1]]), YOUTUBE)
-    with pytest.raises(ValueError, match="no YouTube cookies"):
+    with pytest.raises(ValueError, match="no YouTube sign-in"):
         import_cookies(format_netscape([jar()[3]]), YOUTUBE)
     assert session_expiry(cookies, YOUTUBE) == FUTURE
 

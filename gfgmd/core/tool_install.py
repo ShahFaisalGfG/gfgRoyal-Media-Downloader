@@ -9,7 +9,9 @@ rewriting the manifest atomically. The previous version stays on disk for one ro
 
 from __future__ import annotations
 
+import errno
 import hashlib
+import http.client
 import json
 import os
 import platform
@@ -36,13 +38,35 @@ TIMEOUT_S = 30
 _CHUNK = 256 * 1024
 _HEX64 = re.compile(r"\b([0-9a-fA-F]{64})\b")
 _TAG = re.compile(r"/releases/download/([^/]+)/")
+# Write failures that mean the drive is full or the folder is locked, not that the connection dropped.
+_DISK_ERRNOS = (errno.ENOSPC, errno.EACCES)
 USER_AGENT = "gfgRoyal-Media-Downloader (+https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader)"
 
 Progress = Callable[[str, int, int], None]  # (stage text, bytes done, bytes total)
 
 
 class ToolInstallError(Exception):
-    """A package could not be fetched, verified, or installed; the message suits the UI."""
+    """A package could not be fetched, verified, or installed; the message suits the log, not the screen."""
+
+
+class ToolDownloadError(ToolInstallError):
+    """A package or its checksums couldn't be downloaded: no connection, or a server error."""
+
+
+class ToolVerifyError(ToolInstallError):
+    """A package failed a safety check: its host, size, checksum, contents, or paths."""
+
+
+class ToolStartError(ToolInstallError):
+    """A program from a package didn't run on this PC (often an antivirus blocking it)."""
+
+    def __init__(self, message: str, label: str) -> None:
+        super().__init__(message)
+        self.label = label
+
+
+class ToolInstallCancelled(ToolInstallError):
+    """The user stopped the install before anything changed."""
 
 
 @dataclass(frozen=True)
@@ -102,7 +126,7 @@ def check_url(url: str) -> None:
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
     if parts.scheme != "https" or host not in ALLOWED_HOSTS:
-        raise ToolInstallError(f"Refused to download from {host or url}: only GitHub over HTTPS is allowed")
+        raise ToolVerifyError(f"Refused to download from {host or url}: only GitHub over HTTPS is allowed")
 
 
 def open_url(url: str, headers: dict[str, str] | None = None) -> Any:
@@ -127,11 +151,11 @@ def read_text(url: str, opener: Opener = open_url, limit: int = MAX_CHECKSUM_BYT
             chain = [*getattr(response, "redirect_chain", []), response.geturl()]
             final = next((link for link in chain if _TAG.search(link)), chain[-1])
     except urllib.error.HTTPError as error:
-        raise ToolInstallError(f"{url} answered HTTP {error.code}") from error
-    except (urllib.error.URLError, OSError, ValueError) as error:
-        raise ToolInstallError(f"Couldn't reach GitHub: {getattr(error, 'reason', error)}") from error
+        raise ToolDownloadError(f"{url} answered HTTP {error.code}") from error
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as error:
+        raise ToolDownloadError(f"Couldn't reach GitHub: {getattr(error, 'reason', error)}") from error
     if len(data) > limit:
-        raise ToolInstallError(f"{url} is unexpectedly large")
+        raise ToolVerifyError(f"{url} is unexpectedly large")
     return data.decode("utf-8", errors="replace"), final
 
 
@@ -172,7 +196,7 @@ def resolve(package: Package, opener: Opener = open_url) -> Resolved:
     text, final = read_text(package.base_url + asset + ".sha256sum", opener)
     match = _HEX64.search(text)
     if match is None:
-        raise ToolInstallError(f"{package.label}'s checksum file has no SHA-256")
+        raise ToolVerifyError(f"{package.label}'s checksum file has no SHA-256")
     return Resolved(package, asset, match.group(1).lower(), release_tag(final))
 
 
@@ -183,7 +207,7 @@ def _pick(package: Package, sums: dict[str, str]) -> str:
         for name in sorted(sums):
             if regex.fullmatch(name):
                 return name
-    raise ToolInstallError(f"{package.label}'s release has no Windows build this app recognizes")
+    raise ToolVerifyError(f"{package.label}'s release has no Windows build this app recognizes")
 
 
 def download(url: str, target: Path, sha256: str, progress: Progress | None = None,
@@ -207,18 +231,18 @@ def download(url: str, target: Path, sha256: str, progress: Progress | None = No
             length = response.headers.get("Content-Length")
             total = start + int(length) if length and length.isdigit() else 0
             if total > limit:
-                raise ToolInstallError("The package is larger than expected")
+                raise ToolVerifyError("The package is larger than expected")
             done = start
             with part.open("ab" if start else "wb") as handle:
                 while True:
                     if cancel is not None and cancel.is_set():
-                        raise ToolInstallError("Download cancelled")
+                        raise ToolInstallCancelled("Download cancelled")
                     chunk = response.read(_CHUNK)
                     if not chunk:
                         break
                     done += len(chunk)
                     if done > limit:
-                        raise ToolInstallError("The package is larger than expected")
+                        raise ToolVerifyError("The package is larger than expected")
                     handle.write(chunk)
                     digest.update(chunk)
                     if progress is not None:
@@ -226,12 +250,14 @@ def download(url: str, target: Path, sha256: str, progress: Progress | None = No
     except urllib.error.HTTPError as error:
         if error.code == 416:  # the part file is complete or longer than the asset: start over
             part.unlink(missing_ok=True)
-        raise ToolInstallError(f"The download failed: HTTP {error.code}") from error
-    except (urllib.error.URLError, OSError) as error:
-        raise ToolInstallError(f"The download failed: {getattr(error, 'reason', error)}") from error
+        raise ToolDownloadError(f"The download failed: HTTP {error.code}") from error
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
+        if isinstance(error, OSError) and error.errno in _DISK_ERRNOS:
+            raise  # the drive refused the file, not the connection: the caller reports it as such
+        raise ToolDownloadError(f"The download failed: {getattr(error, 'reason', error)}") from error
     if digest.hexdigest() != sha256.lower():
         part.unlink(missing_ok=True)
-        raise ToolInstallError("The download doesn't match its published checksum, so it was deleted")
+        raise ToolVerifyError("The download doesn't match its published checksum, so it was deleted")
     os.replace(part, target)
     return target
 
@@ -253,31 +279,34 @@ def safe_extract(archive: Path, folder: Path, wanted: set[str] | None = None) ->
                 if member.is_dir():
                     continue
                 if pure.is_absolute() or ".." in pure.parts or ":" in name or not pure.parts:
-                    raise ToolInstallError(f"The package contains an unsafe path: {name}")
+                    raise ToolVerifyError(f"The package contains an unsafe path: {name}")
                 if wanted is not None and pure.name not in wanted:
                     continue
                 total += member.file_size
                 if total > MAX_UNPACKED_BYTES:
-                    raise ToolInstallError("The package unpacks to more than expected")
+                    raise ToolVerifyError("The package unpacks to more than expected")
                 relative = Path(pure.name) if wanted is not None else Path(*pure.parts)
                 destination = (root / relative).resolve()
                 if not str(destination).startswith(str(root) + os.sep):
-                    raise ToolInstallError(f"The package contains an unsafe path: {name}")
+                    raise ToolVerifyError(f"The package contains an unsafe path: {name}")
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 with bundle.open(member) as source, destination.open("wb") as sink:
                     shutil.copyfileobj(source, sink, _CHUNK)
                 written.append(destination)
     except zipfile.BadZipFile as error:
-        raise ToolInstallError("The package is damaged") from error
+        raise ToolVerifyError("The package is damaged") from error
     return written
 
 
 def install(package: Package, tools_root: Path, progress: Progress | None = None,
             cancel: threading.Event | None = None, opener: Opener = open_url,
             channel: str = "stable") -> dict[str, Any]:
-    """Download, verify, unpack, smoke-test, and switch one package; returns its manifest entries."""
+    """Download, verify, unpack, smoke-test, and switch one package; returns its manifest entries.
+
+    Raises ToolInstallError (a subclass says what went wrong) or OSError when the drive refuses a file.
+    """
     progress = progress or (lambda stage, done, total: None)
-    progress("Checking the latest release", 0, 0)
+    progress("Looking for the newest version", 0, 0)
     resolved = resolve(package, opener)
     downloads = tools_root / ".downloads"
     archive = download(package.base_url + resolved.asset, downloads / resolved.asset, resolved.sha256, progress,
@@ -294,13 +323,13 @@ def install(package: Package, tools_root: Path, progress: Progress | None = None
         found = sorted(staging.rglob(file_name), key=lambda path: len(path.parts))
         if not found:
             shutil.rmtree(staging, ignore_errors=True)
-            raise ToolInstallError(f"{package.label}'s package has no {file_name}")
+            raise ToolVerifyError(f"{package.label}'s package has no {file_name}")
         programs[name] = found[0]
-    progress("Testing", 0, 0)
+    progress("Checking that it works", 0, 0)
     for name, path in programs.items():
         if not tool_version(name, str(path)):
             shutil.rmtree(staging, ignore_errors=True)
-            raise ToolInstallError(f"{path.name} from {package.label} didn't run on this PC")
+            raise ToolStartError(f"{path.name} from {package.label} didn't run on this PC", package.label)
     final = tools_root / package.tool / folder_name
     shutil.rmtree(final, ignore_errors=True)
     final.parent.mkdir(parents=True, exist_ok=True)
@@ -313,7 +342,7 @@ def install(package: Package, tools_root: Path, progress: Progress | None = None
                          "channel": channel if package.tool == "yt-dlp" else ""}
     update_manifest(tools_root, entries)
     archive.unlink(missing_ok=True)
-    progress("Installed", 1, 1)
+    progress("Done", 1, 1)
     return entries
 
 

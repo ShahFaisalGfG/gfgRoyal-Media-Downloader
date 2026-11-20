@@ -3,8 +3,11 @@
 An in-memory stand-in for GitHub serves the files, so nothing is downloaded.
 """
 
+import errno
 import hashlib
 import io
+import os
+import threading
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -14,7 +17,11 @@ import pytest
 from gfgmd.core import tool_install
 from gfgmd.core.tool_install import (
     Package,
+    ToolDownloadError,
+    ToolInstallCancelled,
     ToolInstallError,
+    ToolStartError,
+    ToolVerifyError,
     check_url,
     download,
     install,
@@ -23,7 +30,7 @@ from gfgmd.core.tool_install import (
     rollback,
     safe_extract,
 )
-from gfgmd.core.tools import managed_tools, read_manifest
+from gfgmd.core.tools import managed_tools, path_tools, read_manifest
 
 BASE = "https://github.com/owner/repo/releases/latest/download/"
 
@@ -74,7 +81,7 @@ def sha(data: bytes) -> str:
 
 @pytest.fixture(autouse=True)
 def runs_anywhere(monkeypatch):
-    """Treat every unpacked program as working (the test zips hold no real executables)."""
+    """Treat every unpacked program as working (the test zips hold placeholder bytes, not programs)."""
     monkeypatch.setattr(tool_install, "tool_version", lambda name, path: "9.9.9")
 
 
@@ -116,7 +123,7 @@ def test_download_restarts_when_range_is_ignored(tmp_path: Path) -> None:
 
 def test_checksum_mismatch_deletes_the_file(tmp_path: Path) -> None:
     target = tmp_path / "pkg.zip"
-    with pytest.raises(ToolInstallError, match="checksum"):
+    with pytest.raises(ToolVerifyError, match="checksum"):
         download(BASE + "pkg.zip", target, "0" * 64, opener=Server({"pkg.zip": b"tampered"}))
     assert not target.exists() and not target.with_name("pkg.zip.part").exists()
 
@@ -170,3 +177,58 @@ def test_missing_asset_is_reported(tmp_path: Path) -> None:
     server = Server({"SUMS": f"{'a' * 64}  something-else.zip\n".encode()})
     with pytest.raises(ToolInstallError, match="no Windows build"):
         install(package(), tmp_path / "tools", opener=server)
+
+
+def test_a_dropped_connection_is_a_download_error(tmp_path: Path) -> None:
+    def offline(url: str, headers: dict | None) -> Response:
+        raise urllib.error.URLError("getaddrinfo failed")
+
+    with pytest.raises(ToolDownloadError, match="getaddrinfo"):
+        download(BASE + "pkg.zip", tmp_path / "pkg.zip", sha(b"x"), opener=offline)
+
+
+def test_a_full_drive_is_not_reported_as_a_connection_problem(tmp_path: Path) -> None:
+    def full(url: str, headers: dict | None) -> Response:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    with pytest.raises(OSError) as raised:
+        download(BASE + "pkg.zip", tmp_path / "pkg.zip", sha(b"x"), opener=full)
+    assert not isinstance(raised.value, ToolInstallError)
+
+
+def test_cancel_stops_the_download(tmp_path: Path) -> None:
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(ToolInstallCancelled):
+        download(BASE + "pkg.zip", tmp_path / "pkg.zip", sha(b"x"), cancel=stop, opener=Server({"pkg.zip": b"x"}))
+
+
+def test_a_program_that_doesnt_run_names_its_package(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(tool_install, "tool_version", lambda name, path: "")
+    bundle = make_zip({"deno.exe": b"blocked"})
+    server = Server({"SUMS": f"{sha(bundle)}  deno-win.zip\n".encode(), "deno-win.zip": bundle})
+    with pytest.raises(ToolStartError) as raised:
+        install(package(), tmp_path / "tools", opener=server)
+    assert raised.value.label == "Deno"
+
+
+def test_install_reports_its_steps_in_plain_words(tmp_path: Path) -> None:
+    bundle = make_zip({"deno.exe": b"one"})
+    server = Server({"SUMS": f"{sha(bundle)}  deno-win.zip\n".encode(), "deno-win.zip": bundle})
+    stages: list[str] = []
+    install(package(), tmp_path / "tools", progress=lambda stage, done, total: stages.append(stage), opener=server)
+    assert list(dict.fromkeys(stages)) == ["Looking for the newest version", "Downloading", "Unpacking",
+                                           "Checking that it works", "Done"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows looks in the current folder for programs")
+def test_tools_are_never_taken_from_the_current_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A yt-dlp.exe or ffprobe.bat dropped where the command line runs isn't used as the tool."""
+    here = tmp_path / "Downloads"
+    here.mkdir()
+    for planted in ("yt-dlp.exe", "ffprobe.bat", "ffmpeg.cmd"):
+        (here / planted).write_bytes(b"")
+    monkeypatch.chdir(here)
+    monkeypatch.setenv("PATH", ";" + str(tmp_path / "empty") + ";.")  # an empty and a relative entry
+    monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
+    assert path_tools() == {}

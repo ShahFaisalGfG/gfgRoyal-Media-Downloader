@@ -2,7 +2,7 @@
 
 import pytest
 
-from gfgmd.core.errors import Policy, classify, judge
+from gfgmd.core.errors import CATEGORIES, Failure, Policy, classify, folder_failure, given_up, judge
 
 
 @pytest.mark.parametrize(("message", "key"), [
@@ -27,6 +27,9 @@ from gfgmd.core.errors import Policy, classify, judge
     ("[youtube] abc: This live event will begin in 3 hours.", "upcoming"),
     ("ffmpeg not found. Please install or provide the path", "tools"),
     ("something nobody has seen before", "unknown"),
+    ("[dailymotion] x5kesuj: No video formats found!; please report this issue on https://github.com", "no_formats"),
+    ("[youtube:tab] @jawed: This channel does not have a shorts tab", "empty_tab"),
+    ("[youtube] jfKfPfyJRdk: This live stream recording is not available.", "removed"),
 ])
 def test_classify(message: str, key: str) -> None:
     """Map real yt-dlp messages to their categories."""
@@ -79,3 +82,20 @@ def test_cut_connections_are_network_trouble_not_a_broken_yt_dlp() -> None:
                "BoringSSL SSL_connect: Connection closed abruptly; please report this issue on GitHub")
     assert classify(message).category.key == "network"
     assert classify("ERROR: [facebook] 1: Unable to download webpage: Read timed out.").category.key == "network"
+
+
+def test_a_folder_that_cant_be_written_says_why() -> None:
+    """Full, not allowed, or not there (an unplugged drive): each offers Choose folder."""
+    full = folder_failure(OSError(28, "No space left on device"))
+    denied = folder_failure(PermissionError(13, "Access is denied"))
+    missing = folder_failure(FileNotFoundError(3, "The system cannot find the path specified"))
+    assert [f.category.key for f in (full, denied, missing)] == ["disk_full", "access_denied", "folder_missing"]
+    assert all(f.category.action == "choose_folder" for f in (full, denied, missing))
+
+
+def test_a_video_given_up_on_is_skipped() -> None:
+    """A temporary failure turned into a skip keeps its words; the attempt then ends like a skip."""
+    failure = Failure(CATEGORIES["network"], "HTTP Error 403", "bbbbbbbbbbb")
+    skipped = given_up(failure)
+    assert skipped.category.policy is Policy.SKIP and skipped.category.final == CATEGORIES["network"].final
+    assert judge([skipped]).policy is Policy.SKIP and judge([skipped]).skipped_ids == ("bbbbbbbbbbb",)

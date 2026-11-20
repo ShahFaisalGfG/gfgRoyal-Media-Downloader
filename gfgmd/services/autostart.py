@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 
 from gfgmd.config.defaults import AppInfo
+from gfgmd.utils.logging import write_log
 
 if sys.platform == "win32":
     import winreg
@@ -49,7 +50,7 @@ def is_enabled() -> bool:
 def enable() -> tuple[bool, str]:
     """Add the Run entry; returns (ok, message for the user)."""
     if not available():
-        return False, "Start with Windows works in the installed app."
+        return False, "Start with Windows needs the installed version of the app."
     try:
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
             winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, _command())
@@ -60,11 +61,12 @@ def enable() -> tuple[bool, str]:
             pass
         return True, ""
     except OSError as error:
-        return False, f"Couldn't turn on Start with Windows: {error}"
+        write_log(f"Adding the Start with Windows entry failed: {error}", "critical")
+        return False, "Couldn't turn on Start with Windows. Windows didn't allow the change."
 
 
 def disable() -> tuple[bool, str]:
-    """Remove the Run entry."""
+    """Remove the Run entry; returns (ok, message for the user)."""
     if sys.platform != "win32":
         return True, ""
     try:
@@ -73,5 +75,6 @@ def disable() -> tuple[bool, str]:
     except FileNotFoundError:
         pass
     except OSError as error:
-        return False, f"Couldn't turn off Start with Windows: {error}"
+        write_log(f"Removing the Start with Windows entry failed: {error}", "critical")
+        return False, "Couldn't turn off Start with Windows. Windows didn't allow the change."
     return True, ""

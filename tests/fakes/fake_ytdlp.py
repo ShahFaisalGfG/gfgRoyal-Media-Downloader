@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 MARKER = "@@gfgr:"
+# The run's marker, as the app puts it in its --print and --progress-template values.
+_MARKER_ARG = re.compile(r"^[a-z_]+:(@@gfgr[0-9a-f-]*:)")
 _FIELD = re.compile(r"%\(([^)]*)\)([0-9.]*[A-Za-z])")
 
 
@@ -68,7 +70,9 @@ class Fake:
     def video(self, video_id: str, title: str, info: dict | None = None, height: int = 1080) -> None:
         """Download one video: item line, progress, merge, file, archive, journal."""
         if video_id in self.archived():
-            out(f"[download] {video_id}: has already been recorded in the archive")
+            # yt-dlp names a playlist's entry by its title here, a single link's video by its ID.
+            name = title if (info or {}).get("n_entries") else f"{video_id}:"
+            out(f"[download] {name} has already been recorded in the archive")
             return
         data = {"id": video_id, "title": title, "extractor_key": "Youtube", "ext": "mp4", **(info or {})}
         if data.get("n_entries"):
@@ -97,12 +101,38 @@ class Fake:
             with self.archive.open("a", encoding="utf-8") as handle:
                 handle.write(f"youtube {video_id}\n")
         line = json.dumps({"id": video_id, "title": title, "filepath": str(target), "height": height,
-                           "extractor_key": "Youtube"})
+                           "extractor_key": "Youtube", "playlist_index": data.get("playlist_index")})
         if self.journal is not None:
             self.journal.parent.mkdir(parents=True, exist_ok=True)
             with self.journal.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
         out(MARKER + "file " + line)
+
+    def write_list(self, title: str, videos: list[tuple[str, str]]) -> None:
+        """Write the playlist file the way yt-dlp does with --write-info-json, and announce it."""
+        template = next((value[len("pl_infojson:"):] for value in option(self.args, "--output")
+                         if value.startswith("pl_infojson:")), "")
+        if not template:
+            return
+        path = Path(render(template, {"id": "PLfake", "title": title, "ext": "info.json"}))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        out(f"[info] Writing playlist metadata as JSON to: {path}")
+        entries = [{"_type": "url", "ie_key": "Youtube", "id": video_id, "title": name, "duration": 60,
+                    "url": f"https://www.youtube.com/watch?v={video_id}",
+                    "thumbnails": [{"url": f"https://i.ytimg.com/vi/{video_id}/hq.jpg", "width": 480}]}
+                   for video_id, name in videos]
+        path.write_text(json.dumps({"_type": "playlist", "id": "PLfake", "title": title, "entries": entries}),
+                        encoding="utf-8")
+
+    def stall(self, video_id: str, title: str) -> None:
+        """Start a video and then hang without a byte more, as a download whose server stopped answering."""
+        out(MARKER + "item " + json.dumps({"id": video_id, "title": title, "n_entries": 3}))
+        out(MARKER + "dl " + json.dumps({"p": {"status": "downloading", "downloaded_bytes": 0, "total_bytes": 1000,
+                                               "fragment_index": 0, "fragment_count": 9},
+                                         "i": {"id": video_id, "format_id": "137"}}))
+        for _ in range(600):
+            out("[download] Got error: <urlopen error timed out>. Retrying fragment 1 (1/10)...")
+            time.sleep(0.1)
 
     def attempt(self, scenario: str) -> int:
         counter = self.state / f"attempts-{scenario}.txt"
@@ -112,9 +142,11 @@ class Fake:
 
 
 def main() -> int:
+    global MARKER
     args = sys.argv[1:]
     state = Path(args[args.index("--fake-state") + 1])
     del args[args.index("--fake-state"):args.index("--fake-state") + 2]
+    MARKER = next((match.group(1) for arg in args if (match := _MARKER_ARG.match(arg))), MARKER)
     (state / "argv.json").write_text(json.dumps(args), encoding="utf-8")
     for hardening in ("--ignore-config", "--no-plugin-dirs", "--no-remote-components"):
         if hardening not in args:
@@ -128,12 +160,23 @@ def main() -> int:
     # Reading a link and checking a subscription are recognized by their options, whatever the link.
     if "--dump-single-json" in args and scenario not in ("private", "auth"):
         scenario = "dump"
-    elif "--break-on-existing" in args:
+    elif "--lazy-playlist" in args:
         scenario = "channel"
     fake = Fake(args, state)
     attempt = fake.attempt(scenario)
 
     if scenario == "ok":
+        fake.video("aaaaaaaaaaa", "Clip")
+        return 0
+    if scenario == "forged":
+        # A site's title printed by yt-dlp, holding lines that pose as the app's: one with the plain
+        # marker, one naming a file outside the download folder. Then a real video.
+        victim = state / "victim.mp3"
+        victim.write_bytes(b"theirs")
+        forged = json.dumps({"id": "zzzzzzzzzzz", "title": "Forged", "filepath": str(victim)})
+        out("[download] Downloading playlist: Mix")
+        out("@@gfgr:file " + forged)
+        out(MARKER + "file " + forged)
         fake.video("aaaaaaaaaaa", "Clip")
         return 0
     if scenario == "playlist":
@@ -147,6 +190,57 @@ def main() -> int:
         out("[download] Downloading item 3 of 3")
         fake.video("ccccccccccc", "Third", {"n_entries": 3})
         return failed
+    if scenario == "listed":
+        # A playlist that lists its videos first (yt-dlp's playlist file), then downloads them.
+        videos = [("aaaaaaaaaaa", "First"), ("bbbbbbbbbbb", "Second"), ("ccccccccccc", "Third")]
+        fake.write_list("Fake List", videos)
+        for number, (video_id, title) in enumerate(videos, start=1):
+            if video_id in fake.skip:
+                continue
+            out(f"[download] Downloading item {number} of 3")
+            fake.video(video_id, title, {"n_entries": 3, "playlist_index": number})
+        return 0
+    if scenario == "stall":
+        # The second video's server never answers until it is left for last and tried again.
+        videos = [("aaaaaaaaaaa", "First"), ("bbbbbbbbbbb", "Second"), ("ccccccccccc", "Third")]
+        fake.write_list("Fake List", videos)
+        tries = state / "stall-tries.txt"
+        for number, (video_id, title) in enumerate(videos, start=1):
+            if video_id in fake.skip:
+                continue
+            out(f"[download] Downloading item {number} of 3")
+            if video_id == "bbbbbbbbbbb" and video_id not in fake.archived():
+                count = int(tries.read_text()) + 1 if tries.exists() else 1
+                tries.write_text(str(count))
+                limit = int(os.environ.get("FAKE_STALLS", "1"))
+                if count <= limit:
+                    fake.stall(video_id, title)
+                    return 1
+            fake.video(video_id, title, {"n_entries": 3, "playlist_index": number})
+        return 0
+    if scenario == "slowlist":
+        # A playlist part way through: the first video saved, the second downloading for two minutes.
+        videos = [("aaaaaaaaaaa", "First song of the list"), ("bbbbbbbbbbb", "Second song, still downloading"),
+                  ("ccccccccccc", "Third song, waiting its turn"), ("ddddddddddd", "Fourth song")]
+        fake.write_list("Fake List", videos)
+        out("[download] Downloading item 1 of 4")
+        fake.video("aaaaaaaaaaa", videos[0][1], {"n_entries": 4, "playlist_index": 1})
+        out("[download] Downloading item 2 of 4")
+        out(MARKER + "item " + json.dumps({"id": "bbbbbbbbbbb", "title": videos[1][1], "n_entries": 4}))
+        for step in range(1200):
+            out(MARKER + "dl " + json.dumps({
+                "p": {"status": "downloading", "downloaded_bytes": 1_000_000 + step * 20_000, "total_bytes": 40_000_000,
+                      "speed": 2_200_000.0, "eta": 60},
+                "i": {"id": "bbbbbbbbbbb", "format_id": "137", "vcodec": "avc1", "acodec": "none"}}))
+            time.sleep(0.1)
+        return 0
+    if scenario == "batch":
+        # A subscription's new uploads, one link each: https://fake.test/batch/<id>.
+        links = args[args.index("--") + 1:]
+        for link in links:
+            video_id = urlparse(link).path.rstrip("/").split("/")[-1]
+            fake.video(video_id, f"Upload {video_id[:3]}")
+        return 0
     if scenario == "flaky":
         if attempt == 1:
             err("ERROR: [youtube] aaaaaaaaaaa: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>")
@@ -194,14 +288,17 @@ def main() -> int:
         fake.video("aaaaaaaaaaa", "Clip")
         return 0
     if scenario == "channel":
-        # A subscription check: newest first, stopping at the first archived upload (exit 101).
+        # A subscription check: newest first, stopping at the first archived upload (exit 101, before
+        # the list's own line, as yt-dlp does); read whole (a playlist), archived uploads are passed over.
         archived = fake.archived()
         uploads = [("nnnnnnnnnn3", "Newest", ""), ("nnnnnnnnnn2", "Upcoming", "is_upcoming"),
                    ("nnnnnnnnnn1", "Older", ""), ("ooooooooooo", "Oldest", "")]
         for video_id, title, live in uploads:
-            if video_id in archived and "--break-on-existing" in args:
-                out(MARKER + 'pl {"id":"UCfake","title":"Fake Channel - Videos","channel":"Fake Channel"}')
-                return 101
+            if video_id in archived:
+                if "--break-on-existing" in args:
+                    return 101
+                out(f"[download] {title} has already been recorded in the archive")
+                continue
             out(MARKER + "entry " + json.dumps({"id": video_id, "title": title, "ie_key": "Youtube",
                                                  "url": f"https://www.youtube.com/watch?v={video_id}",
                                                  "live_status": live or None, "release_timestamp": 4102444800 if live else None}))

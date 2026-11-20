@@ -26,6 +26,7 @@ Rectangle {
             spacing: Theme.spaceSm
             Icon { name: "download"; size: Theme.iconLg; color: Theme.accent }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: toolsController.busy ? "Getting the download tools..." : "Get the download tools"
                 font.family: Theme.fontFamily
@@ -35,12 +36,11 @@ Rectangle {
             }
         }
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
-            text: "Downloads use three free programs: yt-dlp, FFmpeg, and Deno (" + toolsController.downloadSize
-                + "). They come from their official GitHub releases, are checked against their published "
-                + "checksums, and stay up to date on their own."
-                + (toolsController.missing.length > 0 && toolsController.missing.length < 4
-                   ? " Missing now: " + toolsController.missing.join(", ") + "." : "")
+            text: "The app needs a few free download tools (" + toolsController.downloadSize + "). They come "
+                + "from their official sources, are checked for safety, and stay up to date on their own."
+                + (toolsController.partlyMissing ? " Some of them are missing or damaged." : "")
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.textMuted
@@ -56,6 +56,7 @@ Rectangle {
             Accessible.name: "Tool download progress"
         }
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             visible: text.length > 0
             text: toolsController.stage
@@ -71,7 +72,7 @@ Rectangle {
                 kind: "primary"
                 text: "Download tools"
                 iconName: "download"
-                toolTipText: "Download yt-dlp, FFmpeg, and Deno into the app's own folder"
+                toolTipText: "Download the tools the app needs into its own folder"
                 onClicked: toolsController.installMissing()
             }
             AppButton {
@@ -79,14 +80,14 @@ Rectangle {
                 kind: "danger"
                 text: "Cancel"
                 iconName: "cancel"
-                toolTipText: "Stop downloading the tools; nothing is installed until a package is complete and verified"
+                toolTipText: "Stop downloading the tools. Nothing changes until the download is complete and checked."
                 onClicked: toolsController.cancel()
             }
             AppButton {
                 visible: toolsController.foundOnPath && !toolsController.busy
-                text: "Use the installed programs"
+                text: "Use the installed tools"
                 iconName: "check"
-                toolTipText: "Use the yt-dlp, FFmpeg, and Deno already on PATH (installed with winget, for example)"
+                toolTipText: "Use the copies of these tools already installed on this PC"
                 onClicked: prefsController.saveSettings({"tools.source": "path"})
             }
             AppButton {
@@ -94,7 +95,7 @@ Rectangle {
                 kind: "ghost"
                 text: "Choose locations"
                 iconName: "folder"
-                toolTipText: "Point the app at programs you installed elsewhere (Preferences > Tools)"
+                toolTipText: "Choose where these tools are on this PC (Preferences > Tools)"
                 onClicked: card.chooseLocations()
             }
         }

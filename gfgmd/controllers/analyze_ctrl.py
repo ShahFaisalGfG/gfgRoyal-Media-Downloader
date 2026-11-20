@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
+from urllib.parse import urlsplit
 from datetime import datetime
 from typing import Any
 
@@ -18,12 +20,21 @@ from gfgmd.core.options import DownloadOptions
 from gfgmd.core.schedule import live_launch_time
 from gfgmd.core.secret_store import SecretError
 from gfgmd.core.sources import Source, canonical_url, source_from_url
+from gfgmd.controllers.player_ctrl import language_name
 from gfgmd.controllers.queue_ctrl import QueueController, base_options
 from gfgmd.models.entry_model import EntryModel
 from gfgmd.services.context import VAULT_METHODS, AppContext
 from gfgmd.services.tasks import TaskRunner
-from gfgmd.utils.format import format_bytes, format_duration
+from gfgmd.utils.format import count_media, format_bytes, format_duration
+from gfgmd.utils.logging import write_log
 from gfgmd.utils.settings import load_settings
+
+
+# What reading a link says when it failed for a reason the app doesn't recognize.
+_UNREADABLE = "This link couldn't be read. Check that it opens in your browser, then try again."
+# Sites whose lists are songs, not videos (for "19 songs").
+_MUSIC_SITES = ("soundcloud.com", "bandcamp.com", "mixcloud.com", "audiomack.com", "jiosaavn.com", "deezer.com")
+_PAGE = re.compile(r"Downloading (?:API JSON )?page (\d+)", re.IGNORECASE)
 
 
 class AnalyzeController(QObject):
@@ -65,7 +76,7 @@ class AnalyzeController(QObject):
 
     @Property(str, notify=statusChanged)
     def status(self) -> str:
-        """What the analysis is doing (yt-dlp's last line), while busy."""
+        """What reading the link is doing, in plain words, while busy."""
         return self._status
 
     @Property(bool, notify=changed)
@@ -132,7 +143,7 @@ class AnalyzeController(QObject):
             return ""
         parts = []
         if self._result.kind == "playlist":
-            parts.append(f"{len(self._result.entries)} videos")
+            parts.append(count_media(len(self._result.entries), "audio" if self._music_link() else "video"))
         elif self._result.duration:
             parts.append(format_duration(self._result.duration))
         if self._result.heights:
@@ -140,6 +151,11 @@ class AnalyzeController(QObject):
         if self._result.size_estimate:
             parts.append(f"about {format_bytes(self._result.size_estimate)}")
         return "  ·  ".join(parts)
+
+    def _music_link(self) -> bool:
+        """True for a link to music (YouTube Music, SoundCloud, Bandcamp), whose lists hold songs."""
+        host = (urlsplit(self._url).hostname or "").lower()
+        return host.startswith("music.") or any(host == site or host.endswith("." + site) for site in _MUSIC_SITES)
 
     @Property(list, constant=True)
     def heightOptions(self) -> list[dict[str, Any]]:
@@ -159,7 +175,7 @@ class AnalyzeController(QObject):
         """The video's audio languages ({code, label, original}), original first; empty with just one."""
         if self._result is None:
             return []
-        return [{"code": track.code, "label": track.label, "original": track.original}
+        return [{"code": track.code, "label": language_name(track.code) or track.label, "original": track.original}
                 for track in self._result.audio_tracks]
 
     @Property(str, notify=changed)
@@ -180,7 +196,8 @@ class AnalyzeController(QObject):
         try:
             tools = self._context.tools()
         except RuntimeError as error:
-            self._fail(str(error), "repair_tools")
+            write_log(f"Reading a link can't start: {error}", "critical")
+            self._fail("The download tools aren't installed yet. Click Update tools.", "repair_tools")
             return
         self.cancel()
         self._stop = threading.Event()
@@ -194,7 +211,7 @@ class AnalyzeController(QObject):
         self.changed.emit()
         options = base_options(load_settings())
         self._runner.start(self._read, self._url, source, tools, options, self._stop,
-                           on_done=self._done, on_error=lambda message: self._fail(message, ""))
+                           on_done=self._done, on_error=lambda _message: self._fail(_UNREADABLE, ""))
 
     def _read(self, url: str, source: Source, tools: Any, options: DownloadOptions,
               stop: threading.Event) -> tuple[Analysis | None, set[str], Failure | None]:
@@ -226,15 +243,20 @@ class AnalyzeController(QObject):
         return result, archived, None
 
     def _progress_line(self, line: str) -> None:
-        # Called from the pool; a plain attribute write the busy poll in QML reads via `status`.
-        self._status = line[:160]
+        # Called from the pool; a plain attribute write the busy poll in QML reads via `status`. yt-dlp's
+        # own lines aren't shown: a long playlist says which page it has reached.
+        page = _PAGE.search(line)
+        if page:
+            self._status = f"Reading the playlist (page {page.group(1)})..."
 
     def _done(self, outcome: tuple[Analysis | None, set[str], Failure | None]) -> None:
         result, archived, failure = outcome
         if self._stop.is_set():
             return
         if result is None:
-            self._fail(failure.category.message if failure else "The link couldn't be read",
+            # A reason the app knows names it; anything else is said plainly, as nothing was downloading yet.
+            known = failure is not None and failure.category.key != "unknown"
+            self._fail(failure.category.final if failure is not None and known else _UNREADABLE,
                        failure.category.action if failure else "")
             return
         self._result = result
@@ -299,7 +321,8 @@ class AnalyzeController(QObject):
                 return False
             if not self._entries.all_selected():
                 chosen["items"] = items_spec(entry.index for entry in selected)
-            items = [{"id": e.id, "title": e.title, "index": e.index, "duration": e.duration} for e in selected]
+            items = [{"id": e.id, "title": e.title, "index": e.index, "duration": e.duration, "url": e.url,
+                      "thumbnail": e.thumbnail} for e in selected]
         not_before = 0.0
         if self._result.live_status == "is_upcoming":
             chosen["wait_for_video"] = True

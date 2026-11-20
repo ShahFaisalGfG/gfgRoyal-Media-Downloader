@@ -34,6 +34,12 @@ MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_URLS = 200
 MAX_COOKIES = 3000
 _START_WAIT_S = 15
+# What the extension's popup shows. A message the host can't use means the extension and the app
+# come from different versions; the host has no log of its own (its standard output is the browser's).
+MISMATCH = "The extension and the app don't match. Update both, then try again."
+NO_LINK = "There's no link here to download."
+TOO_MANY_LINKS = f"Send up to {MAX_URLS} links at a time."
+BAD_LINK = "The app can't download from this link. Check that it opens a video, song, or playlist."
 
 
 def read_message(stream: BinaryIO) -> dict[str, Any] | None:
@@ -90,25 +96,30 @@ def cookies_from_extension(text: str) -> list[Cookie]:
 
 
 def request_for(message: dict[str, Any]) -> LaunchRequest:
-    """The launch request for a valid message; raises ValueError naming what is wrong."""
+    """The launch request for a valid message; raises ValueError whose message is the reply the popup shows."""
     kind = message.get("type")
     if kind == "download":
         urls = message.get("urls")
-        if not isinstance(urls, list) or not urls or len(urls) > MAX_URLS:
-            raise ValueError("expected 1 to 200 links")
-        checked = tuple(check_url(str(url)) for url in urls if isinstance(url, str))
-        if len(checked) != len(urls):
-            raise ValueError("every link must be text")
+        if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
+            raise ValueError(MISMATCH)
+        if not urls:
+            raise ValueError(NO_LINK)
+        if len(urls) > MAX_URLS:
+            raise ValueError(TOO_MANY_LINKS)
+        try:
+            checked = tuple(check_url(url) for url in urls)
+        except ValueError as error:
+            raise ValueError(BAD_LINK) from error
         return LaunchRequest("links", checked)
     if kind == "signin":
         site, cookies = message.get("site"), message.get("cookies")
         known = {site.key for site in SITES}
         if not isinstance(site, str) or not (site in known or _hostname(site)):
-            raise ValueError("unknown site")
+            raise ValueError(MISMATCH)
         if not isinstance(cookies, list) or len(cookies) > MAX_COOKIES:
-            raise ValueError("expected a list of cookies")
+            raise ValueError(MISMATCH)
         return LaunchRequest("signin", (site, json.dumps(cookies)))
-    raise ValueError("unknown message type")
+    raise ValueError(MISMATCH)
 
 
 def _hostname(text: str) -> bool:
@@ -148,8 +159,8 @@ def run(argv: list[str], stdin: BinaryIO, stdout: BinaryIO) -> int:
     while True:
         try:
             message = read_message(stdin)
-        except (ValueError, UnicodeDecodeError) as error:
-            write_message(stdout, {"ok": False, "message": f"Bad message: {error}"})
+        except (ValueError, UnicodeDecodeError):
+            write_message(stdout, {"ok": False, "message": MISMATCH})
             return 1
         if message is None:
             return 0

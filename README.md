@@ -65,21 +65,21 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 ## Features
 
 - 📚 **Every kind of link**: YouTube videos, Shorts, playlists, and channels (Videos, Shorts, and Live tabs); TikToks, Instagram and Facebook Reels and posts, X posts, Snapchat Spotlight, Pinterest, and Reddit; and the other sites yt-dlp supports, such as Vimeo, Twitch, Dailymotion, and SoundCloud
-- 🎯 **Video your way**: best quality up to 4K or any limit, MP4, MKV, or WebM, H.264 for compatibility or AV1/VP9 for quality, and the original audio track or dubbed languages too
+- 🎯 **Video your way**: best quality up to 4K or any limit, MP4, MKV, or WebM, files that play everywhere or the best picture the site has, and the original audio track or dubbed languages too
 - 🎵 **Music your way**: MP3 at 320 kbps by default, or 64 to 256 kbps, M4A, Opus, OGG, lossless FLAC or WAV, or the site's own stream; the thumbnail becomes a square album cover, and artist and title go in the tags
 - 🎤 **Synced lyrics**: songs get a timed `.lrc` file from the site's captions, or from LRCLIB when the length matches, and plain lyrics in the file's tags
 - ▶️ **Built-in players**: a video player with subtitles, audio tracks, speed, and fullscreen, and a music player with a queue, shuffle, repeat, cover art, and lyrics that follow the song
 - 🧾 **Pick the videos**: read a playlist or channel first, then filter, check ranges, or take only the videos you don't have yet
 - 💬 **Subtitles and extras**: written or automatic subtitles in the languages you pick, embedded, as SRT or WebVTT files, or both; embedded thumbnail, details, and chapters; SponsorBlock marks or cuts sponsor segments
-- 🗂️ **A real queue**: several downloads at once, per-site limits, pause, resume, retry, reorder, and progress on the taskbar
+- 🗂️ **A full queue**: several downloads at once, per-site limits, pause, resume, retry, reorder, and progress on the taskbar; a playlist, channel, or subscription lists every video under it, each saved, waiting, or downloading
 - ⏯️ **Resumable**: partial files continue, finished videos are skipped through per-playlist archives, and interrupted downloads resume when the app starts again
-- 🔁 **Knows when to retry**: dropped connections retry with growing waits; private, removed, or region-locked videos are skipped instead of retried forever; a sign-in request or a full disk stops and tells you why
+- 🔁 **Knows when to retry**: dropped connections retry with growing waits; a video whose server stops answering waits while the rest of its playlist downloads; private, removed, or region-locked videos are skipped instead of retried forever; a sign-in request or a full disk stops and tells you why
 - 🔑 **Website sign-ins**: one click opens the site in your own browser; sign in and click Done, and your private playlists, Watch later, Liked videos, and members-only or age-restricted videos download; sign-ins stay encrypted on your PC
 - 🔔 **Subscriptions**: watch channels and playlists and download new uploads on a schedule, without downloading anything twice
 - 🕑 **Scheduling**: start the queue at a set time, limit the speed by time of day, and sleep or shut down the PC when everything is done
 - 🔴 **Live streams**: record from the start, or wait for a scheduled stream or premiere and record it when it begins
-- 🧩 **Companion extension**: send the page you are watching to the app, or sign a site in, from Chrome, Edge, Opera, or Brave
-- 🗄️ **Library**: every finished download, searchable, with Play, Play all, show in folder, extract audio, download again, and Recycle Bin
+- 🧩 **Companion extension**: send the page you are watching to the app, or sign a site in, from Chrome, Edge, Opera, Brave, or Vivaldi
+- 🗄️ **Library**: every finished download, searchable, with each playlist and channel grouped in its own order, and Play, Play all, show in folder, extract audio, download again, and Recycle Bin
 - ⌨️ **Command line**: `gfgmd` keeps the original script's options and exit codes for scripts and scheduled tasks
 - 🎨 **Built for everyday use**: light and dark themes, keyboard shortcuts, tooltips everywhere, tray icon, notifications, and in-app updates
 
@@ -97,7 +97,7 @@ Get the latest release from the [Releases page](https://github.com/ShahFaisalGfG
 | `gfgRoyal-Media-Downloader_<version>_portable.7z` | The same, unpacked, with `gfgmd.exe` included |
 | `gfgRoyal-Media-Downloader-Companion_<version>_chrome.zip` | The companion browser extension (see [below](#companion-browser-extension)) |
 
-Windows 10 version 1809 or later, 64-bit. On first start the app offers to download yt-dlp, FFmpeg, and Deno (about 280 MB) from their official releases; or choose **Use the installed programs** if you installed them yourself with winget.
+Windows 10 version 1809 or later, 64-bit. On first start the app offers to download yt-dlp, FFmpeg, and Deno (about 280 MB) from their official releases; or choose **Use the installed tools** if you installed them yourself with winget.
 
 ### Updating
 
@@ -113,7 +113,9 @@ The app checks GitHub once a day and installs updates when you quit, after check
 
 Drag links from the browser onto the window to queue them, or drop a `.txt` file with one link per line. Turn on **Offer copied links** in Preferences and the app offers to download each link you copy.
 
-**Downloads** lists what is downloading, waiting, paused, or failed, and what finished since you opened the app; the **Library** keeps every finished file. **Clear finished** above the list tidies it at any time, and finished downloads leave it on their own when you quit the app (Preferences > Downloads can keep them). Failed and unfinished downloads stay, to be tried again or resumed.
+**Downloads** lists what is downloading, waiting, paused, or failed, and what finished since you opened the app; the **Library** keeps every finished file.
+
+A playlist, channel, or several new uploads from a subscription make one download that lists every video under it, numbered, as soon as the site names them: **Saved**, **Downloading** with its size, speed, and time left, **Waiting**, **Downloaded before**, **Skipped** with the reason, or **Waiting for its server**. Its button (**8 videos**, **8 songs**) shows or hides the list, and each song lands in the Library the moment it is saved. When a video's download stops moving for a minute and a half (its server stopped answering), it waits while the rest of the list downloads, then tries again with fresh links; the playlist's progress counts what is saved and never jumps back. **Clear finished** above the list tidies it at any time, and finished downloads leave it on their own when you quit the app (Preferences > Downloads can keep them). Failed and unfinished downloads stay, to be tried again or resumed.
 
 Songs show a square cover and videos a wide thumbnail, each with a badge naming the type (**♪ MP3**, **▶ MP4**). To act on several at once, tick the round box on their thumbnails (it appears on hover), or Ctrl+click and Shift+click them; a bar above the list then offers Pause, Resume, Try again, and Remove in Downloads, and Play, Extract audio, Remove, and Recycle Bin in the Library. **Select all** there takes every file the Library's search and filters show.
 
@@ -122,16 +124,21 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 | Ctrl+V | Paste the copied link |
 | Enter | Download with the chosen preset |
 | Ctrl+Shift+O | Open the download options for the link |
+| Esc / Ctrl+Enter | In the download options: close them / add the download |
 | Ctrl+L | Go to the link box |
 | Space | Pause or resume the selected download |
-| Delete | Remove the selected download from the list (asks first when it is unfinished or saved files) |
+| Delete | Remove the selected download from the list (asks first when it is unfinished or has saved files) |
 | Ctrl+click, Shift+click | Pick several downloads or library files, or a range of them |
 | Ctrl+A / Ctrl+Space / Esc | Pick every row / pick the current row / clear the picks |
+| Menu key or Shift+F10 | Open the current row's menu (Downloads, Library, Subscriptions) |
+| Enter | Play the current file or group (Library); check now (Subscriptions); sign in (Sign-ins) |
+| Right / Left | Show or hide a playlist's videos (Downloads) or a group's files (Library) |
 | Ctrl+Shift+P | Pause or resume every download |
 | Ctrl+1 to Ctrl+4 | Downloads, Library, Subscriptions, Sign-ins |
 | Ctrl+, | Preferences |
 | F5 | Check subscriptions now (on Subscriptions) |
 | F1 | About |
+| Ctrl+Q | Quit (closing the window keeps the app in the tray; asks first while downloading) |
 
 ---
 
@@ -142,15 +149,15 @@ Presets next to the link box cover the usual choices (video in the best quality 
 | Video | Choices |
 |---|---|
 | Quality | Best available, 2160p, 1440p, 1080p, 720p, 480p, 360p (measured on the shorter side, so portrait Shorts fit too) |
-| File | MP4 (plays everywhere), MKV (keeps any codec), WebM |
-| Codecs | Compatible (H.264 and AAC first), Balanced, Best quality (AV1 and VP9 allowed) |
+| File type | MP4 (plays everywhere), MKV (keeps everything), WebM (for web browsers) |
+| Compatibility | Plays everywhere (recommended), Balanced (highest resolution first), Best quality (not for older devices) |
 | Audio tracks | The original language only, or dubbed languages too as extra tracks in one MP4 or MKV file; the download options list the languages a video has |
 | Subtitles | None, embedded, separate SRT or WebVTT files, or both; pick the languages, and optionally the site's automatic captions |
 
 | Audio | Choices |
 |---|---|
-| Format | MP3 (default), M4A (AAC), Opus, OGG (Vorbis), FLAC, WAV, or Original (the site's own stream, unconverted) |
-| Quality | 320 kbps (default), 256, 192, 160, 128, 96, or 64 kbps; lossless formats have none. Sites stream about 128-256 kbps, so a higher bitrate keeps everything but adds no detail; M4A and Opus keep the site's stream unchanged when it already is one |
+| Format | MP3 (default), M4A (Apple devices), Opus, OGG, FLAC and WAV (full quality, larger files), or Original (the site's own sound, as it sends it) |
+| Quality | 320 kbps (default), 256, 192, 160, 128, 96, or 64 kbps; FLAC, WAV, and Original have none. Higher numbers sound better and make bigger files; above 256 the sound can't get better than the site's. M4A and Opus keep the site's sound as it is when they can |
 | Cover | The video's thumbnail, cropped square like an album cover or kept in its shape; WAV gets it as a `.jpg` beside the file |
 | Lyrics | A timed `.lrc` file and plain lyrics in the tags (see [Lyrics](#lyrics)) |
 
@@ -175,7 +182,7 @@ Audio downloads save the song's lyrics as `<song>.lrc` beside the file, timed li
 **Play** in the Library, or on a finished download, opens videos in the player window and songs in the music bar at the bottom of the app; **Play all** plays the list as filtered. Both continue where a file last stopped, and **Open in another player** uses the program Windows chooses.
 
 - **Video player**: its own window, so downloads stay in view. Subtitles (embedded, or files saved beside the video), audio tracks, speed from 0.25× to 2×, loop, keep on top, and fullscreen. Portrait videos open in a portrait window.
-- **Music player**: cover art, previous and next, shuffle, repeat the list or one song, speed, and volume. **Lyrics and queue** opens the Now playing view: a large cover, lyrics that light up and scroll with the song (click a line to jump to it), and the play order.
+- **Music player**: cover art, previous and next, shuffle, repeat the list or one song, speed, and volume. **Lyrics and up next** opens the Now playing view: a large cover, lyrics that light up and scroll with the song (click a line to jump to it), and the play order.
 
 | Key (video player) | Action |
 |---|---|
@@ -225,7 +232,7 @@ On the **Sign-ins** page, click **Sign in** next to the site. The site's sign-in
 | **Firefox** | Downloads read your everyday Firefox's sign-in each time. |
 | **Cookies file** | Import a `cookies.txt` exported from a browser; the app offers to move the original to the Recycle Bin. |
 
-The browser window is your real browser on a profile of its own, so sites such as Google treat it like any browser; Google refuses sign-ins in browsers built into apps, which is why the app doesn't use one. Because that profile isn't used for browsing, YouTube doesn't replace the session, and the sign-in keeps working. For YouTube through the extension, use a private window that you close afterwards for the same reason.
+The browser window is your own browser on a profile of its own, so sites such as Google treat it like any browser; Google refuses sign-ins in browsers built into apps, which is why the app doesn't use one. Because that profile isn't used for browsing, YouTube doesn't replace the session, and the sign-in keeps working. For YouTube through the extension, use a private window that you close afterwards for the same reason.
 
 Sign-ins are saved encrypted for your Windows account (DPAPI), so a copied file is useless on another account or PC. Each download receives only its own site's cookies, in a file deleted when the download ends. **Sign out** deletes the sign-in from this PC; signing out on the site itself also ends the session there.
 
@@ -235,13 +242,13 @@ Sign-ins are saved encrypted for your Windows account (DPAPI), so a copied file 
 
 On the **Subscriptions** page, subscribe to a channel or playlist with a preset and a check interval (every hour to once a day). By default only uploads from now on download; turn on **Earlier uploads too** to get the whole channel first. New uploads join the queue on their own, or wait for **Download new** when automatic downloads are off. Scheduled streams and premieres wait in the queue and record when they start.
 
-A subscription shares its archive with downloads of the same channel, so nothing downloads twice. Checks run while the app is open or in the tray; turn on **Start with Windows** to keep checking after a restart. Import your YouTube subscriptions from [Google Takeout](https://takeout.google.com/)'s `subscriptions.csv`, or export and import the app's own list.
+A subscription shares its archive with downloads of the same channel, so nothing downloads twice. A channel is checked newest first and stops at the first upload you have; a playlist is read whole each time (up to 2,000 videos), since new videos are usually added at its end. Checks run while the app is open or in the tray; turn on **Start with Windows** to keep checking after a restart. Import your YouTube subscriptions from [Google Takeout](https://takeout.google.com/)'s `subscriptions.csv`, or export and import the app's own list.
 
 ---
 
 ## Scheduling and When-Done
 
-- **Start the queue at** (Preferences > Network and schedule): new downloads wait until that time; **Start now** in the bottom bar overrides it.
+- **Start downloads at** (Preferences > Network and schedule): new downloads wait until that time; **Start now** in the bottom bar overrides it.
 - **Speed limits by time of day**: for example 500 KB/s from 09:00 to 18:00. The limit is shared by every running download; live recordings are never slowed.
 - **When downloads finish**: quit the app, sleep, hibernate, or shut down, chosen in the bottom bar, after a 60-second countdown you can cancel.
 
@@ -281,27 +288,28 @@ gfgmd "https://vimeo.com/123456" --subs "en.*" --embed-subs --limit-rate 2M
 | `URL` | (required) | A video, Short, playlist, or channel, or a page on another site |
 | `-r`, `--resolution HEIGHT` | `1080` | Highest resolution on the shorter side; `0` for the best |
 | `--output-dir PATH` | `Videos\gfgRoyal Media Downloader` (`Music\…` for audio) | Download root (the original script's folder is kept when it exists) |
-| `-c`, `--concurrent-fragments N` | `8` | HLS/DASH fragments at the same time, 1 to 16 |
+| `-c`, `--concurrent-fragments N` | `8` | Pieces of a video downloaded at the same time, 1 to 16 |
 | `--max-attempts N` | `0` | Attempts before giving up on temporary failures; `0` keeps trying |
 | `--retry-delay SECONDS` | `10` | First wait between attempts; it doubles up to five minutes |
-| `--cookies PATH` | | Netscape cookies file for sign-in |
+| `--cookies PATH` | | A `cookies.txt` sign-in file saved from your browser |
 | `--cookies-from-browser BROWSER` | | Read the sign-in from a browser, such as `firefox` |
 | `--audio [FORMAT]` | `mp3` | Audio only: `mp3`, `m4a`, `opus`, `vorbis`, `flac`, `wav`, or `best` (unconverted) |
-| `--audio-quality KBPS` | `320` | Bitrate for lossy audio: 320, 256, 192, 160, 128, 96, or 64 |
+| `--audio-quality KBPS` | `320` | Audio quality in kbps for MP3, M4A, Opus, and OGG: 320, 256, 192, 160, 128, 96, or 64 |
 | `--cover square\|original`, `--no-cover` | `square` | The audio file's cover from the thumbnail |
 | `--no-lyrics`, `--no-online-lyrics` | | Skip lyrics, or use only the site's captions for them |
-| `--container`, `--codec` | `mp4`, `balanced` | Video container and codec preference |
+| `--container`, `--codec` | `mp4`, `balanced` | Video file type, and compatible, balanced, or best quality |
 | `--audio-langs LANGS` | | Keep dubbed audio tracks too, such as `es,pt-BR` (MP4 or MKV) |
 | `--subs LANGS`, `--auto-subs` | | Subtitles in these languages, and automatic captions |
 | `--embed-subs`, `--keep-subs`, `--sub-format srt\|vtt` | | Embed subtitles, embed and keep the files, and the files' format |
 | `--embed` | | Embed the thumbnail, details, and chapters |
 | `--sponsorblock mark\|remove` | | SponsorBlock on YouTube |
 | `--limit-rate RATE`, `--proxy URL`, `--force-ipv4` | | Network |
-| `--items SPEC` | | Playlist items, such as `1:5,8` |
+| `--items SPEC` | | Which playlist videos, by number, such as `1:5,8` |
 | `--live-from-start`, `--wait-for-video` | | Live streams |
-| `--strict` | | Exit with status 1 when any item was skipped |
+| `--strict` | | Exit with status 1 when any video couldn't be downloaded |
+| `-v`, `--verbose` | | Also print yt-dlp's warnings and its own error text |
 
-Exit status: `0` when every available item was saved (private or removed items are listed but don't fail the run unless `--strict`), `1` when failures remain after `--max-attempts`, `2` when the link, the tools, or the folders can't be used, and `130` after Ctrl+C. The command line uses the app's managed tools when the app is installed, otherwise yt-dlp, FFmpeg, and Deno on PATH. It needs only Python's standard library, so it also runs on Linux.
+Progress reads like `Video 2 of 8  Downloading  45% of 40.0 MB  2.1 MB/s  about 1 minute left`, and a video that can't be downloaded is named with the reason. Exit status: `0` when every available video was saved (private or removed ones are listed but don't fail the run unless `--strict`), `1` when failures remain after `--max-attempts`, `2` when the link, the tools, or the folders can't be used, and `130` after Ctrl+C. The command line uses the app's managed tools when the app is installed, otherwise yt-dlp, FFmpeg, and Deno on PATH. It needs only Python's standard library, so it also runs on Linux.
 
 ---
 
@@ -327,13 +335,13 @@ A video downloaded before isn't downloaded twice: its entry reads **Already down
 
 ## Quality and Speed
 
-The quality limit applies to the shorter side, so 1080 suits landscape videos and portrait Shorts alike. **Compatible** prefers H.264 video and AAC sound, which every player handles; **Best quality** allows AV1 and VP9. HLS streams download eight fragments at a time by default; **Optimize for this PC** (Preferences > Downloads) measures 4, 8, and 16 on your connection and keeps the fastest. Three downloads run at once by default, with at most two or three per site.
+The quality limit applies to the shorter side, so 1080 suits landscape videos and portrait Shorts alike. **Plays everywhere** prefers H.264 video and AAC sound, which every player handles; **Best quality** allows AV1 and VP9, which older devices may not play. Streams download eight pieces at a time by default; **Optimize for this PC** (Preferences > Downloads) measures 4, 8, and 16 on your connection and keeps the fastest. Three downloads run at once by default, with at most two or three per site.
 
 ---
 
 ## The Download Tools
 
-yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube's player challenges. The app downloads them from their official GitHub releases ([yt-dlp](https://github.com/yt-dlp/yt-dlp/releases), [yt-dlp's FFmpeg builds](https://github.com/yt-dlp/FFmpeg-Builds/releases), [Deno](https://github.com/denoland/deno/releases)), checks every file against the checksums those projects publish, and keeps them in `%LOCALAPPDATA%\gfgRoyal Media Downloader\tools`. They update once a day and right after a download fails in a way a newer yt-dlp usually fixes. Preferences > Tools shows each version, switches yt-dlp to nightly builds, goes back to the previous version, or uses programs on PATH or in a folder you choose.
+yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube's player challenges. The app downloads them from their official GitHub releases ([yt-dlp](https://github.com/yt-dlp/yt-dlp/releases), [yt-dlp's FFmpeg builds](https://github.com/yt-dlp/FFmpeg-Builds/releases), [Deno](https://github.com/denoland/deno/releases)), checks every file against the checksums those projects publish, and keeps them in `%LOCALAPPDATA%\gfgRoyal Media Downloader\tools`. They update once a day and right after a download fails in a way a newer yt-dlp usually fixes. Preferences > Tools shows each version, switches yt-dlp to early fixes (updated daily), goes back to the previous version, or uses programs already installed on this PC or in a folder you choose.
 
 ---
 
@@ -342,7 +350,9 @@ yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube
 - **No accounts, no telemetry, no ads.** The app contacts the sites you download from, GitHub (for its own updates and the tools), LRCLIB for lyrics (title, artist, album, and length only; it can be turned off), and nothing else.
 - **No configuration from elsewhere runs.** Every yt-dlp run ignores yt-dlp's own configuration files, plugins, and remote code, and links are always passed after `--`, so nothing can add options such as `--exec`.
 - **Verified downloads.** Tools must match their published SHA-256 checksums and come only from GitHub over HTTPS; app updates must carry the release signature.
-- **Sign-ins stay on your PC**, encrypted for your Windows account, and are never written to logs.
+- **Sign-ins stay on your PC**, encrypted for your Windows account, and are never written to logs. A download that needs one gets a copy for that run only, removed when it ends (and at the next start after a crash).
+- **Text from sites is only text.** Titles and names are shown as plain text, and nothing a site puts in a title can pose as the app's own progress lines or point it at a file outside the download folder.
+- **The tools are never taken from the current folder**, so a program dropped where the command line runs can't stand in for yt-dlp or FFmpeg.
 - **No administrator rights** are needed to run the app or to install it for your account.
 
 ---
@@ -353,14 +363,16 @@ yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube
 |---|---|
 | **Sign-in needed** / **This is private. Sign in with an account that can see it** | Sign in to the site on the Sign-ins page; waiting downloads and the link you opened continue on their own |
 | **This post has only pictures, no video** | The post has no video to save; it's skipped |
-| **The site asked to confirm you are not a bot** | The app updates yt-dlp and tries again; signing in to the site usually ends these checks |
-| **The site is limiting requests** | Downloads from that site wait and resume; lower **Downloads at once** if it keeps happening |
-| **Private video** / **removed** / **not available in your country** | The video is skipped; the rest of the playlist continues |
-| **The disk is full** | The queue pauses; free some space or choose another folder, then **Resume all** |
-| **Windows refused to write to the download folder** | Choose another folder, or allow the app in Windows Security > Ransomware protection |
-| **A required tool is missing** | Preferences > Tools > **Download tools**, or **Previous version** after a bad update |
+| **The site wants to check that you aren't a bot** | The app updates its download tools and tries again; signing in to the site usually ends these checks |
+| **The site is getting too many downloads from you** | Downloads from that site wait and resume; lower **Downloads at once** if it keeps happening |
+| **This is private** / **removed** / **isn't available in your country** | The video is skipped; the rest of the playlist continues |
+| **Waiting for its server** / **The download server didn't answer** | The site sent the video from a server that isn't answering your PC; the rest of the list downloads first, then it tries again with fresh links. If it keeps happening, pause and resume the download later |
+| **The drive is full** | Downloads pause; free some space or choose another folder, then **Resume all** |
+| **The app isn't allowed to save in this folder** | Click **Choose folder** on the download, or allow the app in Windows Security > Ransomware protection |
+| **The download folder can't be reached** | Plug in the drive the folder is on, or click **Choose folder** on the download |
+| **The download tools are missing or damaged** | Click **Update tools** on the download, or Preferences > Tools > **Update tools** (**Download tools** when they're missing); **Previous version** after a bad update |
 
-Still stuck? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/issues) with the link (if you can share it) and, with logging turned on in Preferences, the last lines of the log. Logs never contain sign-in cookies.
+Still stuck? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/issues) with the link (if you can share it) and, with logging turned on in Preferences, the last lines of the log. Logs never contain your sign-ins.
 
 ---
 
@@ -418,7 +430,18 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 📁 Single downloads go straight into the download folder; playlists, channels, profiles, and posts with several videos get folders of their own, and the `.archives` and `.incomplete` folders are hidden
 - ♻️ A video downloaded before reads **Already downloaded** and plays the file you have, or downloads again when you deleted its file; **Download again** (in its menu and the Library) downloads it anyway, and a link already waiting in the list isn't added twice
 - 📊 Audio downloads show how far the conversion has got, and the progress bar moves on downloads whose size the site doesn't list
-- 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off
+- 📜 A playlist, channel, or several new subscription uploads list every video under one download, numbered, with each one's state, progress, and Play button; finished songs reach the Library and get their clean names as they land, not when the whole list ends
+- 🗄️ The Library groups each playlist's and channel's files in one row that opens into them in the playlist's order, with **Play all**; a search opens the groups that hold matches
+- ⏭️ A video whose download stops moving (its server stopped answering) waits while the rest of the list downloads, then tries again with fresh links; the progress bar counts what is saved and no longer jumps back between tries
+- 💬 Every status, step, and message is in plain words: "Song 2 of 8", "about 3 minutes left", "Putting the video together", "Preparing the cover", and errors that say what to do, with tool output, codes, and file paths kept for the log
+- 🔔 Playlist subscriptions read the whole playlist, so videos added at its end are found even when its first ones were downloaded before, and new uploads go in the playlist's own folder; uploads from sites other than YouTube are kept for **Download new**; the Subscribe dialog keeps a link it can't take and says why, including "You're already subscribed to this"
+- 🚪 **Ctrl+Q** quits (asking first while downloading), the first close to the tray says the app is still running there, the tray's **Quit** quits even with the window open, and downloads stopped by quitting start again as soon as the app opens
+- 🎧 Songs drop video clutter such as "(Official Video)" and "(Lyrics)" from their names and tags, and YouTube's quieter "stable volume" audio copy is never picked when the full one is offered
+- ♻️ **Download again** in the Library keeps the file's own type (a song stays a song, an MKV stays an MKV) and says it was added; Choose folder on a download that couldn't save changes the folder of its own type
+- ⌨️ Keyboard and screen reader use: the Download options video list, page tabs, Preferences sections, and every list's menu (Menu key or Shift+F10) work from the keyboard; notices are read out; text boxes have names; picked rows say so; focus never scrolls out of sight; toggle buttons show when they are on
+- 🛡️ Reliability: a file that couldn't be finished, or a subtitle another program held open, no longer stops a download or loses its file; a playlist video that keeps failing is skipped after three tries instead of retrying the list forever; Cancel and Remove stay what they are when you quit right after; a download folder on an unplugged drive says so and offers **Choose folder**; the Library and long playlists stay fast
+- ⌨️ `gfgmd` accepts links typed without `https://`, numbers retries by failed attempts only, and says a reason once
+- 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry
 
 ### v1.0.0 - November 2026 *(current)*
 - 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
