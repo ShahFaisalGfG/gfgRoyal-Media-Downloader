@@ -23,9 +23,10 @@ _PAGE = re.compile(r"Downloading (?:API JSON )?page (\d+)", re.IGNORECASE)
 _WAIT = re.compile(r"\[wait\] Remaining time until next attempt: (\d+):(\d+):(\d+)")
 _ITEM_OF = re.compile(r"^\[download\] Downloading item (\d+) of (\d+)")
 _ARCHIVED = "has already been recorded in the archive"
-# A link whose ID yt-dlp knows without reading the page (YouTube) is skipped as "[download] <id>: has
-# already been recorded in the archive"; other skips name the title instead.
-_ARCHIVED_ID = re.compile(r"^\[download\] (?P<id>[^\s:]{1,128}): has already been recorded in the archive")
+# yt-dlp names a video it skips as downloaded before by its ID, then its title when it knows it:
+# "[download] <id>: <title> has already been recorded in the archive" (a list's entry), or "[download]
+# <id>: has already..." (a link whose ID it knows without reading the page).
+_ARCHIVED_ID = re.compile(r"^\[download\] (?P<id>[^\s:]{1,128}): (?:.+ )?has already been recorded in the archive")
 
 # yt-dlp's playlist file (see command.py), written before the playlist's first video downloads.
 _LIST_WRITTEN = re.compile(r"^\[info\] Writing playlist metadata as JSON to: (?P<path>.+)$")
@@ -243,6 +244,8 @@ class Snapshot:
     # PHASE_DOWNLOAD while the current video downloads (or connects), PHASE_POST while it is converted
     # or put together, PHASE_WAIT while waiting (to try again, for a stream, for another download).
     phase: str = ""
+    # While waiting to try again: what went wrong ("The connection dropped").
+    reason: str = ""
 
     @property
     def size_guessed(self) -> bool:
@@ -316,11 +319,20 @@ class ProgressTracker:
         with self._lock:
             return Snapshot(**self._snap.__dict__)
 
-    def mark_stage(self, stage: str, phase: str = "") -> None:
-        """Set the stage from outside (Trying again in 20 seconds); a wait clears the last video's sizes."""
+    @staticmethod
+    def _own_video(event: Event, snap: Snapshot) -> None:
+        """An error that names no video ("fragment 30 not found", "HTTP Error 403"), said while a video
+        downloads or is put together, is that video's (the caller holds the lock)."""
+        if not event.data.get("id") and snap.item_id and snap.phase in (PHASE_DOWNLOAD, PHASE_POST):
+            event.data["id"] = snap.item_id
+
+    def mark_stage(self, stage: str, phase: str = "", reason: str = "") -> None:
+        """Set the stage from outside (Trying again in 20 seconds, and why); a wait clears the last
+        video's sizes."""
         with self._lock:
             snap = self._snap
             snap.stage = stage
+            snap.reason = reason
             if phase:
                 snap.phase = phase
             if phase == PHASE_WAIT:
@@ -329,9 +341,8 @@ class ProgressTracker:
     def take_updates(self) -> list[tuple[str, Any]]:
         """What happened to the playlist's videos since the last call.
 
-        ("state", (id, "archived", "")) when the archive skipped a video downloaded before, or
-        ("archived_at", position) when it named the video by title, not ID (the executor knows which
-        video is at that place in the list). Failures and the list itself are the executor's.
+        ("state", (id, "archived", "")) when the archive skipped a video downloaded before. Failures
+        and the list itself are the executor's.
         """
         with self._lock:
             updates, self._updates = self._updates, []
@@ -417,6 +428,7 @@ class ProgressTracker:
             self.playlist = data
         elif event.kind == "error":
             if event.text:
+                self._own_video(event, snap)
                 self.errors.append(event)
                 snap.phase = ""  # the video gave up; what comes next is the next one
             else:
@@ -427,7 +439,9 @@ class ProgressTracker:
             if self._blank_error and self._blank_error == event.stream:
                 # "ERROR: \r[download] Got error: ... Giving up after 10 retries" arrives as two lines.
                 self._blank_error = ""
-                self.errors.append(Event("error", _item_of(event.text), event.text, event.stream))
+                joined = Event("error", _item_of(event.text), event.text, event.stream)
+                self._own_video(joined, snap)
+                self.errors.append(joined)
                 snap.phase = ""
             else:
                 self._apply_log(event.text)
@@ -504,8 +518,6 @@ class ProgressTracker:
             if skipped:
                 self.archived_ids.append(skipped.group("id"))
                 self._updates.append(("state", (skipped.group("id"), "archived", "")))
-            elif snap.item_index:
-                self._updates.append(("archived_at", snap.item_index))
             return
         page = _PAGE.search(text)
         if page:

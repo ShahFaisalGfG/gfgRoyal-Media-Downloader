@@ -30,8 +30,9 @@ MAX_INLINE_URLS = 50
 # --match-filters entries beyond this are dropped; the skipped items then fail fast and are skipped again.
 MAX_SKIP_FILTERS = 200
 
+# An item line's filename is where the video will be saved, known before it downloads.
 _ITEM_FIELDS = ("id,extractor_key,title,uploader,channel,duration,live_status,playlist_title,"
-                "playlist_index,n_entries,format_id,webpage_url,thumbnail,release_timestamp")
+                "playlist_index,n_entries,format_id,webpage_url,filename,thumbnail,release_timestamp")
 _FILE_FIELDS = ("id,extractor_key,title,filepath,height,width,vcodec,acodec,webpage_url,duration,uploader,"
                 "channel,playlist_title,playlist_index,thumbnail,artist,creator,track,album")
 _ENTRY_FIELDS = ("id,url,title,duration,live_status,availability,release_timestamp,timestamp,"
@@ -294,11 +295,13 @@ def folder_template(source: Source) -> str:
 def output_template(source: Source, options: DownloadOptions, folder: str = "") -> str:
     """The staged file name: title, ID, and requested profile, renamed to a clean name afterwards.
 
-    `folder` names the folder outright instead of from the video's details (a playlist subscription's
-    new uploads, downloaded one link at a time, carry no playlist name).
+    `folder` names the folder outright, as a path below the download root ("Mix", "Channel/Videos"),
+    instead of from the video's details: a playlist subscription's new uploads, or a list's video
+    downloaded by its own link, carry no playlist name.
     """
     prefix = _FILENAME_PREFIX[options.filename_style]
-    where = escape_template(folder_name(folder)) if folder else folder_template(source)
+    where = "/".join(escape_template(folder_name(part)) for part in folder.split("/")) if folder \
+        else folder_template(source)
     return f"{where}/{prefix}%(title).100B [%(id).64B] (requested-{options.profile}).%(ext)s"
 
 

@@ -21,7 +21,7 @@ from gfgmd.config.defaults import AppInfo, DownloadDefaults, FormatDefaults
 from gfgmd.core import web
 from gfgmd.core.archive import archive_path
 from gfgmd.core.command import Auth, RunPaths
-from gfgmd.core.errors import CATEGORIES, Failure, classify
+from gfgmd.core.errors import CATEGORIES, Category, Failure, classify
 from gfgmd.core.jobs import JobExecutor, JobResult, JobSpec
 from gfgmd.core.lyrics import fetch_json
 from gfgmd.core.naming import normalize_downloads
@@ -37,6 +37,22 @@ _RATE = re.compile(r"^(\d+(?:\.\d+)?)([KMG]?)(?:i?B)?(?:/s)?$", re.IGNORECASE)
 _PROGRESS_EVERY = 2.0
 _TOOLS_MISSING = "The download tools aren't installed. Open the app once to install them."
 _TOOLS_BROKEN = "The download tools are missing or didn't start. Open the app once to install them again."
+_SIGN_IN = "Use --cookies or --cookies-from-browser to sign in."
+_ELSEWHERE = "Use --output-dir to save somewhere else."
+# The command line's way out where the app's message points at a control of its window (Sign in,
+# Choose folder, Update tools, waiting for a stream).
+_CLI_HINTS = {
+    "auth_required": _SIGN_IN, "cookies_stale": _SIGN_IN, "private_signin": _SIGN_IN,
+    "disk_full": _ELSEWHERE, "access_denied": _ELSEWHERE, "folder_missing": _ELSEWHERE,
+    "upcoming": "Add --wait-for-video to wait for it.",
+    "extractor_broken": "Open the app to update the download tools.",
+}
+
+
+def _with_hint(category: Category, text: str) -> str:
+    """The message with the command line's option for it added."""
+    hint = _CLI_HINTS.get(category.key, "")
+    return f"{text} {hint}" if hint else text
 
 
 def positive_int(value: str) -> int:
@@ -257,7 +273,8 @@ class _Reporter:
             item_id = str(event.data.get("id") or "")
             failure = classify(event.text, item_id, self._signed_in, self._single)
             self.said.add(failure.category.message)
-            print(self.describe(item_id, failure.category.message), file=sys.stderr, flush=True)
+            print(self.describe(item_id, _with_hint(failure.category, failure.category.message)), file=sys.stderr,
+                  flush=True)
             if self._verbose:
                 print(f"  Details: {event.text}", file=sys.stderr, flush=True)
         elif event.kind == "warning" and self._verbose and "Falling back on generic" not in event.text:
@@ -388,11 +405,9 @@ def _report(result: JobResult, output_root: Path, strict: bool, kind: str = "vid
     failure = result.failure or Failure(CATEGORIES["unknown"], "")
     if failure.category.key == "tools":
         return _invalid(_TOOLS_BROKEN, failure.text if verbose else "")
-    message = failure.category.final
-    if result.state == "needs_auth":
-        message += " Use --cookies or --cookies-from-browser to sign in."
+    message = _with_hint(failure.category, failure.category.final)
     tries = f" after {result.attempts} attempts" if result.attempts > 1 else ""
-    if message in said:
+    if failure.category.final in said:
         print(f"The download didn't finish{tries}.", file=sys.stderr)  # the reason was the line above
     else:
         print(f"The download didn't finish{tries}: {message}", file=sys.stderr)

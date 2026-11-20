@@ -121,6 +121,43 @@ def test_sign_in_needed_then_retry_after_sign_in(qapp, queue, context):
     assert wait_for(qapp, lambda: states(context) == ["needs_auth"] and context.store.jobs()[0]["attempts"] == 1)
 
 
+def test_yt_dlp_errors_reach_the_log(qapp, queue, context):
+    """yt-dlp's own words for a failure go to the log (written when logging is on); the row says it plainly."""
+    lines: list[tuple[str, str]] = []
+
+    def logged(message: str, level: str = "general") -> None:
+        lines.append((message, level))
+    with patch("gfgmd.controllers.queue_ctrl.write_log", logged):
+        queue.addLinks("https://fake.test/private", "video-best-mp4")
+        assert wait_for(qapp, lambda: states(context) == ["failed"])
+    prefix = f"Download {context.store.jobs()[0]['id']}: "
+    assert any(level == "critical" and message.startswith(prefix) and "Private video" in message
+               for message, level in lines)
+
+
+def test_a_finished_download_deletes_its_saved_videos_leftovers(qapp, queue, context):
+    """A part an earlier attempt left of a video since saved (another stream) goes when the download
+    finishes; a skipped video's part stays for Try again until the download leaves the list."""
+    queue.pauseAll()
+    queue.addLinks("https://fake.test/playlist", "video-best-mp4")
+    job = context.store.jobs()[0]
+    context.store.add_items(job["id"], [{"id": video_id, "title": title, "index": number} for number, (video_id, title)
+                                        in enumerate((("aaaaaaaaaaa", "First"), ("bbbbbbbbbbb", "Second"),
+                                                      ("ccccccccccc", "Third")), start=1)])
+    folder = Path(job["output_root"]) / ".incomplete" / "Fake List"
+    folder.mkdir(parents=True)
+    saved_part = folder / "First [aaaaaaaaaaa] (requested-best).mp4.part"
+    skipped_part = folder / "Second [bbbbbbbbbbb] (requested-best).mp4.part"
+    for part in (saved_part, saved_part.with_suffix(".ytdl"), skipped_part):
+        part.write_bytes(b"part")
+    queue._keep_partials(job["id"], {str(saved_part), str(skipped_part)})
+    queue.resumeAll()
+    assert wait_for(qapp, lambda: states(context) == ["done"])
+    assert sorted(path.name for path in folder.iterdir()) == [skipped_part.name]
+    queue.clearFinished()
+    assert list(folder.iterdir()) == []
+
+
 def test_full_disk_pauses_the_queue(qapp, queue, context):
     queue.addLinks("https://fake.test/disk", "video-best-mp4")
     assert wait_for(qapp, lambda: states(context) == ["paused"])
@@ -539,6 +576,28 @@ def test_a_stalled_video_waits_while_the_rest_download(qapp, context, fake_ytdlp
         assert saved == ["aaaaaaaaaaa", "ccccccccccc", "bbbbbbbbbbb"]
     finally:
         queue.shutdown()
+
+
+def test_videos_its_archive_records_show_as_downloaded_before(qapp, queue, context):
+    """A list's videos still waiting when it ends, but in its archive, read "Downloaded before"."""
+    from gfgmd.core.jobs import JobResult
+    queue.pauseAll()
+    queue.addLinks("https://fake.test/playlist", "video-best-mp4")
+    job = context.store.jobs()[0]
+    context.store.add_items(job["id"], [{"id": "aaaaaaaaaaa", "title": "First", "index": 1},
+                                        {"id": "bbbbbbbbbbb", "title": "Second", "index": 2}])
+    archive = Path(queue._job_archive(job))
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_text("youtube aaaaaaaaaaa\n", encoding="utf-8")
+    queue._record_result(context.store.job(job["id"]), JobResult("done", archived=1, kind="video"))
+    states_by_id = {item["item_id"]: item["state"] for item in context.store.job_items(job["id"])}
+    assert states_by_id == {"aaaaaaaaaaa": "archived", "bbbbbbbbbbb": "pending"}
+
+
+def test_a_wait_to_try_again_says_why():
+    from gfgmd.core.progress import PHASE_WAIT
+    snap = Snapshot(stage="Trying again in 5 minutes", phase=PHASE_WAIT, reason="The connection dropped")
+    assert running_values(snap)["detail"] == "The connection dropped"
 
 
 def test_a_video_set_aside_says_it_waits_for_its_server():
