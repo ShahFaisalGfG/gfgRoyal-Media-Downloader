@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from gfgmd.config.defaults import AppInfo, DownloadDefaults, FormatDefaults
+from gfgmd.core import web
 from gfgmd.core.archive import archive_path
 from gfgmd.core.command import Auth, RunPaths
 from gfgmd.core.errors import CATEGORIES, Failure, classify
@@ -314,6 +315,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         options = options_from_args(args)
     except ValueError as exc:
         return _invalid(str(exc))
+    web.use_proxy(options.proxy)  # the lyrics lookup goes through --proxy too
     if args.cookies is not None and not args.cookies.is_file():
         return _invalid(f"The sign-in file wasn't found: {args.cookies}")
     try:

@@ -35,6 +35,7 @@ MODULES = [
     "gfgmd.core.subscriptions",
     "gfgmd.core.tool_install",
     "gfgmd.core.tools",
+    "gfgmd.core.web",
 ]
 
 

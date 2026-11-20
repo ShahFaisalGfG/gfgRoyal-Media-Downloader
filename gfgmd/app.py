@@ -14,6 +14,7 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from gfgmd.config.defaults import AppInfo
+from gfgmd.core import web
 from gfgmd.core.lyrics import fetch_json
 from gfgmd.core.sources import likely_media
 from gfgmd.services import autostart
@@ -290,6 +291,7 @@ class _Startup:
                          repr(settings.get("network", {}))),
         }
         previous = self._applied
+        web.use_proxy(str(settings.get("network", {}).get("proxy", "")))
         app_ctrl = self._controllers.get("appController")
         if current["start_with_windows"] != previous.get("start_with_windows") and autostart.available():
             if current["start_with_windows"] != autostart.is_enabled():

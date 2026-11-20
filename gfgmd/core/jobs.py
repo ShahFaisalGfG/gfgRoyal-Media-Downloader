@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from gfgmd.core.archive import ArchiveLock
 from gfgmd.core.command import Auth, RunPaths, download_command, run_marker, url_args
@@ -159,8 +160,10 @@ class JobExecutor:
         # being downloaded (for archive lines that name a title, not an ID).
         self._list_offset = 0
         self._positions: dict[int, str] = {}
-        # The IDs of the lists read (a playlist, a channel's tabs), which are no video of their own.
+        # The IDs of the lists read (a playlist, a channel's tabs), which are no video of their own,
+        # and the parts of the link that can name the list.
         self._list_ids: set[str] = set()
+        self._link_names = _link_names(spec.url)
 
     def stop(self) -> None:
         """Stop the running attempt (or the wait before the next one)."""
@@ -488,10 +491,10 @@ class JobExecutor:
         return "" if item_id and self._is_list(item_id) else item_id
 
     def _is_list(self, item_id: str) -> bool:
-        """True for the playlist's or a tab's own ID (in the link, or a list file read): an error about
-        the list, not one of its videos, so it gets no row of its own."""
+        """True for the playlist's or a tab's own ID (a part of its link, or a list file read): an error
+        about the list, not one of its videos, so it gets no row of its own."""
         with self._updates_lock:
-            return item_id in self._spec.url or item_id in self._list_ids
+            return item_id in self._link_names or item_id in self._list_ids
 
     def _finish_files(self) -> None:
         """On its own thread: finish each saved file as yt-dlp reports it, until run() ends.
@@ -589,11 +592,19 @@ class JobExecutor:
                    self._lyrics_fetch or (lambda _url: None))
 
 
+def _link_names(url: str) -> set[str]:
+    """The parts of a list's link that can name the list itself (path parts, query values), but not a
+    video it also names (a watch link's v=, which yt-dlp downloads alone when the list can't be read)."""
+    parts = urlsplit(url)
+    names = {part for part in parts.path.split("/") if part}
+    return names | {value for key, value in parse_qsl(parts.query) if key != "v" and value}
+
+
 def _give_up_on_repeats(failures: list[Failure], counts: dict[str, int], progressed: bool) -> list[Failure]:
     """Count each playlist video's temporary failures of its own; one that failed ITEM_ATTEMPTS attempts
     running is skipped from now on, so the rest of the list can finish. A video that went through is
-    forgotten. Failures of the connection, rate limits, and bot checks never count, nor does an attempt
-    that got nowhere (the whole list failing at once means the connection, not the videos)."""
+    forgotten. Rate limits and bot checks never count, nor does an attempt that got nowhere (the whole
+    list failing at once means the connection, not the videos)."""
     failing = {failure.item_id for failure in failures
                if failure.item_id and failure.category.policy in (Policy.RETRY, Policy.UPDATE)
                and failure.category.key not in _NOT_THE_VIDEO}
@@ -608,9 +619,10 @@ def _give_up_on_repeats(failures: list[Failure], counts: dict[str, int], progres
             else failure for failure in failures]
 
 
-# Temporary failures that say nothing about one video: the connection, the site limiting downloads,
-# or a bot check (see _give_up_on_repeats).
-_NOT_THE_VIDEO = frozenset({"network", "rate_limited", "bot_check", "stalled"})
+# Temporary failures that say nothing about one video: the site limiting downloads, a bot check, or a
+# stall (counted on its own). A dropped connection counts only when the same attempt got somewhere,
+# so an outage never does, while a video whose server never answers your PC is given up on.
+_NOT_THE_VIDEO = frozenset({"rate_limited", "bot_check", "stalled"})
 
 
 def _harmless(error: str) -> bool:

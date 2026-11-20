@@ -27,6 +27,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
 
+from gfgmd.core import web
 from gfgmd.core.tools import MANIFEST, read_manifest, tool_version
 
 ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
@@ -134,7 +135,7 @@ def open_url(url: str, headers: dict[str, str] | None = None) -> Any:
     check_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     redirects = _GitHubOnly()
-    response = urllib.request.build_opener(redirects).open(request, timeout=TIMEOUT_S)
+    response = web.open_url(request, TIMEOUT_S, redirects=redirects)  # through the app's proxy
     response.redirect_chain = redirects.chain
     return response
 

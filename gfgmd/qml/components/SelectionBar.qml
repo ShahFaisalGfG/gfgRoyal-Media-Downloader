@@ -46,7 +46,7 @@ Rectangle {
             kind: "ghost"
             compact: true
             text: "Select all " + bar.total
-            toolTipText: "Pick every row the list holds (Ctrl+A)"
+            toolTipText: "Select every row the list holds (Ctrl+A)"
             onClicked: bar.selectAllRequested()
         }
         Item { Layout.fillWidth: true }

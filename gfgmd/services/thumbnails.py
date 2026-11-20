@@ -2,8 +2,9 @@
 #
 # QML asks for a thumbnail with localFor(url, thumbnails.revision): a cached file comes back at
 # once; otherwise "" comes back and a background fetch starts. Each finished fetch bumps
-# `revision`, which re-evaluates those bindings so the image appears. Fetches use HTTPS only, stop
-# at a size limit, and must decode as an image; the cache prunes itself to a size cap.
+# `revision`, which re-evaluates those bindings so the image appears. Fetches use HTTPS only (through
+# the app's proxy), stop at a size limit, and must decode as an image; the cache prunes itself to a
+# size cap.
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QImage
 
+from gfgmd.core import web
 from gfgmd.services.tasks import TaskRunner
 from gfgmd.utils.logging import write_log
 
@@ -34,9 +36,8 @@ def cache_file(folder: Path, url: str) -> Path:
 def _fetch(url: str, target: Path) -> Path:
     """Download one image to target (written atomically); raises on any failure."""
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:  # noqa: S310 - https checked by caller
-        if urlsplit(response.geturl()).scheme != "https":
-            raise ValueError("thumbnail redirected away from HTTPS")
+    # Through the app's proxy; a redirect away from HTTPS is refused before it is followed.
+    with web.open_url(request, _TIMEOUT_S) as response:
         data = response.read(MAX_IMAGE_BYTES + 1)
     if len(data) > MAX_IMAGE_BYTES:
         raise ValueError("thumbnail too large")

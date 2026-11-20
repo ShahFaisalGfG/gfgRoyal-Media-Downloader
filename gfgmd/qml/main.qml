@@ -262,8 +262,8 @@ AppWindow {
             spacing: Theme.spaceSm
             Icon { name: "link"; size: Theme.iconLg; color: Theme.accent }
             Text {
-                textFormat: Text.PlainText
                 id: offerText
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: "Download the copied link?\n" + clipboardOffer.url
                 font.family: Theme.fontFamily

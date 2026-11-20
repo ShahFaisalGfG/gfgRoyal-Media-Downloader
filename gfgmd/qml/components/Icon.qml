@@ -3,8 +3,8 @@ import QtQuick
 // A glyph from the Windows icon font. Decorative by default: screen readers skip it, since the
 // control or text next to it carries the accessible name.
 Text {
-    textFormat: Text.PlainText
     id: icon
+    textFormat: Text.PlainText
 
     property string name: ""
     property int size: Theme.iconLg

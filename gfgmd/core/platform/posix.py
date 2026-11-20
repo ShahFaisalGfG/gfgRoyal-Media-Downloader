@@ -16,12 +16,14 @@ class ProcessGroup:
         self.process: subprocess.Popen[bytes] | None = None
 
     def launch(self, argv: Sequence[str], env: Mapping[str, str] | None = None,
-               cwd: str | None = None, capture: bool = True) -> subprocess.Popen[bytes]:
-        """Start argv in a new session (stdout and stderr piped when `capture`)."""
+               cwd: str | None = None, capture: bool = True,
+               inherit: Sequence[int] = ()) -> subprocess.Popen[bytes]:
+        """Start argv in a new session (stdout and stderr piped when `capture`); `inherit` lists file
+        descriptors it keeps besides its standard ones."""
         output = subprocess.PIPE if capture else subprocess.DEVNULL
         process = subprocess.Popen(
             list(argv), stdin=subprocess.DEVNULL, stdout=output, stderr=output,
-            env=dict(env) if env is not None else None, cwd=cwd, start_new_session=True,
+            env=dict(env) if env is not None else None, cwd=cwd, start_new_session=True, pass_fds=tuple(inherit),
         )
         self.process = process
         return process

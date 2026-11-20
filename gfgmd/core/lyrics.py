@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from gfgmd.config.defaults import AppInfo, UpdateInfo
+from gfgmd.core import web
 from gfgmd.core.captions import is_synced_lrc, parse_lrc, plain_text, to_lrc
 from gfgmd.core.platform import hidden_window_flags
 
@@ -115,7 +116,8 @@ def fetch_json(url: str) -> Any:
     """GET a JSON document; None for 404. Raises OSError (network) or ValueError (bad data)."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310 - fixed https host
+        # Through the app's proxy; the address is LRCLIB's own fixed HTTPS one (tests serve it locally).
+        with web.open_url(request, _TIMEOUT, https_only=False) as response:
             body = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as error:
         if error.code == 404:

@@ -108,13 +108,21 @@ class ProcessGroup:
         self.process: subprocess.Popen[bytes] | None = None
 
     def launch(self, argv: Sequence[str], env: Mapping[str, str] | None = None,
-               cwd: str | None = None, capture: bool = True) -> subprocess.Popen[bytes]:
-        """Start argv suspended (stdout and stderr piped when `capture`), put it in the job, then resume it."""
+               cwd: str | None = None, capture: bool = True,
+               inherit: Sequence[int] = ()) -> subprocess.Popen[bytes]:
+        """Start argv suspended (stdout and stderr piped when `capture`), put it in the job, then resume it.
+
+        `inherit` lists inheritable handles the program gets besides its standard ones (and no others).
+        """
         output = subprocess.PIPE if capture else subprocess.DEVNULL
         flags = subprocess.CREATE_NO_WINDOW | _CREATE_SUSPENDED
+        startup = None
+        if inherit:
+            startup = subprocess.STARTUPINFO()
+            startup.lpAttributeList = {"handle_list": list(inherit)}
         process = subprocess.Popen(
             list(argv), stdin=subprocess.DEVNULL, stdout=output, stderr=output,
-            env=dict(env) if env is not None else None, cwd=cwd, creationflags=flags,
+            env=dict(env) if env is not None else None, cwd=cwd, creationflags=flags, startupinfo=startup,
         )
         self.process = process
         handle = int(process._handle)  # type: ignore[attr-defined]  # the process handle Popen keeps

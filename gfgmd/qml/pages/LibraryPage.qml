@@ -164,7 +164,7 @@ Item {
                 compact: true
                 text: "Play"
                 iconName: "play"
-                toolTipText: "Play the picked files in the built-in players, newest first"
+                toolTipText: "Play the selected files in the built-in players, newest first"
                 onClicked: page.playList(libraryController.pathsOf(selection.ids))
             }
             AppButton {
@@ -172,7 +172,7 @@ Item {
                 compact: true
                 text: "Extract audio"
                 iconName: "audio"
-                toolTipText: "Save the picked videos' audio as songs (songs among them are left out)"
+                toolTipText: "Save the selected videos' audio as songs (songs among them are left out)"
                 onClicked: extractDialog.forVideos(selection.ids, selection.count === 1 ? "1 file" : selection.count + " files")
             }
             AppButton {
@@ -180,7 +180,7 @@ Item {
                 compact: true
                 text: "Remove"
                 iconName: "clear"
-                toolTipText: "Take the picked files off the library; the files stay (Delete)"
+                toolTipText: "Take the selected files off the library; the files stay (Delete)"
                 onClicked: page.removePicked()
             }
             AppButton {
@@ -188,7 +188,7 @@ Item {
                 compact: true
                 text: "Recycle Bin"
                 iconName: "delete"
-                toolTipText: "Move the picked files to the Recycle Bin"
+                toolTipText: "Move the selected files to the Recycle Bin"
                 onClicked: deleteDialog.ask(selection.ids)
             }
         }

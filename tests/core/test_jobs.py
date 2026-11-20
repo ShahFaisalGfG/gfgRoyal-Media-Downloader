@@ -107,10 +107,18 @@ def test_a_playlist_video_that_keeps_failing_is_skipped(tmp_path: Path) -> None:
     assert _give_up_on_repeats([failure], counts, False)[0].category.policy is Policy.RETRY  # got nowhere
     assert _give_up_on_repeats([failure], counts, True)[0].category.policy is Policy.SKIP
     assert _give_up_on_repeats([], counts, True) == [] and counts == {}  # a clean attempt forgets it
-    for key in ("network", "rate_limited", "bot_check"):
-        outage = Failure(CATEGORIES[key], "Connection reset", "bbbbbbbbbbb")
+    for key in ("rate_limited", "bot_check"):
+        limited = Failure(CATEGORIES[key], "HTTP Error 429", "bbbbbbbbbbb")
         for _ in range(ITEM_ATTEMPTS + 1):
-            assert _give_up_on_repeats([outage], counts, True)[0].category.policy is not Policy.SKIP
+            assert _give_up_on_repeats([limited], counts, True)[0].category.policy is not Policy.SKIP
+    # A dropped connection counts only in attempts that got somewhere: an outage never gives a video up,
+    # a video whose server never answers while the rest download does.
+    dropped = Failure(CATEGORIES["network"], "Connection reset", "ccccccccccc")
+    for _ in range(ITEM_ATTEMPTS + 1):
+        assert _give_up_on_repeats([dropped], counts, False)[0].category.policy is Policy.RETRY
+    for _ in range(ITEM_ATTEMPTS - 1):
+        assert _give_up_on_repeats([dropped], counts, True)[0].category.policy is Policy.RETRY
+    assert _give_up_on_repeats([dropped], counts, True)[0].category.policy is Policy.SKIP
 
 
 def test_a_video_whose_server_never_answers_is_skipped(fake_ytdlp: list[str], tmp_path: Path,
@@ -129,6 +137,11 @@ def test_an_error_about_the_list_names_no_video(tmp_path: Path) -> None:
     """The playlist's own ID (in its link, or a list file read) is never taken for a video's."""
     executor = JobExecutor(make_spec(tmp_path, "playlist", kind="playlist"), lambda: TOOLS)
     assert executor._video_id("playlist") == "" and executor._video_id("bbbbbbbbbbb") == "bbbbbbbbbbb"
+    # A watch link picked from a playlist names a video too; that one is still a video.
+    spec = make_spec(tmp_path, "playlist", kind="playlist")
+    watch = JobSpec("https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLfake", spec.source, spec.options, spec.paths)
+    executor = JobExecutor(watch, lambda: TOOLS)
+    assert executor._video_id("aaaaaaaaaaa") == "aaaaaaaaaaa" and executor._video_id("PLfake") == ""
 
 
 def test_a_download_folder_that_cant_be_made_says_so(fake_ytdlp: list[str], tmp_path: Path) -> None:

@@ -249,11 +249,10 @@ Item {
             width: parent.width
             spacing: Theme.spaceMd
 
-            RadioButton {
+            AppRadioButton {
                 checked: methodDialog.method === "browser"
                 enabled: signInsController.browsers.length > 0
                 text: "In a browser window (recommended)"
-                font.family: Theme.fontFamily
                 onClicked: methodDialog.method = "browser"
             }
             RowLayout {
@@ -276,10 +275,9 @@ Item {
                     wrapMode: Text.WordWrap
                 }
             }
-            RadioButton {
+            AppRadioButton {
                 checked: methodDialog.method === "extension"
                 text: "From your browser, with the app's browser extension"
-                font.family: Theme.fontFamily
                 onClicked: methodDialog.method = "extension"
             }
             Text {
@@ -295,10 +293,9 @@ Item {
                 color: Theme.textMuted
                 wrapMode: Text.WordWrap
             }
-            RadioButton {
+            AppRadioButton {
                 checked: methodDialog.method === "firefox"
                 text: "Use Firefox's sign-in on each download"
-                font.family: Theme.fontFamily
                 onClicked: methodDialog.method = "firefox"
             }
             StyledTextField {
@@ -308,10 +305,9 @@ Item {
                 visible: methodDialog.method === "firefox"
                 placeholderText: "Firefox profile name (leave empty for the default)"
             }
-            RadioButton {
+            AppRadioButton {
                 checked: methodDialog.method === "file"
                 text: "Import a sign-in file from your browser"
-                font.family: Theme.fontFamily
                 onClicked: methodDialog.method = "file"
             }
             Text {

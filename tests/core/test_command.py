@@ -57,7 +57,7 @@ def test_download_is_resumable_mp4_like_version_1(tmp_path: Path) -> None:
     assert "--throttled-rate" not in command
     assert value(command, "--download-archive") == str(tmp_path / ".archives" / "key-1080p.txt")
     assert values(command, "--paths") == [str(tmp_path), f"temp:{tmp_path / '.incomplete'}"]
-    assert value(command, "--output") == "%(playlist).100B/%(title).100B [%(id).64B] (requested-1080p).%(ext)s"
+    assert value(command, "--output") == "%(playlist|.).100B/%(title).100B [%(id).64B] (requested-1080p).%(ext)s"
     for flag in ("--continue", "--part", "--no-overwrites", "--abort-on-unavailable-fragments",
                  "--no-abort-on-error", "--yes-playlist"):
         assert flag in command
@@ -91,7 +91,7 @@ def test_every_command_is_hardened(tmp_path: Path) -> None:
     (VIDEO_URL, ".", "--no-playlist"),
     (SHORT_URL, ".", "--no-playlist"),
     # Lists, channels, and profiles: a folder of their own.
-    ("https://www.youtube.com/playlist?list=PLabcdefghijklmnop", "%(playlist).100B", "--yes-playlist"),
+    ("https://www.youtube.com/playlist?list=PLabcdefghijklmnop", "%(playlist|.).100B", "--yes-playlist"),
     ("https://www.youtube.com/@Some/shorts", "%(channel,uploader,playlist_uploader|Channel).100B/Shorts",
      "--yes-playlist"),
     ("https://www.tiktok.com/@someone", "%(uploader,channel,playlist_uploader,playlist_title|Profile).100B",
