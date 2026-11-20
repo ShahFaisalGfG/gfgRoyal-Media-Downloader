@@ -84,15 +84,20 @@ def test_every_command_is_hardened(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(("url", "folder", "playlist_flag"), [
-    (VIDEO_URL, "Single Videos", "--no-playlist"),
-    (SHORT_URL, "Shorts", "--no-playlist"),
+    # One video or Short: straight into the download folder.
+    (VIDEO_URL, ".", "--no-playlist"),
+    (SHORT_URL, ".", "--no-playlist"),
+    # Lists, channels, and profiles: a folder of their own.
+    ("https://www.youtube.com/playlist?list=PLabcdefghijklmnop", "%(playlist).100B", "--yes-playlist"),
     ("https://www.youtube.com/@Some/shorts", "%(channel,uploader,playlist_uploader|Channel).100B/Shorts",
      "--yes-playlist"),
-    ("https://vimeo.com/1", "%(extractor_key|Site).60B/%(playlist_title,playlist|Single Videos).100B",
+    ("https://www.tiktok.com/@someone", "%(uploader,channel,playlist_uploader,playlist_title|Profile).100B",
      "--yes-playlist"),
+    # A post or another page: a folder when it holds several videos, else the download folder.
+    ("https://vimeo.com/1", "%(playlist_title,playlist|.).100B", "--yes-playlist"),
 ])
 def test_folders_by_link_type(url: str, folder: str, playlist_flag: str, tmp_path: Path) -> None:
-    """Put each kind of link in its own folder."""
+    """Single downloads go into the download folder; anything holding several videos gets its own folder."""
     options = DownloadOptions(max_height=720, fragments=4)
     command = download_command(url, source_from_url(url), options, TOOLS, paths(tmp_path))
     assert value(command, "--output") == f"{folder}/%(title).100B [%(id).64B] (requested-720p).%(ext)s"
@@ -109,7 +114,9 @@ def test_audio_download(tmp_path: Path) -> None:
     assert value(command, "--audio-format") == "mp3"
     assert value(command, "--audio-quality") == "320K"
     assert "--extract-audio" in command and "--embed-thumbnail" in command and "--embed-metadata" in command
-    assert value(command, "--postprocessor-args") == SQUARE_COVER
+    # The square cover, then ffmpeg's progress file for the conversion (the app shows how far it got).
+    progress = (tmp_path / ".gfgmd" / "jobs" / "j" / "convert.progress").as_posix()
+    assert values(command, "--postprocessor-args") == [SQUARE_COVER, f'ExtractAudio+ffmpeg_o:-progress "{progress}"']
     assert value(command, "--replace-in-metadata") == "uploader"
     assert value(command, "--convert-subs") == "lrc" and value(command, "--sub-langs") == "en.*"
     assert "--write-auto-subs" not in command
@@ -122,7 +129,8 @@ def test_lossless_audio_has_no_bitrate(tmp_path: Path, audio_format: str) -> Non
     """FLAC, WAV, and the original stream ignore the bitrate; WAV gets its cover as a separate file."""
     options = DownloadOptions(kind="audio", audio_format=audio_format, embed_thumbnail=True, cover="original")
     command = download_command(VIDEO_URL, source_from_url(VIDEO_URL), options, TOOLS, paths(tmp_path))
-    assert "--audio-quality" not in command and "--postprocessor-args" not in command
+    assert "--audio-quality" not in command
+    assert [arg.split(":")[0] for arg in values(command, "--postprocessor-args")] == ["ExtractAudio+ffmpeg_o"]
     assert ("--write-thumbnail" in command) == (audio_format == "wav")
     assert ("--embed-thumbnail" in command) == (audio_format != "wav")
     assert f"(requested-audio-{audio_format})" in value(command, "--output")

@@ -90,15 +90,6 @@ Rectangle {
         }
 
         AppButton {
-            visible: queueController.finishedCount > 0
-            kind: "ghost"
-            text: "Clear finished"
-            iconName: "clear"
-            toolTipText: "Remove finished downloads from the list (the files stay)"
-            onClicked: queueController.clearFinished()
-        }
-
-        AppButton {
             kind: "ghost"
             text: "Open folder"
             iconName: "folderOpen"

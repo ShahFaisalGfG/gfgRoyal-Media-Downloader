@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from gfgmd.core.locks import FileLock
+from gfgmd.core.platform import hide_folder
 from gfgmd.core.sources import Source
 
 ARCHIVE_FOLDER = ".archives"
@@ -46,6 +47,7 @@ def append_archive(archive: Path, extractor: str, video_ids: Iterable[str]) -> i
     if not lines:
         return 0
     archive.parent.mkdir(parents=True, exist_ok=True)
+    hide_folder(archive.parent)
     with archive.open("a", encoding="utf-8", newline="\n") as handle:
         handle.writelines(lines)
     return len(lines)

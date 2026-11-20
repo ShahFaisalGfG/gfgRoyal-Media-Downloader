@@ -9,7 +9,8 @@ MenuItem {
     property bool danger: false
 
     implicitWidth: item.leftPadding + label.implicitWidth + item.rightPadding
-    implicitHeight: Theme.controlHeight - 2
+    // A hidden row takes no room (the menu's list would otherwise keep a gap for it).
+    implicitHeight: item.visible ? Theme.controlHeight - 2 : 0
     leftPadding: Theme.spaceMd
     rightPadding: item.subMenu ? Theme.spaceMd + Theme.iconLg + Theme.spaceXs : Theme.spaceMd
     topPadding: 0

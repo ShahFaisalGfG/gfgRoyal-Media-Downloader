@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-from gfgmd.controllers.queue_ctrl import QueueController
+from gfgmd.controllers.queue_ctrl import QueueController, _running_values
 from gfgmd.core import extract, naming
 from gfgmd.core.extract import VideoProbe
+from gfgmd.core.progress import Snapshot
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.tools import ToolSet
 from gfgmd.services import recycle as recycle_module
@@ -242,3 +243,87 @@ def test_extract_audio_of_a_finished_download(qapp, queue, context):
     assert context.store.history()[0]["kind"] == "audio"
     row = queue.model.get(1)
     assert row["kind"] == "audio" and row["lastFile"] == str(song)
+
+
+def test_the_same_video_again_plays_the_file_already_downloaded(qapp, queue, context):
+    notices = []
+    queue.notice.connect(notices.append)
+    queue.pauseAll()
+    assert queue.addLinks("https://fake.test/ok", "video-best-mp4") == 1
+    # The same link with the same choices while it waits: nothing more is queued.
+    assert queue.addLinks("https://fake.test/ok", "video-best-mp4") == 1
+    assert len(context.store.jobs()) == 1 and notices[-1] == "Already in the list with the same choices."
+    queue.resumeAll()
+    assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
+    first = context.store.history()[0]["filepath"]
+    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    assert wait_for(qapp, lambda: states(context) == ["done", "done"])
+    again = context.store.jobs()[1]
+    assert again["message"] == "Already downloaded" and again["title"] == "Clip"
+    assert queue.model.get(1)["lastFile"] == first and len(context.store.history()) == 1
+    # Download again ignores the archive and saves a second copy.
+    assert queue.model.get(1)["canRedownload"] is True
+    queue.downloadAgain(again["id"])
+    assert wait_for(qapp, lambda: states(context) == ["done", "done"] and len(context.store.history()) == 2)
+    assert context.store.job(again["id"])["message"] == "1 file saved"
+    # Try again goes back to the archive's rule.
+    queue.retry(again["id"])
+    assert wait_for(qapp, lambda: context.store.job(again["id"])["message"] == "Already downloaded")
+
+
+def test_a_video_whose_file_is_gone_downloads_again(qapp, queue, context):
+    """Deleted after downloading (in Explorer, or with its library record): asking again downloads it."""
+    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
+    first = Path(context.store.history()[0]["filepath"])
+    first.unlink()
+    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    assert wait_for(qapp, lambda: states(context) == ["done", "done"] and first.exists())
+    again = context.store.jobs()[1]
+    assert again["message"] == "1 file saved" and queue.model.get(1)["lastFile"] == str(first)
+    # The file took its old name back, so its library record is the new download's.
+    assert [record["job_id"] for record in context.store.history()] == [again["id"]]
+
+
+def test_the_list_shows_how_far_a_conversion_has_got():
+    """Converting shows its own share done and time left, not the finished download's speed."""
+    snap = Snapshot(stage="Converting", downloaded=12_000_000, total=12_000_000, convert_fraction=0.45, eta=10,
+                    overall=0.999, item_count=1)
+    values = _running_values(snap)
+    assert values["progress"] == 0.45 and values["statusText"] == "Converting"
+    assert values["detail"] == "45%  ·  11.4 MB downloaded  ·  0:10 left"
+    # Without ffmpeg's progress (merging, or a conversion not started yet) the bar sweeps.
+    assert _running_values(Snapshot(stage="Merging", downloaded=5, speed=900.0))["progress"] == -1.0
+    assert "/s" not in _running_values(Snapshot(stage="Merging", downloaded=5, speed=900.0))["detail"]
+
+
+def test_finished_downloads_leave_the_list_when_the_app_closes(qapp, context, fake_ytdlp):
+    """The Library keeps finished files; the list keeps what still needs doing."""
+    def make():
+        return QueueController(context, ToolManager(context), Notifier(lambda: None, lambda path: None),
+                               runner=lambda c, o, s: run_to_completion(fake_ytdlp + c[1:], o, s))
+    first = make()
+    first.addLinks("https://fake.test/ok", "video-best-mp4")
+    assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
+    first.addLinks("https://fake.test/auth", "audio-mp3")
+    assert wait_for(qapp, lambda: states(context) == ["done", "needs_auth"])
+    first.pauseAll()
+    first.addLinks("https://fake.test/slow", "video-best-mp4")
+    first.shutdown()
+    assert states(context) == ["needs_auth", "queued"] and len(context.store.history()) == 1
+    # Kept when Preferences says so, and cleared at the next start otherwise (after a crash, say).
+    settings = load_settings()
+    settings["downloads"]["clear_finished_on_exit"] = False
+    save_settings(settings)
+    finished = context.store.add_job("https://fake.test/x", "generic", "x", "fake.test", {"kind": "video"},
+                                     settings["downloads"]["folder"], state="done")
+    second = make()
+    second.shutdown()
+    assert context.store.job(finished) is not None
+    settings["downloads"]["clear_finished_on_exit"] = True
+    save_settings(settings)
+    third = make()
+    try:
+        assert context.store.job(finished) is None and third.model.count == 2
+    finally:
+        third.shutdown()

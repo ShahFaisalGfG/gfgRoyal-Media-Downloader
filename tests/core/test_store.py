@@ -121,3 +121,24 @@ def test_a_1_0_0_library_gains_the_jobs_input_file_and_stays_readable(tmp_path: 
                 " created, updated) VALUES ('u', 'video', 'c', 'youtube', '{}', 'C:/D', 'queued', 9, 0, 0)")
     assert raw.execute("SELECT input_path FROM jobs WHERE source_id = 'c'").fetchone()[0] == ""
     raw.close()
+
+
+def test_a_removed_jobs_files_stay_in_the_library_under_no_job(store: Store) -> None:
+    """A new job may get a removed job's number; the old files must not pass for the new job's."""
+    job = add(store, "a")
+    store.add_history("C:/V/a.mp4", job_id=job, title="a")
+    store.delete_jobs([job])
+    assert store.history()[0]["job_id"] is None
+    reused = add(store, "b")
+    assert store.history_for_job(reused) == [] and store.last_file(reused) == ""
+
+
+def test_records_naming_jobs_removed_earlier_are_released_on_open(tmp_path: Path) -> None:
+    db = Store(tmp_path / "library.db")
+    db.add_history("C:/V/old.mp4", job_id=7, title="old")  # as 1.0.0 left them after Clear finished
+    db.close()
+    again = Store(tmp_path / "library.db")
+    try:
+        assert again.history()[0]["job_id"] is None
+    finally:
+        again.close()

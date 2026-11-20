@@ -267,6 +267,9 @@ def get_default_settings() -> Dict[str, Any]:
             "retry_delay": DownloadDefaults.RETRY_DELAY,
             "filename_style": "title-quality",
             "keep_awake": True,
+            # Finished and cancelled downloads leave the Downloads list when the app closes; the
+            # Library keeps their files, and failed or unfinished downloads stay to be resumed.
+            "clear_finished_on_exit": True,
         },
         "formats": {
             "container": "mp4",

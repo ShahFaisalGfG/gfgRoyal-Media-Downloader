@@ -137,7 +137,7 @@ def test_version_1_library_gains_playback(tmp_path):
     """A library made before playback positions existed is migrated in place."""
     path = tmp_path / "library.db"
     db = sqlite3.connect(path)
-    db.execute("CREATE TABLE history (id INTEGER PRIMARY KEY, filepath TEXT)")
+    db.execute("CREATE TABLE history (id INTEGER PRIMARY KEY, filepath TEXT, job_id INTEGER)")
     db.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, url TEXT)")
     db.execute("PRAGMA user_version = 1")
     db.commit()

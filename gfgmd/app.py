@@ -110,7 +110,7 @@ class _Startup:
             signins_ctrl.signedIn.connect(queue_ctrl.retrySignIn)
             signins_ctrl.signedIn.connect(analyze_ctrl.signedIn)
             library_ctrl.redownloadRequested.connect(
-                lambda url: queue_ctrl.addLinks(url, str(load_settings().get("downloads", {}).get("preset", ""))))
+                lambda url: queue_ctrl.download_again(url, str(load_settings().get("downloads", {}).get("preset", ""))))
             tools_ctrl.toolsReady.connect(queue_ctrl.refresh_settings)
             for source in (queue_ctrl, analyze_ctrl, library_ctrl, subs_ctrl, signins_ctrl, tools_ctrl, player_ctrl):
                 source.notice.connect(app_ctrl.notice)

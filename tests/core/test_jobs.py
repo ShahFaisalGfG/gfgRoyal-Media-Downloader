@@ -49,7 +49,7 @@ def test_success_renames_and_reports(fake_ytdlp: list[str], tmp_path: Path) -> N
                            runner=fake_runner(fake_ytdlp))
     result = executor.run(sleep=lambda seconds: False)
     assert result.state == "done" and result.attempts == 1
-    final = spec.paths.root / "Single Videos" / "Clip (720p).mp4"
+    final = spec.paths.root / "Clip (720p).mp4"
     assert result.files == [final] and seen == [final] and final.exists()
     argv = json.loads((Path(fake_ytdlp[-1]) / "argv.json").read_text())
     assert argv[argv.index("--download-archive") + 1] == str(spec.paths.archive)

@@ -53,7 +53,7 @@ POLL_MS = 250
 TICK_MS = 15_000
 ROLES = ("jobId", "title", "url", "site", "kind", "thumbnail", "jobState", "statusText", "stage", "progress",
          "detail", "itemText", "message", "action", "folder", "lastFile", "canPause", "canResume", "canRetry",
-         "hasItems")
+         "canRedownload", "hasItems")
 _WAITING = ("queued", "scheduled", "waiting_live")
 _LIVE_STATES = ("running", "retry_wait")
 _CLEARABLE = ("done", "cancelled")
@@ -172,6 +172,8 @@ class QueueController(QObject):
         recovered = context.store.recover()
         if recovered:
             write_log(f"Resuming {len(recovered)} download(s) interrupted last time", "general")
+        # Also here, not only on closing: a crash or a power cut skips the clean-up there.
+        self._clear_last_session()
         self._apply_schedule_settings()
         self._sync_model()
         self._tick.start()
@@ -245,11 +247,18 @@ class QueueController(QObject):
 
     @Slot(str, str, result=int)
     def addLinks(self, text: str, preset_id: str) -> int:
-        """Queue every link in text (one per line) with a preset; returns how many were added."""
+        """Queue every link in text (one per line) with a preset; returns how many are now in the list."""
+        return self._add_links(text, preset_id, again=False)
+
+    def download_again(self, url: str, preset_id: str) -> None:
+        """Queue a link even if it was downloaded before (the Library's Download again)."""
+        self._add_links(url, preset_id, again=True)
+
+    def _add_links(self, text: str, preset_id: str, again: bool) -> int:
         links = [line.strip() for line in text.replace(",", "\n").split() if line.strip()]
-        added, problems = 0, []
+        added, listed, problems = 0, 0, []
         try:
-            options = self._preset_options(preset_id)
+            options = self._preset_options(preset_id).with_changes(ignore_archive=again)
         except ValueError as error:
             self.notice.emit(f"The preset can't be used: {error}")
             return 0
@@ -259,13 +268,29 @@ class QueueController(QObject):
             except ValueError as error:
                 problems.append(f"{link[:60]}: {error}")
                 continue
-            self._add(canonical_url(source, link), source, options)
+            url = canonical_url(source, link)
+            if self._listed(url, options):
+                listed += 1
+                continue
+            self._add(url, source, options)
             added += 1
         if problems:
             self.notice.emit(f"{len(problems)} link(s) were skipped. " + problems[0])
+        elif listed:
+            self.notice.emit("Already in the list with the same choices." if listed == 1
+                             else f"{listed} links are already in the list with the same choices.")
         if added:
             self._after_change()
-        return added
+        return added + listed
+
+    def _listed(self, url: str, options: DownloadOptions) -> bool:
+        """True when this link waits or downloads already with the same type and quality."""
+        for job in self._context.store.jobs(ACTIVE_STATES):
+            if job["url"] == url and not job["input_path"]:
+                listed = DownloadOptions.from_dict(json.loads(job["options_json"]))
+                if (listed.kind, listed.profile) == (options.kind, options.profile):
+                    return True
+        return False
 
     @Slot(str, "QVariantMap", "QVariantList", str, str, float, result=bool)
     def addJob(self, url: str, options: dict[str, Any], items: list[dict[str, Any]], title: str, thumbnail: str,
@@ -277,7 +302,11 @@ class QueueController(QObject):
         except ValueError as error:
             self.notice.emit(str(error))
             return False
-        self._add(canonical_url(source, url), source, download_options, items, title, thumbnail, not_before)
+        link = canonical_url(source, url)
+        if not items and self._listed(link, download_options):
+            self.notice.emit("Already in the list with the same choices.")
+            return True
+        self._add(link, source, download_options, items, title, thumbnail, not_before)
         self._after_change()
         return True
 
@@ -374,8 +403,27 @@ class QueueController(QObject):
 
     @Slot(int)
     def retry(self, job_id: int) -> None:
-        """Try a failed download again (items skipped for good are tried again too)."""
-        self._context.store.update_job(job_id, skip_ids_json="[]")
+        """Try a failed download again (items skipped for good are tried again too).
+
+        Videos downloaded before stay skipped: an earlier Download again doesn't carry over.
+        """
+        job = self._context.store.job(job_id)
+        if job is None:
+            return
+        options = json.loads(job["options_json"])
+        options["ignore_archive"] = False
+        self._context.store.update_job(job_id, skip_ids_json="[]", options_json=json.dumps(options))
+        self.resume(job_id)
+
+    @Slot(int)
+    def downloadAgain(self, job_id: int) -> None:
+        """Download a finished download once more, even what the archive lists as downloaded before."""
+        job = self._context.store.job(job_id)
+        if job is None or job_id in self._running or job["input_path"]:
+            return
+        options = DownloadOptions.from_dict(json.loads(job["options_json"])).with_changes(ignore_archive=True)
+        self._last_files.pop(job_id, None)
+        self._context.store.update_job(job_id, options_json=json.dumps(options.to_dict()), skip_ids_json="[]")
         self.resume(job_id)
 
     @Slot(int)
@@ -410,6 +458,11 @@ class QueueController(QObject):
         """Move a download up or down the queue."""
         self._context.store.move_job(job_id, steps)
         self._after_change()
+
+    def _clear_last_session(self) -> None:
+        """Take finished and cancelled downloads off the list as the app closes (Preferences can keep them)."""
+        if load_settings().get("downloads", {}).get("clear_finished_on_exit", True):
+            self._forget_jobs([job["id"] for job in self._context.store.jobs(_CLEARABLE)])
 
     @Slot()
     def clearFinished(self) -> None:
@@ -616,7 +669,7 @@ class QueueController(QObject):
         return extractor.run()
 
     def _mirror_folder(self, video: Path, record: dict[str, Any]) -> str:
-        """The video's folder below its download root ("YouTube/Single Videos"), which the audio mirrors."""
+        """The video's folder below its download root (a playlist's, or "" for the root), which the audio mirrors."""
         roots = [self._context.download_root("video")]
         job = self._context.store.job(record["job_id"]) if record.get("job_id") else None
         if job is not None:
@@ -696,6 +749,9 @@ class QueueController(QObject):
     def _record_result(self, job: dict[str, Any], result: JobResult) -> None:
         job_id = job["id"]
         failure = result.failure
+        if result.state == "done" and not result.files and result.archived == 1 and not result.skipped:
+            self._record_archived(job, result)
+            return
         skip_ids = sorted({f.item_id for f in result.skipped if f.item_id} | set(json.loads(job["skip_ids_json"])))
         for skipped in result.skipped:
             self._context.store.set_item_state(job_id, skipped.item_id, "skipped", skipped.category.message)
@@ -786,6 +842,38 @@ class QueueController(QObject):
         """Forget what this app kept about a job id: its scratch folder (journal, unfinished files) and Play file."""
         self._last_files.pop(job_id, None)
         shutil.rmtree(self._context.job_dir(job_id), ignore_errors=True)
+
+    def _record_archived(self, job: dict[str, Any], result: JobResult) -> None:
+        """One video the archive skipped and nothing else.
+
+        While its file is still on disk, the job shows it as downloaded and Play opens that file. When
+        the file is gone (deleted, or never in this library), asking for the video again means wanting
+        it again, so the job downloads it once more past the archive.
+        """
+        existing = self._existing_file(job, result.archived_ids)
+        options = DownloadOptions.from_dict(json.loads(job["options_json"]))
+        if existing is None and not options.ignore_archive:
+            self._context.store.update_job(
+                job["id"], options_json=json.dumps(options.with_changes(ignore_archive=True).to_dict()),
+                state="queued", message="", error_key="", action="", attempts=0)
+            return
+        message = "Already downloaded"
+        fields: dict[str, Any] = {"state": "done", "message": message, "error_key": "", "action": "",
+                                  "files_done": 0, "attempts": result.attempts, "finished": time.time()}
+        if existing:
+            self._last_files[job["id"]] = existing["filepath"]
+            fields["title"] = job["title"] or existing["title"]
+            fields["thumbnail"] = job["thumbnail"] or existing["thumbnail"]
+        self._context.store.update_job(job["id"], **fields)
+        self._summary = f"{fields.get('title') or job['title'] or job['url']}: {message}"
+
+    def _existing_file(self, job: dict[str, Any], ids: list[str]) -> dict[str, Any] | None:
+        """The library's newest file of this job's video, of the same type, that is still on disk."""
+        kind = DownloadOptions.from_dict(json.loads(job["options_json"])).kind
+        for record in self._context.store.history_of_video(job["site"], [*ids, job["source_id"]], job["url"]):
+            if record["kind"] == kind and os.path.isfile(record["filepath"]):
+                return record
+        return None
 
     def _crashed(self, running: _Running, message: str) -> None:
         """The worker raised (a bug): record it instead of leaving the job running forever."""
@@ -883,7 +971,12 @@ class QueueController(QObject):
         for job in self._context.store.jobs():
             snap = self._snapshots.get(job["id"]) if job["id"] in self._running else None
             if job["state"] == "done" and job["id"] not in self._last_files:
-                self._last_files[job["id"]] = self._context.store.last_file(job["id"])
+                last = self._context.store.last_file(job["id"])
+                if not last and not job["files_done"]:
+                    # "Already downloaded": its Play button plays the file the library has.
+                    existing = self._existing_file(job, [])
+                    last = existing["filepath"] if existing else ""
+                self._last_files[job["id"]] = last
             rows.append(_job_row(job, snap, self._context.site(job["site"]).label, self._last_files.get(job["id"], "")))
         self._model.sync(rows)
 
@@ -906,6 +999,7 @@ class QueueController(QObject):
                 self._keep_partials(running.job_id, running.executor.partial_files())
             self._context.store.update_job(running.job_id, state="queued")
         self._running.clear()
+        self._clear_last_session()
         self._keep_awake(False)
         self._taskbar.close()
 
@@ -913,25 +1007,36 @@ class QueueController(QObject):
 def _running_values(snap: Snapshot) -> dict[str, Any]:
     """The list values of a running job from its progress."""
     parts = []
-    if snap.total:
-        parts.append(f"{format_bytes(snap.downloaded)} of {format_bytes(snap.total)}")
-    elif snap.downloaded:
-        parts.append(format_bytes(snap.downloaded))
-    if snap.speed:
-        parts.append(f"{format_bytes(int(snap.speed))}/s")
-    if snap.eta >= 0 and not snap.is_live:
-        parts.append(f"{format_duration(snap.eta)} left")
-    if snap.fragment:
-        parts.append(f"part {snap.fragment}")
     waiting = snap.wait_seconds >= 0 and snap.stage == "Waiting for the stream"
     progress = -1.0 if snap.is_live or waiting or snap.stage in ("Starting", "Starting download") else snap.overall
-    if snap.stage in ("Merging", "Embedding", "Converting", "Cutting", "Finalizing"):
-        progress = -1.0
+    if snap.stage in _POST_STAGES:
+        if snap.stage == "Converting" and snap.convert_fraction >= 0:
+            # The conversion's own share done; a list's bar keeps its overall progress.
+            parts.append(f"{int(snap.convert_fraction * 100)}%")
+            progress = snap.convert_fraction if snap.item_count <= 1 else snap.overall
+        else:
+            progress = -1.0
+        if snap.downloaded:
+            parts.append(f"{format_bytes(snap.downloaded)} downloaded")
+    else:
+        if snap.total:
+            parts.append(f"{format_bytes(snap.downloaded)} of {format_bytes(snap.total)}")
+        elif snap.downloaded:
+            parts.append(format_bytes(snap.downloaded))
+        if snap.speed:
+            parts.append(f"{format_bytes(int(snap.speed))}/s")
+    if snap.eta >= 0 and not snap.is_live:
+        parts.append(f"{format_duration(snap.eta)} left")
+    if snap.fragment and snap.stage not in _POST_STAGES:
+        parts.append(f"part {snap.fragment}")
     item = f"Item {snap.item_index} of {snap.item_count}" if snap.item_count > 1 else ""
     stage = snap.stage + (f" ({format_duration(snap.wait_seconds)})" if waiting else "")
     return {"statusText": stage, "stage": stage, "progress": progress, "detail": "  ·  ".join(parts),
             "itemText": item}
 
+
+# Stages after the download: ffmpeg works on the saved file, so there is no download speed.
+_POST_STAGES = ("Merging", "Embedding", "Converting", "Cutting", "Finalizing", "Processing")
 
 _STATE_TEXT = {
     "queued": "Waiting", "scheduled": "Scheduled", "waiting_live": "Waiting for the stream", "running": "Starting",
@@ -956,6 +1061,7 @@ def _job_row(job: dict[str, Any], snap: Snapshot | None, site_label: str, last_f
         "canPause": state in ("queued", "scheduled", "waiting_live", "running", "retry_wait"),
         "canResume": state in ("paused", "cancelled"),
         "canRetry": state in ("failed", "needs_auth", "done"),
+        "canRedownload": state == "done" and not job["input_path"],
         "hasItems": job["items_total"] > 0,
     }
     if snap is not None:

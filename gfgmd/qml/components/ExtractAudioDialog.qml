@@ -146,7 +146,7 @@ AppDialog {
         }
         Text {
             Layout.fillWidth: true
-            text: "The audio goes to the audio folder, in a folder named like the video's."
+            text: "The song takes the video's place in the audio folder: a playlist video's goes in a folder of the playlist's name."
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption
             color: Theme.textMuted

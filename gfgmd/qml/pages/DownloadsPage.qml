@@ -149,6 +149,30 @@ Item {
             onClosed: page.optionsOpen = false
         }
 
+        // Above the list it acts on: finished downloads leave it, and the Library keeps their files.
+        RowLayout {
+            Layout.fillWidth: true
+            visible: queueController.finishedCount > 0
+            spacing: Theme.spaceSm
+
+            Text {
+                Layout.fillWidth: true
+                text: queueController.finishedCount === 1 ? "1 finished download" : queueController.finishedCount + " finished downloads"
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textMuted
+                elide: Text.ElideRight
+            }
+            AppButton {
+                kind: "ghost"
+                compact: true
+                text: "Clear finished"
+                iconName: "clear"
+                toolTipText: "Take finished and cancelled downloads off this list; their files stay in the Library"
+                onClicked: queueController.clearFinished()
+            }
+        }
+
         ListView {
             id: queueView
             Layout.fillWidth: true
@@ -232,6 +256,11 @@ Item {
         AppMenuItem { text: "Resume"; enabled: jobMenu.row.canResume === true; onTriggered: queueController.resume(jobMenu.jobId) }
         AppMenuItem { text: "Try again"; enabled: jobMenu.row.canRetry === true; onTriggered: queueController.retry(jobMenu.jobId) }
         AppMenuItem {
+            text: "Download again"
+            enabled: jobMenu.row.canRedownload === true
+            onTriggered: queueController.downloadAgain(jobMenu.jobId)
+        }
+        AppMenuItem {
             text: "Cancel and delete unfinished files"
             danger: true
             enabled: jobMenu.row.canPause === true || jobMenu.row.jobState === "paused"
@@ -240,7 +269,8 @@ Item {
         AppMenuSeparator {}
         AppMenuItem {
             text: "Extract audio"
-            enabled: jobMenu.row.jobState === "done" && jobMenu.row.kind === "video" && (jobMenu.row.lastFile || "").length > 0
+            visible: jobMenu.row.kind !== "audio"
+            enabled: jobMenu.row.jobState === "done" && (jobMenu.row.lastFile || "").length > 0
             onTriggered: extractDialog.forJob(jobMenu.jobId, jobMenu.row.title)
         }
         AppMenuItem { text: "Remove"; onTriggered: removeDialog.show(jobMenu.jobId, jobMenu.row.title) }

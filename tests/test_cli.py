@@ -114,10 +114,10 @@ def run_fake(fake_ytdlp: list[str], argv: list[str]) -> int:
 
 
 def test_download_finishes_with_clean_name(fake_ytdlp: list[str], tmp_path: Path) -> None:
-    """Save into the site's folder with the measured quality in the name."""
+    """Save a single video straight into the download folder, with the measured quality in the name."""
     status = run_fake(fake_ytdlp, ["https://fake.test/ok", "--output-dir", str(tmp_path)])
     assert status == 0
-    assert (tmp_path / "Youtube" / "Single Videos" / "Clip (720p).mp4").exists()
+    assert (tmp_path / "Clip (720p).mp4").exists()
 
 
 def test_failed_attempt_retries_then_succeeds(fake_ytdlp: list[str], tmp_path: Path,

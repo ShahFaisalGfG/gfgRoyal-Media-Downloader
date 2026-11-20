@@ -192,6 +192,15 @@ AppWindow {
                         }
                     }
                     SettingRow {
+                        label: "Clear finished downloads when the app closes"
+                        hint: "Their files stay in the Library. Failed and unfinished downloads stay in the list to be tried again or resumed."
+                        AppSwitch {
+                            checked: prefsWin.v("downloads.clear_finished_on_exit")
+                            accessibleName: "Clear finished downloads when the app closes"
+                            onToggled: prefsWin.save("downloads.clear_finished_on_exit", checked)
+                        }
+                    }
+                    SettingRow {
                         label: "Keep the PC awake while downloading"
                         AppSwitch {
                             checked: prefsWin.v("downloads.keep_awake")
