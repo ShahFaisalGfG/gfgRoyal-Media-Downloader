@@ -162,6 +162,9 @@ def test_item_states_in_bulk(store: Store) -> None:
     # A later attempt's archive check names a video this run saved; it stays saved.
     store.set_item_states(job, [("x", "archived", ""), ("y", "deferred", "No answer"), ("z", "done", "")])
     assert {i["item_id"]: i["state"] for i in store.job_items(job)} == {"x": "done", "y": "deferred", "z": "done"}
+    # So does one whose earlier "waiting again" reaches the store after its file did.
+    store.set_item_states(job, [("z", "pending", ""), ("z", "failed", "Dropped")])
+    assert {i["item_id"]: i["state"] for i in store.job_items(job)}["z"] == "done"
     assert store.job_items(job)[-1]["idx"] == 3 and store.job(job)["items_total"] == 3
     assert store.item_counts(job) == {"done": 2, "deferred": 1}
     store.reset_items(job, ("deferred", "failed"))
