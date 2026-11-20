@@ -45,6 +45,9 @@ QtObject {
     // Dims the window behind a dialog. Dark in both themes: a pale wash over the dark theme looks
     // like Windows fading out a frozen app.
     readonly property color scrim:       dark ? "#8c000000" : "#4d000000"
+    // A media thumbnail's kind badge sits on a picture, so it is dark in both themes.
+    readonly property color mediaBadge:     "#d914161b"
+    readonly property color mediaBadgeText: "#ffffff"
     // Toasts use the opposite theme's colors so they stand out from the window.
     readonly property color inverseSurface: dark ? "#e8eaee" : "#22262e"
     readonly property color inverseText:    dark ? "#1a1d23" : "#ffffff"

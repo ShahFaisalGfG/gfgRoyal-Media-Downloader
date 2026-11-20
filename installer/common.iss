@@ -67,6 +67,9 @@ WizardStyle=modern
 WizardSizePercent=110,120
 ; The "Add the gfgmd command to PATH" task changes the environment.
 ChangesEnvironment=yes
+; Tells Explorer to reload icons once Setup or Uninstall is done, so the Start menu and taskbar
+; show a new version's icon instead of the one Windows cached (in-app updates run this installer too).
+ChangesAssociations=yes
 
 ; PySide6 6.11 needs a 64-bit PC with Windows 10 version 1809 or later.
 ArchitecturesAllowed=x64os

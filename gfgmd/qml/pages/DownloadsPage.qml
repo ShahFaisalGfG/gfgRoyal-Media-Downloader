@@ -18,6 +18,55 @@ Item {
     property bool optionsOpen: false
     readonly property string presetId: { prefsController.revision; return prefsController.value("downloads.preset") }
 
+    // Downloads that saved nothing and are finished (cancelled, failed, already downloaded) go at
+    // once, with their unfinished parts; any in progress or with saved files asks first.
+    function removeJobs(jobIds, name) {
+        var removal = queueController.removal(jobIds)
+        if (removal.inProgress === 0 && removal.savedFiles === 0) {
+            queueController.applyToJobs("remove", jobIds)
+            selection.clear()
+        } else {
+            removeDialog.show(jobIds, name, removal)
+        }
+    }
+    function removeJob(jobId, title) {
+        page.removeJobs([jobId], title)
+    }
+
+    // ── Picking several downloads ────────────────────────────────────────
+
+    // Bumped as the list changes, so the selection bar's buttons re-check the picked rows.
+    property int rowsRevision: 0
+    readonly property var _rows: { page.rowsRevision; return page.allRows() }
+
+    function allRows() {
+        var rows = []
+        for (var i = 0; i < queueController.model.count; ++i) rows.push(queueController.model.get(i))
+        return rows
+    }
+    function selectRange(index) {
+        var from = Math.min(selection.anchor < 0 ? index : selection.anchor, index)
+        var to = Math.max(selection.anchor < 0 ? index : selection.anchor, index)
+        selection.addRange(page._rows.slice(from, to + 1).map(row => row.jobId))
+    }
+    // True when any picked download allows this ("canPause", "canResume", "canRetry").
+    function anyPicked(flag) {
+        return page._rows.some(row => row[flag] === true && selection.contains(row.jobId))
+    }
+    function applyToPicked(action) {
+        queueController.applyToJobs(action, selection.ids)
+    }
+
+    ListSelection { id: selection }
+
+    Connections {
+        target: queueController
+        function onChanged() {
+            page.rowsRevision += 1
+            selection.keep(page._rows.map(row => row.jobId))
+        }
+    }
+
     function focusLink() {
         linkField.selectInput()
     }
@@ -149,10 +198,54 @@ Item {
             onClosed: page.optionsOpen = false
         }
 
+        SelectionBar {
+            Layout.fillWidth: true
+            visible: selection.count > 0
+            count: selection.count
+            total: queueView.count
+            onSelectAllRequested: selection.setAll(page._rows.map(row => row.jobId))
+            onClearRequested: selection.clear()
+
+            AppButton {
+                kind: "ghost"
+                compact: true
+                text: "Pause"
+                iconName: "pause"
+                enabled: page.anyPicked("canPause")
+                toolTipText: "Pause the picked downloads; they continue from where they stopped"
+                onClicked: page.applyToPicked("pause")
+            }
+            AppButton {
+                kind: "ghost"
+                compact: true
+                text: "Resume"
+                iconName: "play"
+                enabled: page.anyPicked("canResume")
+                onClicked: page.applyToPicked("resume")
+            }
+            AppButton {
+                kind: "ghost"
+                compact: true
+                text: "Try again"
+                iconName: "refresh"
+                enabled: page.anyPicked("canRetry")
+                toolTipText: "Try the picked failed or finished downloads again"
+                onClicked: page.applyToPicked("retry")
+            }
+            AppButton {
+                kind: "danger"
+                compact: true
+                text: "Remove"
+                iconName: "delete"
+                toolTipText: "Take the picked downloads off the list (Delete)"
+                onClicked: page.removeJobs(selection.ids, selection.count + " downloads")
+            }
+        }
+
         // Above the list it acts on: finished downloads leave it, and the Library keeps their files.
         RowLayout {
             Layout.fillWidth: true
-            visible: queueController.finishedCount > 0
+            visible: selection.count === 0 && queueController.finishedCount > 0
             spacing: Theme.spaceSm
 
             Text {
@@ -189,14 +282,32 @@ Item {
             Accessible.role: Accessible.List
             Accessible.name: "Downloads"
 
+            // Ctrl+A picks every download, Ctrl+Space the current one, and Esc lets go of them.
+            Keys.onPressed: function (event) {
+                if (event.matches(StandardKey.SelectAll)) {
+                    selection.setAll(page._rows.map(row => row.jobId))
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Space && (event.modifiers & Qt.ControlModifier)) {
+                    var current = queueController.model.get(queueView.currentIndex)
+                    if (current.jobId !== undefined) selection.toggle(current.jobId, queueView.currentIndex)
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Escape && selection.count > 0) {
+                    selection.clear()
+                    event.accepted = true
+                }
+            }
             Keys.onSpacePressed: {
                 var row = queueController.model.get(queueView.currentIndex)
                 if (row.canPause) queueController.pause(row.jobId)
                 else if (row.canResume || row.canRetry) queueController.resume(row.jobId)
             }
             Keys.onDeletePressed: {
+                if (selection.count > 0) {
+                    page.removeJobs(selection.ids, selection.count + " downloads")
+                    return
+                }
                 var row = queueController.model.get(queueView.currentIndex)
-                if (row.jobId !== undefined) removeDialog.show(row.jobId, row.title)
+                if (row.jobId !== undefined) page.removeJob(row.jobId, row.title)
             }
             Keys.onMenuPressed: {
                 var row = queueController.model.get(queueView.currentIndex)
@@ -204,8 +315,13 @@ Item {
             }
 
             delegate: JobItem {
+                id: jobRow
                 width: queueView.width
                 current: ListView.isCurrentItem
+                selected: selection.contains(jobRow.jobId)
+                selecting: selection.count > 0
+                onSelectToggled: function (jobId, index) { selection.toggle(jobId, index) }
+                onRangeRequested: function (index) { page.selectRange(index) }
                 onMenuRequested: function (jobId) { jobMenu.openFor(jobId) }
                 onItemsRequested: function (jobId, title) { itemsDialog.show(jobId, title) }
                 onFixRequested: function (jobId, action) {
@@ -273,26 +389,39 @@ Item {
             enabled: jobMenu.row.jobState === "done" && (jobMenu.row.lastFile || "").length > 0
             onTriggered: extractDialog.forJob(jobMenu.jobId, jobMenu.row.title)
         }
-        AppMenuItem { text: "Remove"; onTriggered: removeDialog.show(jobMenu.jobId, jobMenu.row.title) }
+        AppMenuItem { text: "Remove"; onTriggered: page.removeJob(jobMenu.jobId, jobMenu.row.title) }
     }
 
     ExtractAudioDialog { id: extractDialog }
 
+    // Asks only when removing loses something: downloads in progress, or files they saved.
     AppDialog {
         id: removeDialog
-        property int jobId: -1
-        function show(jobId, title) {
-            removeDialog.jobId = jobId
-            removeName.text = title
+        property var jobIds: []
+        property int count: 0
+        property int inProgress: 0
+        property int savedFiles: 0
+        readonly property bool many: removeDialog.count > 1
+        function show(jobIds, name, removal) {
+            removeDialog.jobIds = jobIds
+            removeDialog.count = removal.count
+            removeDialog.inProgress = removal.inProgress
+            removeDialog.savedFiles = removal.savedFiles
+            removeName.text = name
             deleteFiles.checked = false
             removeDialog.open()
         }
-        title: "Remove this download?"
+        title: removeDialog.many ? "Remove " + removeDialog.count + " downloads?"
+            : removeDialog.inProgress > 0 ? "Remove this unfinished download?" : "Remove this download?"
         standardButtons: Dialog.Ok | Dialog.Cancel
         defaultButton: Dialog.Ok
         width: Math.min(page.width - 2 * Theme.spaceXl, 460)
         Component.onCompleted: removeDialog.standardButton(Dialog.Ok).text = "Remove"
-        onAccepted: queueController.remove(removeDialog.jobId, deleteFiles.checked)
+        onAccepted: {
+            queueController.applyToJobs(removeDialog.savedFiles > 0 && deleteFiles.checked ? "remove_saved" : "remove",
+                                        removeDialog.jobIds)
+            selection.clear()
+        }
 
         ColumnLayout {
             width: parent.width
@@ -301,6 +430,7 @@ Item {
             Text {
                 id: removeName
                 Layout.fillWidth: true
+                visible: !removeDialog.many  // the title already counts them
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
                 font.weight: Font.DemiBold
@@ -311,7 +441,20 @@ Item {
             }
             Text {
                 Layout.fillWidth: true
-                text: "It leaves the download list. Its files stay in the folder unless you choose to delete them."
+                text: {
+                    var unfinished = !removeDialog.many
+                        ? (removeDialog.inProgress > 0 ? "It leaves the list unfinished, and what it downloaded so far is deleted."
+                                                       : "It leaves the list.")
+                        : removeDialog.inProgress === 0 ? "They leave the list."
+                        : (removeDialog.inProgress === removeDialog.count ? "They leave the list unfinished"
+                           : removeDialog.inProgress + " of them leave the list unfinished")
+                          + ", and what they downloaded so far is deleted."
+                    var saved = removeDialog.savedFiles === 0 ? ""
+                        : removeDialog.savedFiles === 1 ? " The file " + (removeDialog.many ? "they" : "it") + " saved stays in the folder and the Library."
+                        : " The " + removeDialog.savedFiles + " files " + (removeDialog.many ? "they" : "it")
+                          + " saved stay in the folder and the Library."
+                    return unfinished + saved
+                }
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
                 color: Theme.text
@@ -320,13 +463,17 @@ Item {
             CheckBox {
                 id: deleteFiles
                 Layout.leftMargin: -Theme.spaceSm
-                text: "Also delete its files"
+                visible: removeDialog.savedFiles > 0
+                text: removeDialog.savedFiles === 1 ? "Also move the saved file to the Recycle Bin"
+                                                    : "Also move the saved files to the Recycle Bin"
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
             }
             Text {
                 Layout.fillWidth: true
-                text: "Saved files go to the Recycle Bin, where you can restore them; unfinished parts are deleted."
+                visible: deleteFiles.visible
+                text: removeDialog.savedFiles === 1 ? "You can restore it from the Recycle Bin; its captions and lyrics go with it."
+                                                    : "You can restore them from the Recycle Bin; their captions and lyrics go with them."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted

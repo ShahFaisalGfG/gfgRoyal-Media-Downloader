@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 import os
 import shutil
 import threading
@@ -28,7 +30,7 @@ from gfgmd.core.command import Auth, RunPaths
 from gfgmd.core.extract import AudioExtractor, ExtractSpec
 from gfgmd.core.jobs import JobExecutor, JobResult, JobSpec, Runner
 from gfgmd.core.lyrics import Fetch
-from gfgmd.core.naming import AUDIO_EXTENSIONS, remove_partials
+from gfgmd.core.naming import AUDIO_EXTENSIONS, format_label, remove_partials
 from gfgmd.core.options import DownloadOptions, options_from_preset
 from gfgmd.core.progress import Snapshot
 from gfgmd.core.runner import run_to_completion
@@ -53,7 +55,7 @@ POLL_MS = 250
 TICK_MS = 15_000
 ROLES = ("jobId", "title", "url", "site", "kind", "thumbnail", "jobState", "statusText", "stage", "progress",
          "detail", "itemText", "message", "action", "folder", "lastFile", "canPause", "canResume", "canRetry",
-         "canRedownload", "hasItems")
+         "canRedownload", "hasItems", "format")
 _WAITING = ("queued", "scheduled", "waiting_live")
 _LIVE_STATES = ("running", "retry_wait")
 _CLEARABLE = ("done", "cancelled")
@@ -161,6 +163,11 @@ class QueueController(QObject):
         self._speed = 0.0
         self._progress = 0.0
         self._summary = ""
+        # While an action runs on several downloads, the list refreshes once at the end and the
+        # Recycle Bin notice counts them all (see _batch).
+        self._batching = False
+        self._batch_changed = False
+        self._batch_recycled = 0
         self._taskbar = TaskbarProgress()
         self._awake = False
         self._poll = QTimer(self)
@@ -338,11 +345,15 @@ class QueueController(QObject):
         videos = [record for record in self._context.store.history_for_job(job_id) if record["kind"] == "video"]
         self._extract(videos, choices)
 
-    @Slot(int, "QVariantMap")
-    def extractAudio(self, history_id: int, choices: dict[str, Any]) -> None:
-        """Extract the audio of one video in the library, with the Extract audio dialog's choices."""
-        record = self._context.store.history_record(history_id)
-        self._extract([record] if record is not None and record["kind"] == "video" else [], choices)
+    @Slot("QVariantList", "QVariantMap")
+    def extractAudio(self, history_ids: list[int], choices: dict[str, Any]) -> None:
+        """Extract the audio of library videos (songs among them are left out), with the dialog's choices."""
+        records = [self._context.store.history_record(int(history_id)) for history_id in history_ids]
+        videos = [record for record in records if record is not None and record["kind"] == "video"]
+        if records and not videos:
+            self.notice.emit("Only videos have audio to extract; these are songs already.")
+            return
+        self._extract(videos, choices)
 
     def _extract(self, records: list[dict[str, Any]], choices: dict[str, Any]) -> None:
         """Queue an audio extraction for each video file still there (one at a time per file).
@@ -438,20 +449,66 @@ class QueueController(QObject):
         self._set_state(job_id, "cancelled", "")
 
     @Slot(int, bool)
-    def remove(self, job_id: int, with_files: bool) -> None:
-        """Take a download off the list; its files stay on disk unless `with_files` is set.
+    def remove(self, job_id: int, delete_saved: bool) -> None:
+        """Take a download off the list, stopping it and deleting its unfinished files.
 
-        With `with_files`, its saved files (and their captions, lyrics, and covers) go to the Recycle
-        Bin and its unfinished files are deleted.
+        Its saved files stay (they are in the Library) unless `delete_saved` is set; then they go to
+        the Recycle Bin with their captions, lyrics, and covers.
         """
         if job_id in self._running:
-            self._running[job_id].stop("remove_files" if with_files else "remove")
+            self._running[job_id].stop("remove_files" if delete_saved else "remove")
             return
         job = self._context.store.job(job_id)
-        if job is not None and with_files and not self._discard_files(job, set()):
-            return
+        if job is not None:
+            self._remove_partials(job, set())
+            if delete_saved and not self._recycle_saved(job):
+                return
         self._forget_jobs([job_id])
         self._after_change()
+
+    @Slot("QVariantList", result="QVariantMap")
+    def removal(self, job_ids: list[int]) -> dict[str, Any]:
+        """What removing these downloads would lose, so the page asks only when needed.
+
+        `inProgress`: how many are downloading or still to (stopping them loses that work);
+        `savedFiles`: the complete files they saved that are still there (offered for the Recycle Bin,
+        never deleted unasked).
+        """
+        in_progress = saved = count = 0
+        for job_id in (int(item) for item in job_ids):
+            job = self._context.store.job(job_id)
+            if job is None:
+                continue
+            count += 1
+            in_progress += job_id in self._running or job["state"] in ACTIVE_STATES
+            saved += sum(os.path.isfile(record["filepath"]) for record in self._context.store.history_for_job(job_id))
+        return {"count": count, "inProgress": in_progress, "savedFiles": saved}
+
+    @Slot(str, "QVariantList")
+    def applyToJobs(self, action: str, job_ids: list[int]) -> None:
+        """Pause, resume, try again, or remove several downloads ("remove_saved" also recycles saved files)."""
+        handlers = {"pause": self.pause, "resume": self.resume, "retry": self.retry,
+                    "remove": lambda job_id: self.remove(job_id, False),
+                    "remove_saved": lambda job_id: self.remove(job_id, True)}
+        handler = handlers.get(action)
+        if handler is None:
+            return
+        with self._batch():
+            for job_id in job_ids:
+                handler(int(job_id))
+
+    @contextmanager
+    def _batch(self) -> Iterator[None]:
+        """Refresh the list once, and say once what went to the Recycle Bin, for an action on many."""
+        self._batching, self._batch_changed, self._batch_recycled = True, False, 0
+        try:
+            yield
+        finally:
+            self._batching = False
+            if self._batch_recycled:
+                self.notice.emit(f"Moved {self._batch_recycled} file(s) to the Recycle Bin.")
+            if self._batch_changed:
+                self._after_change()
 
     @Slot(int, int)
     def move(self, job_id: int, steps: int) -> None:
@@ -724,10 +781,11 @@ class QueueController(QObject):
         job = self._context.store.job(running.job_id)
         reason = running.stop_reason
         partials = running.executor.partial_files() if running.executor is not None else set()
-        if job is None or reason == "remove":
+        if job is None:
             self._forget_jobs([running.job_id])
-        elif reason == "remove_files":
-            if self._discard_files(job, partials):
+        elif reason in ("remove", "remove_files"):
+            self._remove_partials(job, partials)
+            if reason == "remove" or self._recycle_saved(job):
                 self._forget_jobs([running.job_id])
             else:
                 self._set_state(running.job_id, "cancelled", "", refresh=False)
@@ -814,12 +872,11 @@ class QueueController(QObject):
             (self._context.job_dir(job["id"]) / PARTIALS_FILE).unlink(missing_ok=True)
         remove_partials(partials | saved, Path(job["output_root"]) / ".incomplete")
 
-    def _discard_files(self, job: dict[str, Any], partials: set[str]) -> bool:
-        """Delete a download's unfinished files and move its saved ones to the Recycle Bin.
+    def _recycle_saved(self, job: dict[str, Any]) -> bool:
+        """Move a download's saved files to the Recycle Bin and take them out of the Library.
 
         False when Windows didn't move them (a file open in a player), so the download stays listed.
         """
-        self._remove_partials(job, partials)
         records = self._context.store.history_for_job(job["id"])
         saved = [record["filepath"] for record in records if os.path.isfile(record["filepath"])]
         if not recycle_media(saved):
@@ -828,7 +885,9 @@ class QueueController(QObject):
         self._context.store.delete_history(record["id"] for record in records)
         if records:
             self.filesRemoved.emit()
-        if saved:
+        if saved and self._batching:
+            self._batch_recycled += len(saved)
+        elif saved:
             self.notice.emit(f"Moved {len(saved)} file(s) to the Recycle Bin.")
         return True
 
@@ -962,6 +1021,9 @@ class QueueController(QObject):
             self._awake = wanted
 
     def _after_change(self) -> None:
+        if self._batching:
+            self._batch_changed = True
+            return
         self._pump()
         self._sync_model()
         self.changed.emit()
@@ -1063,6 +1125,7 @@ def _job_row(job: dict[str, Any], snap: Snapshot | None, site_label: str, last_f
         "canRetry": state in ("failed", "needs_auth", "done"),
         "canRedownload": state == "done" and not job["input_path"],
         "hasItems": job["items_total"] > 0,
+        "format": format_label(last_file, options),
     }
     if snap is not None:
         row.update(_running_values(snap))
