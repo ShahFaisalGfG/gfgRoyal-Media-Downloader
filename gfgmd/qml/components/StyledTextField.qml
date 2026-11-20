@@ -14,6 +14,8 @@ ColumnLayout {
     property string toolTipText: ""
     property alias text: input.text
     property alias input: input
+    // Controls drawn inside the box on its right (a paste button, a chip); the text stops before them.
+    property alias trailing: trailingRow.data
 
     signal accepted()
     signal editingFinished()
@@ -43,7 +45,7 @@ ColumnLayout {
         color: input.enabled ? Theme.text : Theme.textMuted
         selectByMouse: true
         leftPadding: 10
-        rightPadding: 10
+        rightPadding: 10 + (trailingRow.implicitWidth > 0 ? trailingRow.implicitWidth + 4 : 0)
         topPadding: 0
         bottomPadding: 0
         verticalAlignment: TextInput.AlignVCenter
@@ -80,6 +82,14 @@ ColumnLayout {
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
             Accessible.ignored: true
+        }
+
+        Row {
+            id: trailingRow
+            anchors.right: parent.right
+            anchors.rightMargin: 4
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2
         }
     }
 
