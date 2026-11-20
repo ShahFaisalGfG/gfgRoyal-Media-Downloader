@@ -19,8 +19,8 @@ MenuItem {
     font.pixelSize: Theme.fontBody
 
     contentItem: Text {
-        textFormat: Text.PlainText
         id: label
+        textFormat: Text.PlainText
         text: item.text
         font: item.font
         color: !item.enabled ? Theme.textMuted : item.danger ? Theme.danger : Theme.text

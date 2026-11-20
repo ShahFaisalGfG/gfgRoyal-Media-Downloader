@@ -45,8 +45,8 @@ Rectangle {
             color: Theme.inverseText
         }
         Text {
-            textFormat: Text.PlainText
             id: label
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.maximumWidth: 500
             font.family: Theme.fontFamily

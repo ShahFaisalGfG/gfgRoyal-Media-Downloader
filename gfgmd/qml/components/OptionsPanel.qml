@@ -352,10 +352,9 @@ Rectangle {
                             spacing: Theme.spaceSm
                             Repeater {
                                 model: analyzeController.audioTracks.filter(track => !track.original)
-                                delegate: CheckBox {
+                                delegate: AppCheckBox {
                                     required property var modelData
                                     text: modelData.label
-                                    font.family: Theme.fontFamily
                                     checked: panel.pickedLangs.indexOf(modelData.code) >= 0
                                     onToggled: {
                                         var picked = panel.pickedLangs.filter(code => code !== modelData.code)
@@ -466,9 +465,9 @@ Rectangle {
                     labelWidth: 110
                     RowLayout {
                         spacing: Theme.spaceLg
-                        CheckBox { id: embedThumb; text: panel.audio ? "Cover" : "Thumbnail"; font.family: Theme.fontFamily; ToolTip.text: "Show the thumbnail as the file's cover"; ToolTip.visible: hovered }
-                        CheckBox { id: embedMeta; text: "Details"; font.family: Theme.fontFamily; ToolTip.text: "Title, uploader, date, and description inside the file"; ToolTip.visible: hovered }
-                        CheckBox { id: embedChapters; text: "Chapters"; font.family: Theme.fontFamily; ToolTip.text: "Chapter marks players can jump to"; ToolTip.visible: hovered }
+                        AppCheckBox { id: embedThumb; text: panel.audio ? "Cover" : "Thumbnail"; toolTipText: "Show the thumbnail as the file's cover" }
+                        AppCheckBox { id: embedMeta; text: "Details"; toolTipText: "Title, uploader, date, and description inside the file" }
+                        AppCheckBox { id: embedChapters; text: "Chapters"; toolTipText: "Chapter marks players can jump to" }
                     }
                 }
                 FormRow {

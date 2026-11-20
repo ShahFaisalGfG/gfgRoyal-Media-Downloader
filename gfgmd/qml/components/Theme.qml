@@ -106,6 +106,7 @@ QtObject {
         settings: "\uE713",
         info: "\uE946",
         completed: "\uE930",
+        checkMark: "\uE73E",
         check: "\uE73E",
         error: "\uEA39",
         warning: "\uE7BA",

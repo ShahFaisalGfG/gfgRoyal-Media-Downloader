@@ -1,9 +1,11 @@
 singleton Theme 1.0 Theme.qml
 AppButton 1.0 AppButton.qml
+AppCheckBox 1.0 AppCheckBox.qml
 AppDialog 1.0 AppDialog.qml
 AppMenu 1.0 AppMenu.qml
 AppMenuItem 1.0 AppMenuItem.qml
 AppMenuSeparator 1.0 AppMenuSeparator.qml
+AppRadioButton 1.0 AppRadioButton.qml
 AppSwitch 1.0 AppSwitch.qml
 AppWindow 1.0 AppWindow.qml
 AudioBar 1.0 AudioBar.qml

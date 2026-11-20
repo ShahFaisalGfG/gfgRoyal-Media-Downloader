@@ -117,7 +117,7 @@ Drag links from the browser onto the window to queue them, or drop a `.txt` file
 
 A playlist, channel, or several new uploads from a subscription make one download that lists every video under it, numbered, as soon as the site names them: **Saved**, **Downloading** with its size, speed, and time left, **Waiting**, **Downloaded before**, **Skipped** with the reason, or **Waiting for its server**. Its button (**8 videos**, **8 songs**) shows or hides the list, and each song lands in the Library the moment it is saved. When a video's download stops moving for a minute and a half (its server stopped answering), it waits while the rest of the list downloads, then tries again with fresh links; the playlist's progress counts what is saved and never jumps back. **Clear finished** above the list tidies it at any time, and finished downloads leave it on their own when you quit the app (Preferences > Downloads can keep them). Failed and unfinished downloads stay, to be tried again or resumed.
 
-Songs show a square cover and videos a wide thumbnail, each with a badge naming the type (**♪ MP3**, **▶ MP4**). To act on several at once, tick the round box on their thumbnails (it appears on hover), or Ctrl+click and Shift+click them; a bar above the list then offers Pause, Resume, Try again, and Remove in Downloads, and Play, Extract audio, Remove, and Recycle Bin in the Library. **Select all** there takes every file the Library's search and filters show.
+Songs show a square cover and videos a wide thumbnail, each with a badge naming the type (**♪ MP3**, **▶ MP4**). To act on several at once, select them with the round box on their thumbnails (it appears on hover or on the row the keyboard is on), or Ctrl+click and Shift+click them; a bar above the list then offers Pause, Resume, Try again, and Remove in Downloads, and Play, Extract audio, Remove, and Recycle Bin in the Library. **Select all** there takes every file the Library's search and filters show.
 
 | Shortcut | Action |
 |---|---|
@@ -128,8 +128,8 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 | Ctrl+L | Go to the link box |
 | Space | Pause or resume the selected download |
 | Delete | Remove the selected download from the list (asks first when it is unfinished or has saved files) |
-| Ctrl+click, Shift+click | Pick several downloads or library files, or a range of them |
-| Ctrl+A / Ctrl+Space / Esc | Pick every row / pick the current row / clear the picks |
+| Ctrl+click, Shift+click | Select several downloads or library files, or a range of them |
+| Ctrl+A / Ctrl+Space / Esc | Select every row / select the current row / clear the selection |
 | Menu key or Shift+F10 | Open the current row's menu (Downloads, Library, Subscriptions) |
 | Enter | Play the current file or group (Library); check now (Subscriptions); sign in (Sign-ins) |
 | Right / Left | Show or hide a playlist's videos (Downloads) or a group's files (Library) |
@@ -350,7 +350,8 @@ yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube
 - **No accounts, no telemetry, no ads.** The app contacts the sites you download from, GitHub (for its own updates and the tools), LRCLIB for lyrics (title, artist, album, and length only; it can be turned off), and nothing else.
 - **No configuration from elsewhere runs.** Every yt-dlp run ignores yt-dlp's own configuration files, plugins, and remote code, and links are always passed after `--`, so nothing can add options such as `--exec`.
 - **Verified downloads.** Tools must match their published SHA-256 checksums and come only from GitHub over HTTPS; app updates must carry the release signature.
-- **Sign-ins stay on your PC**, encrypted for your Windows account, and are never written to logs. A download that needs one gets a copy for that run only, removed when it ends (and at the next start after a crash).
+- **Sign-ins stay on your PC**, encrypted for your Windows account, and are never written to logs. A download that needs one gets a copy for that run only, removed when it ends (and at the next start after a crash). A browser window's sign-in is read over a private pipe, never a network port another program could reach.
+- **Your proxy covers the app's own requests.** Lyrics, thumbnails, and tool downloads go through the HTTP proxy set in Preferences > Network, as downloads do (a SOCKS proxy applies to downloads only); app updates follow Windows' proxy settings.
 - **Text from sites is only text.** Titles and names are shown as plain text, and nothing a site puts in a title can pose as the app's own progress lines or point it at a file outside the download folder.
 - **The tools are never taken from the current folder**, so a program dropped where the command line runs can't stand in for yt-dlp or FFmpeg.
 - **No administrator rights** are needed to run the app or to install it for your account.
@@ -422,7 +423,7 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🎵 **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download
 - 🗑️ **Remove** deletes a download's unfinished parts, asks only for unfinished downloads or ones with saved files, and can move saved files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
 - 🎬 The default preset is **Video, best quality MP4**, which replaces the 1080p and 720p MP4 presets
-- ☑️ Pick several downloads or library files (boxes on the thumbnails, Ctrl+click, Shift+click, Ctrl+A) and act on them together; songs and videos are told apart by their cover shape and a type badge
+- ☑️ Select several downloads or library files (boxes on the thumbnails, Ctrl+click, Shift+click, Ctrl+A) and act on them together; songs and videos are told apart by their cover shape and a type badge
 - 🔽 **Options** became the arrow on the **Download** button, which opens the download options for the link and closes them again
 - 🔗 The link box holds a paste button while it is empty, takes only characters a link can hold (spaces and line breaks are dropped), and keeps several pasted links together as **+N more**
 - ⚙️ Preferences lists its sections down the side (General, Downloads, Video, Audio, Network and schedule, Subscriptions, Tools, Updates and logs)
@@ -438,9 +439,10 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🚪 **Ctrl+Q** quits (asking first while downloading), the first close to the tray says the app is still running there, the tray's **Quit** quits even with the window open, and downloads stopped by quitting start again as soon as the app opens
 - 🎧 Songs drop video clutter such as "(Official Video)" and "(Lyrics)" from their names and tags, and YouTube's quieter "stable volume" audio copy is never picked when the full one is offered
 - ♻️ **Download again** in the Library keeps the file's own type (a song stays a song, an MKV stays an MKV) and says it was added; Choose folder on a download that couldn't save changes the folder of its own type
-- ⌨️ Keyboard and screen reader use: the Download options video list, page tabs, Preferences sections, and every list's menu (Menu key or Shift+F10) work from the keyboard; notices are read out; text boxes have names; picked rows say so; focus never scrolls out of sight; toggle buttons show when they are on
+- ⌨️ Keyboard and screen reader use: the Download options video list, page tabs, Preferences sections, and every list's menu (Menu key or Shift+F10) work from the keyboard; notices are read out; text boxes have names; selected rows say so; focus never scrolls out of sight; toggle buttons show when they are on
 - 🛡️ Reliability: a file that couldn't be finished, or a subtitle another program held open, no longer stops a download or loses its file; a playlist video that keeps failing is skipped after three tries instead of retrying the list forever; Cancel and Remove stay what they are when you quit right after; a download folder on an unplugged drive says so and offers **Choose folder**; the Library and long playlists stay fast
 - ⌨️ `gfgmd` accepts links typed without `https://`, numbers retries by failed attempts only, and says a reason once
+- 🛡️ Lyrics, thumbnails, and tool downloads use the proxy set in Preferences; a browser window's sign-in is read over a private pipe instead of a local debugging port; check boxes and radio buttons match the rest of the app and show a focus ring
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry
 
 ### v1.0.0 - November 2026 *(current)*

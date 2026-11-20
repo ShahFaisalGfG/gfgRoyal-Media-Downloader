@@ -42,8 +42,8 @@ Rectangle {
             color: notice._problem ? Theme.danger : Theme.accent
         }
         Text {
-            textFormat: Text.PlainText
             id: message
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: notice.controller ? notice.controller.message : ""
             elide: Text.ElideRight

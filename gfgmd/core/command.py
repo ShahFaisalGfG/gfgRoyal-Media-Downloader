@@ -283,7 +283,9 @@ def folder_template(source: Source) -> str:
         sub = escape_template(tab) if tab else "%(playlist_title|Videos).100B"
         return f"%(channel,uploader,playlist_uploader|Channel).100B/{sub}"
     if source.kind == "playlist" and source.site == "youtube":
-        return "%(playlist).100B"
+        # As the original script named them; "." when the list can't be read and yt-dlp takes just
+        # the video the link also names (watch?v=...&list=...), so it isn't filed under "NA".
+        return "%(playlist|.).100B"
     if source.kind == "profile":
         return "%(uploader,channel,playlist_uploader,playlist_title|Profile).100B"
     return "%(playlist_title,playlist|.).100B"

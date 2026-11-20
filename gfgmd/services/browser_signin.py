@@ -7,8 +7,9 @@
 # Chromium browsers (Edge, Chrome, Brave, Vivaldi) open as a plain app window with no tabs or address
 # bar. When the user clicks Done in the app (or closes the window), the app closes the browser
 # cleanly so it saves its cookies, then reads them: a Chromium profile is started headless with
-# DevTools on loopback and asked for its cookies (Storage.getCookies); a Firefox profile's cookie
-# database is read directly. Refreshing a sign-in repeats only that read, with no window.
+# DevTools on a private pipe (no port another program could reach) and asked for its cookies
+# (Storage.getCookies); a Firefox profile's cookie database is read directly. Refreshing a sign-in
+# repeats only that read, with no window.
 #
 # Opera isn't offered: its launcher exits at once and starts the browser separately, so the app
 # couldn't tell when the sign-in window closes.
@@ -30,7 +31,7 @@ from pathlib import Path
 
 from gfgmd.core.auth import Cookie
 from gfgmd.core.platform import ProcessGroup
-from gfgmd.services.cdp import CdpClient, CdpError
+from gfgmd.services.cdp import CdpError, CdpPipe
 
 if sys.platform == "win32":
     import winreg
@@ -43,7 +44,6 @@ _BROWSERS = (
     ("vivaldi", "Vivaldi", "vivaldi.exe", (r"Vivaldi\Application",), "chromium", ("VivaldiHTM",)),
     ("firefox", "Mozilla Firefox", "firefox.exe", (r"Mozilla Firefox",), "firefox", ("FirefoxURL", "FirefoxHTML")),
 )
-_PORT_FILE = "DevToolsActivePort"
 _COMMON_FLAGS = ("--no-first-run", "--no-default-browser-check", "--disable-sync")
 # A sign-in page fits comfortably in this window.
 _WINDOW_SIZE = "--window-size=520,760"
@@ -203,21 +203,17 @@ def read_cookies(browser: Browser, profile: Path, timeout: float = 30.0) -> list
 
 
 def _read_chromium(browser: Browser, profile: Path, timeout: float) -> list[Cookie]:
-    """Start the profile headless, read every cookie through DevTools, and close the browser."""
-    port_file = profile / _PORT_FILE
-    port_file.unlink(missing_ok=True)
+    """Start the profile headless, read every cookie through DevTools on a private pipe, and close
+    the browser."""
     group = ProcessGroup()
+    pipe: CdpPipe | None = None
     try:
+        pipe = CdpPipe(timeout)
         group.launch([browser.exe, f"--user-data-dir={profile}", *_COMMON_FLAGS, "--headless=new",
-                      "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "about:blank"],
-                     capture=False)
-        endpoint = _wait_for_endpoint(port_file, timeout)
-        client = CdpClient(endpoint, timeout)
-        try:
-            result = client.call("Storage.getCookies")
-            client.send_only("Browser.close")
-        finally:
-            client.close()
+                      *pipe.browser_args(), "about:blank"], capture=False, inherit=pipe.child_handles())
+        pipe.started()
+        result = pipe.call("Storage.getCookies")
+        pipe.send_only("Browser.close")
         if group.process is not None:
             try:
                 group.process.wait(timeout=10)
@@ -228,6 +224,8 @@ def _read_chromium(browser: Browser, profile: Path, timeout: float) -> list[Cook
     finally:
         group.kill()
         group.close()
+        if pipe is not None:
+            pipe.close()
     return [_cookie(raw) for raw in result.get("cookies", []) if isinstance(raw, dict) and raw.get("name")]
 
 
@@ -268,19 +266,6 @@ def _read_firefox(profile: Path) -> list[Cookie]:
                               secure=bool(secure), expires=max(expires, 0), http_only=bool(http_only),
                               include_subdomains=domain.startswith(".")))
     return cookies
-
-
-def _wait_for_endpoint(port_file: Path, timeout: float) -> str:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            lines = port_file.read_text(encoding="utf-8").splitlines()
-            if len(lines) >= 2 and lines[0].strip().isdigit():
-                return f"ws://127.0.0.1:{int(lines[0])}{lines[1].strip()}"
-        except OSError:
-            pass
-        time.sleep(0.2)
-    raise SignInError("The browser didn't respond (no DevTools port); another window of this sign-in may be open")
 
 
 def _cookie(raw: dict) -> Cookie:

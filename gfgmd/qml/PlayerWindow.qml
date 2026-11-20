@@ -201,8 +201,8 @@ AppWindow {
             visible: errorBox.text.length > 0
             spacing: Theme.spaceMd
             Text {
-                textFormat: Text.PlainText
                 id: errorBox
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
@@ -442,8 +442,8 @@ AppWindow {
                 color: button.checked ? Theme.overlayAccent : Theme.overlayText
             }
             Text {
-                textFormat: Text.PlainText
                 id: label
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 visible: button.text.length > 0
                 text: button.text

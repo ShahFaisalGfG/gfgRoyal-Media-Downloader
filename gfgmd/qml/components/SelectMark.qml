@@ -25,7 +25,7 @@ Item {
     Accessible.name: "Select " + mark.itemName
     Accessible.checked: mark.checked
     ToolTip.visible: markHover.hovered
-    ToolTip.text: mark.checked ? "Let go of this (Ctrl+Space)" : "Pick this for actions on several at once (Ctrl+Space)"
+    ToolTip.text: mark.checked ? "Deselect (Ctrl+Space)" : "Select for actions on several at once (Ctrl+Space)"
     ToolTip.delay: 500
 
     Rectangle {

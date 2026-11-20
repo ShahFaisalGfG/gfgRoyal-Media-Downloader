@@ -291,6 +291,7 @@ def test_subscribe_says_why_a_link_cant_be_used(qapp, context, paused_queue, fak
         assert subs.add("https://www.youtube.com/@fake/videos", {}, 6, False, True)
         assert wait_for(qapp, lambda: subs.model.count == 1)
     assert subs.linkProblem("https://www.youtube.com/@fake/videos") == "You're already subscribed to this."
+    subs.shutdown()  # its check thread must not outlive it and signal a deleted controller later
 
 
 # ── Sign-ins ──────────────────────────────────────────────────────────────

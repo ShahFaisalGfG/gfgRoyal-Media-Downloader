@@ -68,8 +68,8 @@ AppDialog {
         spacing: Theme.spaceSm
 
         Text {
-            textFormat: Text.PlainText
             id: name
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.bottomMargin: Theme.spaceXs
             font.family: Theme.fontFamily
@@ -140,9 +140,9 @@ AppDialog {
             labelWidth: 120
             RowLayout {
                 spacing: Theme.spaceLg
-                CheckBox { id: embedCover; text: "Cover"; font.family: Theme.fontFamily; ToolTip.text: "Show the thumbnail as the song's cover (WAV songs get it as a picture next to the file)"; ToolTip.visible: hovered }
-                CheckBox { id: embedDetails; text: "Details"; font.family: Theme.fontFamily; ToolTip.text: "Title, artist, date, and description inside the file"; ToolTip.visible: hovered }
-                CheckBox { id: embedChapters; text: "Chapters"; font.family: Theme.fontFamily; ToolTip.text: "The video's chapter marks, which players can jump to"; ToolTip.visible: hovered }
+                AppCheckBox { id: embedCover; text: "Cover"; toolTipText: "Show the thumbnail as the song's cover (WAV songs get it as a picture next to the file)" }
+                AppCheckBox { id: embedDetails; text: "Details"; toolTipText: "Title, artist, date, and description inside the file" }
+                AppCheckBox { id: embedChapters; text: "Chapters"; toolTipText: "The video's chapter marks, which players can jump to" }
             }
         }
         Text {

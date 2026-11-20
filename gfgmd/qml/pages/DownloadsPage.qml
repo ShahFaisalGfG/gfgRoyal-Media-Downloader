@@ -218,7 +218,7 @@ Item {
                 text: "Pause"
                 iconName: "pause"
                 enabled: page.picked.canPause === true
-                toolTipText: "Pause the picked downloads; they continue from where they stopped"
+                toolTipText: "Pause the selected downloads; they continue from where they stopped"
                 onClicked: page.applyToPicked("pause")
             }
             AppButton {
@@ -235,7 +235,7 @@ Item {
                 text: "Try again"
                 iconName: "refresh"
                 enabled: page.picked.canRetry === true
-                toolTipText: "Try the picked failed or finished downloads again"
+                toolTipText: "Try the selected failed or finished downloads again"
                 onClicked: page.applyToPicked("retry")
             }
             AppButton {
@@ -243,7 +243,7 @@ Item {
                 compact: true
                 text: "Remove"
                 iconName: "delete"
-                toolTipText: "Take the picked downloads off the list (Delete)"
+                toolTipText: "Take the selected downloads off the list (Delete)"
                 onClicked: page.removeJobs(selection.ids, selection.count === 1 ? "1 download" : selection.count + " downloads")
             }
         }
@@ -493,8 +493,8 @@ Item {
             spacing: Theme.spaceSm
 
             Text {
-                textFormat: Text.PlainText
                 id: removeName
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: !removeDialog.many  // the title already counts them
                 font.family: Theme.fontFamily
@@ -527,14 +527,11 @@ Item {
                 color: Theme.text
                 wrapMode: Text.WordWrap
             }
-            CheckBox {
+            AppCheckBox {
                 id: deleteFiles
-                Layout.leftMargin: -Theme.spaceSm
                 visible: removeDialog.savedFiles > 0
                 text: removeDialog.savedFiles === 1 ? "Also move the saved file to the Recycle Bin"
                                                     : "Also move the saved files to the Recycle Bin"
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontBody
             }
             Text {
                 textFormat: Text.PlainText

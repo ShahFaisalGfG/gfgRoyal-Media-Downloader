@@ -169,7 +169,7 @@ ColumnLayout {
                 anchors.leftMargin: Theme.spaceXs
                 anchors.rightMargin: Theme.spaceSm
                 spacing: Theme.spaceSm
-                CheckBox {
+                AppCheckBox {
                     checked: entry.checked
                     onClicked: list.model.toggle(entry.index)
                     focusPolicy: Qt.NoFocus

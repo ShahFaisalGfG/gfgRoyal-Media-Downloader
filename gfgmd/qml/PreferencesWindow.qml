@@ -308,8 +308,8 @@ AppWindow {
                             Accessible.name: "Speed test progress"
                         }
                         Text {
-                            textFormat: Text.PlainText
                             id: optimizeResult
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             visible: text.length > 0
                             font.family: Theme.fontFamily
@@ -445,10 +445,9 @@ AppWindow {
                             spacing: Theme.spaceSm
                             Repeater {
                                 model: prefsController.options.sponsorCategories
-                                delegate: CheckBox {
+                                delegate: AppCheckBox {
                                     required property var modelData
                                     text: modelData.label
-                                    font.family: Theme.fontFamily
                                     checked: prefsWin.v("formats.sponsorblock_categories").indexOf(modelData.code) >= 0
                                     onToggled: {
                                         var list = prefsWin.v("formats.sponsorblock_categories").filter(code => code !== modelData.code)
@@ -618,7 +617,7 @@ AppWindow {
                         }
                         SettingRow {
                             label: "Proxy"
-                            hint: "Only if your network needs one, such as http://proxy:8080. Leave empty to connect directly."
+                            hint: "Only if your network needs one, such as http://proxy:8080. Downloads, lyrics, thumbnails, and the download tools go through it (a SOCKS proxy: downloads only). Leave empty to connect directly."
                             fillControl: true
                             StyledTextField {
                                 Layout.fillWidth: true
