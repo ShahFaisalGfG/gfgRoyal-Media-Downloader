@@ -18,6 +18,7 @@ ColumnLayout {
         color: Theme.textMuted
     }
     Text {
+        textFormat: Text.PlainText
         Layout.alignment: Qt.AlignHCenter
         Layout.maximumWidth: 460
         text: empty.title
@@ -29,6 +30,7 @@ ColumnLayout {
         wrapMode: Text.WordWrap
     }
     Text {
+        textFormat: Text.PlainText
         Layout.alignment: Qt.AlignHCenter
         Layout.maximumWidth: 460
         visible: empty.text.length > 0

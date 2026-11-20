@@ -22,6 +22,7 @@ Rectangle {
     readonly property bool _waiting: notice.status === "ready" || notice.status === "failed"
     readonly property bool _downloading: notice.status === "downloading"
     readonly property bool _canDownload: notice.controller !== null && notice.controller.canDownload
+    readonly property string _exitWord: notice.controller ? notice.controller.exitWord : "close"
 
     visible: notice.controller !== null && notice.controller.bannerVisible
     implicitHeight: row.implicitHeight + 2 * Theme.spaceXs
@@ -41,6 +42,7 @@ Rectangle {
             color: notice._problem ? Theme.danger : Theme.accent
         }
         Text {
+            textFormat: Text.PlainText
             id: message
             Layout.fillWidth: true
             text: notice.controller ? notice.controller.message : ""
@@ -66,6 +68,7 @@ Rectangle {
             Accessible.name: "Update download progress"
         }
         Text {
+            textFormat: Text.PlainText
             visible: notice._downloading
             text: notice.controller ? notice.controller.progressText : ""
             font.family: Theme.fontFamily
@@ -79,8 +82,8 @@ Rectangle {
             text: !notice._canDownload ? "Download" : (notice.status === "error" ? "Try again" : "Update")
             iconName: notice._canDownload ? "download" : "openExternal"
             toolTipText: notice._canDownload
-                ? "Download the update in the background; it installs when you close the app"
-                : "Open the releases page in your browser"
+                ? "Download the update in the background; it installs when you " + notice._exitWord + " the app"
+                : "Open the download page in your browser"
             onClicked: notice.controller.download()
         }
         AppButton {
@@ -91,7 +94,7 @@ Rectangle {
             iconName: "sync"
             enabled: notice.controller ? notice.controller.canRestart : false
             toolTipText: (enabled ? "Close the app, install the update, and start the new version"
-                                  : "Available once the current work finishes")
+                                  : "Available once your downloads finish")
                 + (notice.restartNote ? ". " + notice.restartNote : "")
             onClicked: notice.controller.restartNow()
         }
@@ -122,7 +125,9 @@ Rectangle {
             kind: "ghost"
             compact: true
             iconName: "close"
-            toolTipText: notice._waiting ? "Hide this notice (the update still installs on close)" : "Hide this notice"
+            toolTipText: notice._waiting
+                ? "Hide this notice (the update still installs when you " + notice._exitWord + " the app)"
+                : "Hide this notice"
             onClicked: notice.controller.dismiss()
         }
     }

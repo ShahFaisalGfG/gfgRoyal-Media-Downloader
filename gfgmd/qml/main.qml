@@ -48,22 +48,30 @@ AppWindow {
         preferences.requestActivate()
     }
 
-    onClosing: function (close) {
-        if (mainWin._quitting) return
-        if (mainWin._trayHide) {
-            close.accepted = false
-            mainWin.hide()
-        } else if (queueController.runningCount > 0) {
-            close.accepted = false
+    // Quit the app (Ctrl+Q, or closing the window without the tray), asking first while downloading.
+    function quitApp() {
+        if (queueController.runningCount > 0) {
             quitDialog.open()
         } else {
+            mainWin._quitting = true
             Qt.quit()
+        }
+    }
+
+    onClosing: function (close) {
+        if (mainWin._quitting) return
+        close.accepted = false
+        if (mainWin._trayHide) {
+            mainWin.hide()
+            appController.closedToTray()
+        } else {
+            mainWin.quitApp()
         }
     }
 
     Connections {
         target: appController
-        function onNotice(message) { toast.show(message) }
+        function onNotice(message) { if (!preferences.active) toast.show(message) }
         function onClipboardLink(url) { clipboardOffer.offer(url) }
     }
     Connections {
@@ -72,11 +80,19 @@ AppWindow {
     }
     Connections {
         target: queueController
-        function onWhenDoneCountdown(action) { countdown.start(action) }
+        // The countdown has to be seen to be cancelled, even with the window in the tray.
+        function onWhenDoneCountdown(action) {
+            if (!mainWin.visible || mainWin.visibility === Window.Minimized)
+                mainWin.showNormal()
+            mainWin.raise()
+            mainWin.requestActivate()
+            countdown.start(action)
+        }
     }
 
     Shortcut { sequence: "Ctrl+,"; onActivated: mainWin.openPreferences() }
     Shortcut { sequence: "F1"; onActivated: aboutDialog.open() }
+    Shortcut { sequence: "Ctrl+Q"; onActivated: mainWin.quitApp() }
     Shortcut { sequence: "Ctrl+1"; onActivated: mainWin.page = 0 }
     Shortcut { sequence: "Ctrl+2"; onActivated: mainWin.page = 1 }
     Shortcut { sequence: "Ctrl+3"; onActivated: mainWin.page = 2 }
@@ -124,6 +140,9 @@ AppWindow {
                         iconName: modelData.icon
                         toolTipText: modelData.tip
                         onClicked: mainWin.page = index
+                        Accessible.role: Accessible.PageTab
+                        Accessible.checkable: true
+                        Accessible.checked: mainWin.page === index
                     }
                 }
                 Item { Layout.fillWidth: true }
@@ -200,6 +219,7 @@ AppWindow {
             border.width: 2
             border.color: Theme.accent
             Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "Drop links to download them"
                 font.family: Theme.fontFamily
@@ -212,6 +232,9 @@ AppWindow {
 
     Toast {
         id: toast
+        // Tooltips can show a site's title; like every Text here, they show it as plain text. The
+        // tooltip is one shared instance, so setting it once covers every window.
+        Component.onCompleted: ToolTip.toolTip.contentItem.textFormat = Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: runBar.height + audioBar.height + Theme.spaceLg
@@ -225,7 +248,9 @@ AppWindow {
             clipboardOffer.url = url
             clipboardOffer.open()
             offerTimer.restart()
+            offerText.Accessible.announce("Download the copied link?")
         }
+        focus: true
         x: (mainWin.width - width) / 2
         y: mainWin.height - runBar.height - audioBar.height - height - Theme.spaceXl * 3
         width: Math.min(mainWin.width - 2 * Theme.spaceXl, 560)
@@ -237,6 +262,8 @@ AppWindow {
             spacing: Theme.spaceSm
             Icon { name: "link"; size: Theme.iconLg; color: Theme.accent }
             Text {
+                textFormat: Text.PlainText
+                id: offerText
                 Layout.fillWidth: true
                 text: "Download the copied link?\n" + clipboardOffer.url
                 font.family: Theme.fontFamily
@@ -272,6 +299,7 @@ AppWindow {
         function start(action) {
             countdown.action = action
             countdown.left = 60
+            countdown.standardButton(Dialog.Cancel).text = action === "quit" ? "Don't quit" : "Keep the PC on"
             countdown.open()
             countdownTimer.start()
         }
@@ -294,9 +322,11 @@ AppWindow {
             }
         }
         Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: ({"quit": "The app quits", "sleep": "The PC goes to sleep", "hibernate": "The PC hibernates",
-                    "shutdown": "The PC shuts down"})[countdown.action] + " in " + countdown.left + " seconds."
+                    "shutdown": "The PC shuts down"})[countdown.action] + " in " + countdown.left
+                + (countdown.left === 1 ? " second." : " seconds.")
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.text
@@ -311,7 +341,12 @@ AppWindow {
         defaultButton: Dialog.Cancel
         width: 420
         onAccepted: { mainWin._quitting = true; Qt.quit() }
+        Component.onCompleted: {
+            quitDialog.standardButton(Dialog.Yes).text = "Quit"
+            quitDialog.standardButton(Dialog.Cancel).text = "Keep downloading"
+        }
         Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: "Downloads stop now and continue from where they stopped the next time the app opens."
             font.family: Theme.fontFamily
@@ -333,6 +368,7 @@ AppWindow {
             spacing: Theme.spaceMd
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: appController.appName + " " + appController.appVersion
                 font.family: Theme.fontFamily
@@ -341,6 +377,7 @@ AppWindow {
                 color: Theme.text
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: appController.appDescription + "."
                 font.family: Theme.fontFamily
@@ -349,9 +386,10 @@ AppWindow {
                 wrapMode: Text.WordWrap
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
-                text: "Downloads are made by yt-dlp, with FFmpeg and Deno; they are separate free programs under "
-                    + "their own licenses. Download only videos you own or have permission to save."
+                text: "Downloading uses the free programs yt-dlp, FFmpeg, and Deno, each under its own license. "
+                    + "Download only videos you own or have permission to save."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted
@@ -367,12 +405,13 @@ AppWindow {
                 }
                 AppButton {
                     kind: "ghost"
-                    text: "Releases"
+                    text: "Download page"
                     iconName: "openExternal"
                     onClicked: updateController.openDownloadPage()
                 }
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: text !== ""
                 text: updateController.message
@@ -382,8 +421,9 @@ AppWindow {
                 wrapMode: Text.WordWrap
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
-                text: "Free and open source (MIT). Built by " + appController.appAuthor + "."
+                text: "Free and open source (MIT license). Built by " + appController.appAuthor + "."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted

@@ -68,6 +68,7 @@ AppDialog {
         spacing: Theme.spaceSm
 
         Text {
+            textFormat: Text.PlainText
             id: name
             Layout.fillWidth: true
             Layout.bottomMargin: Theme.spaceXs
@@ -88,7 +89,7 @@ AppDialog {
                 Layout.fillWidth: true
                 model: prefsController.options.audio
                 accessibleName: "Audio format"
-                toolTipText: "MP3 plays everywhere; FLAC and WAV are lossless; Original keeps the video's own sound unconverted"
+                toolTipText: "MP3 plays everywhere; FLAC and WAV keep full quality (bigger files); Original keeps the video's sound as it is"
             }
         }
         FormRow {
@@ -100,7 +101,7 @@ AppDialog {
                 Layout.fillWidth: true
                 model: prefsController.options.audioQuality
                 accessibleName: "Audio quality"
-                toolTipText: "Videos carry about 128-256 kbps of sound; a higher bitrate keeps all of it but can't add detail"
+                toolTipText: "Higher numbers sound better and make bigger files; above 256 the sound can't get better than the video's"
             }
         }
         FormRow {
@@ -121,7 +122,7 @@ AppDialog {
             AppSwitch {
                 id: lyricsSwitch
                 accessibleName: "Save lyrics"
-                toolTipText: "Save timed lyrics (.lrc) from the video's caption files; the audio player shows them line by line"
+                toolTipText: "Save lyrics that follow along with the song, from the video's captions; the audio player shows them line by line"
             }
         }
         FormRow {
@@ -131,22 +132,23 @@ AppDialog {
             AppSwitch {
                 id: onlineSwitch
                 accessibleName: "Look up lyrics online"
-                toolTipText: "When the video has no captions, ask LRCLIB for the lyrics; it is sent only the song's title, artist, album, and length"
+                toolTipText: "When the video has no captions, ask LRCLIB, a free online lyrics service; it is sent only the song's title, artist, album, and length"
             }
         }
         FormRow {
-            label: "Embed"
+            label: "In the file"
             labelWidth: 120
             RowLayout {
                 spacing: Theme.spaceLg
-                CheckBox { id: embedCover; text: "Cover"; font.family: Theme.fontFamily; ToolTip.text: "Show the thumbnail as the song's cover (WAV gets it as a picture beside the file)"; ToolTip.visible: hovered }
+                CheckBox { id: embedCover; text: "Cover"; font.family: Theme.fontFamily; ToolTip.text: "Show the thumbnail as the song's cover (WAV songs get it as a picture next to the file)"; ToolTip.visible: hovered }
                 CheckBox { id: embedDetails; text: "Details"; font.family: Theme.fontFamily; ToolTip.text: "Title, artist, date, and description inside the file"; ToolTip.visible: hovered }
                 CheckBox { id: embedChapters; text: "Chapters"; font.family: Theme.fontFamily; ToolTip.text: "The video's chapter marks, which players can jump to"; ToolTip.visible: hovered }
             }
         }
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
-            text: "The song takes the video's place in the audio folder: a playlist video's goes in a folder of the playlist's name."
+            text: "The song is saved in your audio folder, inside a folder named after the playlist when the video came from one."
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption
             color: Theme.textMuted

@@ -29,6 +29,9 @@ _CONTROL = re.compile(r"[\x00-\x20\x7f]")
 # Share-tracking parameters on every site.
 _TRACKING = ("fbclid", "gclid", "igshid")
 _COLLECTIONS = {"playlist", "channel", "post", "profile", "generic"}
+# What a YouTube link that is cut short or mistyped gets told (the app and the CLI show it as it is).
+_BROKEN_PLAYLIST = "This YouTube playlist link looks broken. Copy the playlist's link again."
+_BROKEN_VIDEO = "This YouTube link looks incomplete. Copy the video's link again."
 
 
 @dataclass(frozen=True)
@@ -63,18 +66,28 @@ class Source:
 YouTubeSource = Source
 
 
+# A site's address and path typed without "https://" ("youtu.be/abc", "www.youtube.com/watch?v=...").
+_BARE_LINK = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+)+/\S", re.IGNORECASE)
+
+
+def as_link(text: str) -> str:
+    """The text with "https://" in front when it is a site's address and path typed without it."""
+    text = text.strip()
+    return f"https://{text}" if _BARE_LINK.match(text) else text
+
+
 def check_url(url: str) -> str:
     """Return the link without surrounding spaces, or raise ValueError when it can't be a web link."""
     url = url.strip()
     if not url:
-        raise ValueError("Paste a link to a video, playlist, or channel")
+        raise ValueError("Paste a link to a video, playlist, or channel.")
     if len(url) > MAX_URL_LENGTH:
-        raise ValueError("The link is too long")
+        raise ValueError("This link is too long. Copy it again from your browser.")
     if _CONTROL.search(url):
-        raise ValueError("The link contains spaces or control characters")
+        raise ValueError("The link has spaces or hidden characters in it. Copy it again.")
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("Enter a link beginning with https://")
+        raise ValueError("Paste a link that starts with https:// (copy it from your browser's address bar).")
     return url
 
 
@@ -126,13 +139,13 @@ def _youtube_source(path: str, query_text: str, host: str) -> Source:
     if "list" in query:
         playlist_ids = query["list"]
         if len(playlist_ids) != 1 or not playlist_ids[0]:
-            raise ValueError("The list parameter must contain one playlist ID")
+            raise ValueError(_BROKEN_PLAYLIST)
         return Source("playlist", playlist_ids[0])
 
     parts = [part for part in path.split("/") if part]
     if host in SHORT_HOSTS:
         if len(parts) != 1:
-            raise ValueError("The link must point to one YouTube video")
+            raise ValueError(_BROKEN_VIDEO)
         return _video(parts[0], "video")
     if parts == ["watch"]:
         video_ids = query.get("v", [])
@@ -140,19 +153,19 @@ def _youtube_source(path: str, query_text: str, host: str) -> Source:
     if len(parts) == 2 and parts[0] in {"shorts", "live", "embed", "v"}:
         return _video(parts[1], "short" if parts[0] == "shorts" else "video")
     if parts == ["playlist"]:
-        raise ValueError("The playlist link has no list= ID")
+        raise ValueError(_BROKEN_PLAYLIST)
     if parts == ["feed", "playlists"]:
         # A signed-in account's own playlists; each one downloads into its own folder.
         return Source("playlist", "feed-playlists")
     channel = _channel(parts)
     if channel is not None:
         return channel
-    raise ValueError("The link must point to a YouTube video, Short, playlist, or channel")
+    raise ValueError("This YouTube link isn't a video, Short, playlist, or channel. Copy the link of one of those.")
 
 
 def _video(video_id: str, kind: Literal["video", "short"]) -> Source:
     if VIDEO_ID.fullmatch(video_id) is None:
-        raise ValueError("The YouTube video link must contain a valid video ID")
+        raise ValueError(_BROKEN_VIDEO)
     return Source(kind, video_id)
 
 

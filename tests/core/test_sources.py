@@ -2,7 +2,7 @@
 
 import pytest
 
-from gfgmd.core.sources import Source, canonical_url, source_from_url
+from gfgmd.core.sources import Source, as_link, canonical_url, source_from_url
 
 VIDEO_ID = "jNQXAC9IVRw"
 
@@ -51,6 +51,38 @@ def test_rejects_unusable_links(url: str) -> None:
     """Reject links that can't be web pages and YouTube links without a usable ID."""
     with pytest.raises(ValueError):
         source_from_url(url)
+
+
+@pytest.mark.parametrize(
+    ("url", "advice"),
+    [
+        ("https://www.youtube.com/playlist", "Copy the playlist's link again."),
+        ("https://www.youtube.com/playlist?list=", "Copy the playlist's link again."),
+        ("https://www.youtube.com/shorts/invalid", "Copy the video's link again."),
+        ("https://www.youtube.com/feed/history", "Copy the link of one of those."),
+        ("https://exa mple.com/", "Copy it again."),
+        ("ftp://example.com/video", "starts with https://"),
+    ],
+)
+def test_rejections_say_what_to_do(url: str, advice: str) -> None:
+    """The messages reach toasts as they are: plain advice, never URL parts such as "list=" or "ID"."""
+    with pytest.raises(ValueError) as error:
+        source_from_url(url)
+    message = str(error.value)
+    assert advice in message
+    assert "list=" not in message and " ID" not in message and "parameter" not in message
+
+
+@pytest.mark.parametrize(("text", "link"), [
+    ("youtu.be/jNQXAC9IVRw", "https://youtu.be/jNQXAC9IVRw"),
+    ("  www.youtube.com/watch?v=jNQXAC9IVRw ", "https://www.youtube.com/watch?v=jNQXAC9IVRw"),
+    ("https://youtu.be/jNQXAC9IVRw", "https://youtu.be/jNQXAC9IVRw"),
+    ("http://example.com/a", "http://example.com/a"),
+    ("youtube.com", "youtube.com"),  # an address with no page on it stays as typed (and is refused)
+    ("not a link", "not a link"),
+])
+def test_links_typed_without_https_get_it(text: str, link: str) -> None:
+    assert as_link(text) == link
 
 
 def test_archive_keys_match_version_1() -> None:
@@ -124,3 +156,10 @@ def test_youtube_links_lose_only_share_tracking() -> None:
     """A YouTube share link keeps its start time but drops "si"."""
     url = f"https://youtu.be/{VIDEO_ID}?si=abc&t=30"
     assert canonical_url(source_from_url(url), url) == f"https://youtu.be/{VIDEO_ID}?t=30"
+
+
+def test_well_known_sites_without_a_profile_have_their_names() -> None:
+    from gfgmd.core.sites import resolve_site
+    assert resolve_site("youtube-dl.bandcamp.com").label == "Bandcamp"
+    assert resolve_site("www.bilibili.com").label == "Bilibili" and resolve_site("archive.org").label == "Internet Archive"
+    assert resolve_site("example.org").label == "example.org"

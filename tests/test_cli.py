@@ -10,8 +10,11 @@ import pytest
 from gfgmd import cli
 from gfgmd.config.defaults import AppInfo
 from gfgmd.core import naming
+from gfgmd.core.errors import CATEGORIES
 from gfgmd.core.jobs import JobResult
+from gfgmd.core.progress import Event, Snapshot
 from gfgmd.core.runner import run_to_completion
+from gfgmd.core.sources import source_from_url
 from gfgmd.core.tools import ToolSet
 
 URL = "https://www.youtube.com/playlist?list=PLtest123"
@@ -87,10 +90,13 @@ def test_unusable_link_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_missing_tools_exit_2(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-    """Name the missing programs and exit with status 2."""
+    """Say how to get the tools and exit with status 2; --verbose names the missing programs."""
     from gfgmd.core.tools import ToolsMissing
     with patch.object(cli, "find_dependencies", side_effect=ToolsMissing(["yt-dlp", "deno"])):
         assert cli.run([URL, "--output-dir", str(tmp_path)]) == 2
+        err = capsys.readouterr().err
+        assert "Open the app once to install them" in err and "yt-dlp" not in err
+        assert cli.run([URL, "--output-dir", str(tmp_path), "--verbose"]) == 2
     assert "yt-dlp, deno" in capsys.readouterr().err
 
 
@@ -124,7 +130,7 @@ def test_failed_attempt_retries_then_succeeds(fake_ytdlp: list[str], tmp_path: P
                                               capsys: pytest.CaptureFixture[str]) -> None:
     """Resume after a failed attempt without another command."""
     assert run_fake(fake_ytdlp, ["https://fake.test/flaky", "--output-dir", str(tmp_path), "--retry-delay", "2"]) == 0
-    assert "Retrying in 2 seconds" in capsys.readouterr().out
+    assert "Attempt 1 didn't finish. Trying again in 2 seconds." in capsys.readouterr().out
 
 
 def test_attempt_limit_returns_failure(fake_ytdlp: list[str], tmp_path: Path) -> None:
@@ -145,6 +151,77 @@ def test_report_messages(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> 
     result = JobResult("needs_auth", attempts=1, failure=classify("Sign in to confirm your age"))
     assert cli._report(result, tmp_path, strict=False) == 1
     assert "--cookies" in capsys.readouterr().err
+
+
+def test_broken_tools_report_how_to_reinstall(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """A tool that didn't start reads as a reinstall step; its error text shows only with --verbose."""
+    from gfgmd.core.errors import CATEGORIES, Failure
+    result = JobResult("failed", attempts=1, failure=Failure(CATEGORIES["tools"], "yt-dlp didn't start: [WinError 2]"))
+    assert cli._report(result, tmp_path, strict=False) == 2
+    err = capsys.readouterr().err
+    assert "Open the app once" in err and "WinError" not in err
+    assert cli._report(result, tmp_path, strict=False, verbose=True) == 2
+    assert "WinError 2" in capsys.readouterr().err
+
+
+def test_progress_line_reads_plainly() -> None:
+    """Song or video n of m, the stage, size, speed, and the time left in words."""
+    snap = Snapshot(stage="Downloading", item_index=2, item_count=8, total=40 * 1024 * 1024, item_fraction=0.45,
+                    speed=2.1 * 1024 * 1024, eta=75)
+    expected = "Video 2 of 8  Downloading  45% of 40.0 MB  2.1 MB/s  about 1 minute left"
+    assert cli._progress_line(snap, "video") == expected
+    assert cli._progress_line(snap, "audio").startswith("Song 2 of 8  ")
+    assert cli._progress_line(Snapshot(stage="Starting", item_count=8), "video") == "Starting"
+
+
+def test_progress_line_skips_the_first_size_guess() -> None:
+    """yt-dlp's opening guess from one small part ("100% of 1.0 KB") shows as what came so far."""
+    snap = Snapshot(stage="Downloading", total=1024, downloaded=1024, item_fraction=1.0)
+    assert cli._progress_line(snap, "video") == "Downloading  1.0 KB"
+
+
+def test_a_link_typed_without_https_downloads(fake_ytdlp: list[str], tmp_path: Path,
+                                              capsys: pytest.CaptureFixture[str]) -> None:
+    """"fake.test/ok" gets its https:// as in the app's link box; plain words are still refused."""
+    assert run_fake(fake_ytdlp, ["fake.test/ok", "--output-dir", str(tmp_path)]) == 0
+    assert "Downloading https://fake.test/ok" in capsys.readouterr().out
+    assert run_fake(fake_ytdlp, ["not-a-link", "--output-dir", str(tmp_path)]) == 2
+    assert "starts with https://" in capsys.readouterr().err
+
+
+def test_the_closing_line_does_not_repeat_the_reason(fake_ytdlp: list[str], tmp_path: Path,
+                                                     capsys: pytest.CaptureFixture[str]) -> None:
+    """A private video says why as it happens; the closing line then only says the download didn't finish."""
+    assert run_fake(fake_ytdlp, ["https://fake.test/private", "--output-dir", str(tmp_path)]) == 1
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0].endswith(CATEGORIES["private"].message) and lines[-1] == "The download didn't finish."
+
+
+def test_playlist_problems_name_the_video_without_tool_text(fake_ytdlp: list[str], tmp_path: Path,
+                                                            capsys: pytest.CaptureFixture[str]) -> None:
+    """A private video in a list reads as a plain sentence; the tool's own line shows only with --verbose."""
+    assert run_fake(fake_ytdlp, ["https://fake.test/playlist", "--output-dir", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    private = CATEGORIES["private"]
+    assert f"Couldn't download one of the videos: {private.message}" in captured.err
+    assert f"Skipped a video: {private.final}" in captured.err
+    assert "[youtube]" not in captured.err and "bbbbbbbbbbb" not in captured.err
+    assert "Finished: " in captured.out and f"The files are in {tmp_path}" in captured.out
+    assert run_fake(fake_ytdlp, ["https://fake.test/playlist", "--output-dir", str(tmp_path / "again"), "-v"]) == 0
+    assert "Details: [youtube] bbbbbbbbbbb: Private video" in capsys.readouterr().err
+
+
+def test_problems_name_the_title_and_warnings_need_verbose(capsys: pytest.CaptureFixture[str]) -> None:
+    """A known title names the video; warnings stay hidden unless asked for."""
+    args = cli.parse_args([URL])
+    spec = cli.JobSpec(URL, source_from_url(URL), cli.options_from_args(args), None, None)  # type: ignore[arg-type]
+    reporter = cli._Reporter([], spec, verbose=False)
+    reporter(Event("item", {"id": "abc12345678", "title": "Talk"}))
+    reporter(Event("error", {"id": "abc12345678"}, "[youtube] abc12345678: Video unavailable"))
+    reporter(Event("warning", {}, "[youtube] abc12345678: nsig extraction failed"))
+    captured = capsys.readouterr()
+    assert captured.out == "Downloading: Talk\n"
+    assert captured.err == f'Couldn\'t download "Talk": {CATEGORIES["removed"].message}\n'
 
 
 def test_titles_in_any_script_print_on_any_console(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,6 +9,7 @@ download. Stdlib only, so the command-line tool shares it.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -284,7 +285,7 @@ def add_lyrics(audio: Path, info: dict[str, Any], languages: str, online: bool, 
         try:
             # Untimed lyrics from LRCLIB (no synced version fits) still go in the tag.
             synced_text, plain = lookup_lrclib(song, fetch, base_url)
-        except (OSError, ValueError):
+        except (OSError, ValueError, http.client.HTTPException):
             synced_text, plain = "", ""  # offline or LRCLIB unreachable: the download still counts
         source = "lrclib" if synced_text or plain else ""
     _remove_language_files(audio)

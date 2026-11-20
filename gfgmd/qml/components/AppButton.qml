@@ -4,7 +4,8 @@ import QtQuick.Layouts
 
 // The app's single button style: "primary", "secondary", "ghost", or "danger", with an optional
 // icon. Icon-only buttons must set toolTipText, which also becomes their accessible name.
-// Keyboard focus draws a visible ring (WCAG 2.4.7).
+// Keyboard focus draws a visible ring (WCAG 2.4.7). A checked toggle (Shuffle, Repeat) shows in
+// the accent color on a tinted background, and says so to screen readers.
 Button {
     id: control
 
@@ -17,8 +18,11 @@ Button {
     property bool flatRight: false
 
     readonly property bool _iconOnly: control.text.length === 0 && control.iconName.length > 0
+    // Primary buttons are already accent-filled, so only the other kinds draw a checked state.
+    readonly property bool _on: control.checked && control.kind !== "primary"
     readonly property color _fg: {
         if (!control.enabled) return Theme.textMuted
+        if (control._on) return Theme.accent
         switch (control.kind) {
         case "primary": return Theme.textOnAccent
         case "danger":  return Theme.danger
@@ -54,6 +58,8 @@ Button {
     Accessible.role: Accessible.Button
     Accessible.name: control.text.length > 0 ? control.text : control.toolTipText
     Accessible.description: control.text.length > 0 ? control.toolTipText : ""
+    Accessible.checkable: control.checkable
+    Accessible.checked: control.checked
 
     contentItem: RowLayout {
         spacing: 6
@@ -67,6 +73,7 @@ Button {
             color: control._fg
         }
         Text {
+            textFormat: Text.PlainText
             Layout.alignment: Qt.AlignVCenter
             visible: control.text.length > 0
             text: control.text
@@ -89,6 +96,7 @@ Button {
             if (control.kind === "danger" && control.enabled && (control.hovered || control.down))
                 return Theme.dangerSoft
             if (control.down) return Theme.border
+            if (control._on && control.enabled) return Theme.accentSoft
             if (control.hovered && control.enabled) return Theme.surfaceHover
             return control.kind === "secondary" ? Theme.surface : "transparent"
         }

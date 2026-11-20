@@ -16,7 +16,10 @@ _MAGIC_PLAIN = b"GFGP1"
 
 
 class SecretError(Exception):
-    """Stored sign-in data can't be read (another Windows account or PC, or a damaged file)."""
+    """Stored sign-in data can't be written or read (another Windows account or PC, or a damaged file).
+
+    The message suits the log; the app shows its own text.
+    """
 
 
 if sys.platform == "win32":
@@ -58,13 +61,13 @@ if sys.platform == "win32":
         result = _Blob()
         if not _CryptProtectData(ctypes.byref(source), "gfgRoyal Media Downloader sign-in", ctypes.byref(extra),
                                  None, None, _UI_FORBIDDEN, ctypes.byref(result)):
-            raise SecretError(f"Windows couldn't encrypt the sign-in (error {ctypes.get_last_error()})")
+            raise SecretError(f"Windows couldn't protect the sign-in on this PC (error {ctypes.get_last_error()})")
         return _MAGIC_DPAPI + _take(result)
 
     def unprotect(data: bytes, entropy: bytes) -> bytes:
         """Decrypt data protect() wrote for this Windows user."""
         if not data.startswith(_MAGIC_DPAPI):
-            raise SecretError("The sign-in file isn't in a format this app wrote")
+            raise SecretError("The saved sign-in is damaged; sign in again")
         source, _keep1 = _blob(data[len(_MAGIC_DPAPI):])
         extra, _keep2 = _blob(entropy)
         result = _Blob()
@@ -80,7 +83,7 @@ else:
     def unprotect(data: bytes, entropy: bytes) -> bytes:
         """Read data protect() wrote."""
         if not data.startswith(_MAGIC_PLAIN):
-            raise SecretError("The sign-in file isn't in a format this app wrote")
+            raise SecretError("The saved sign-in is damaged; sign in again")
         return data[len(_MAGIC_PLAIN):]
 
 

@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import QtMultimedia
 
 // The audio player along the bottom of the main window: cover, title and artist, previous, play,
-// next, shuffle and repeat, the position, volume, and speed. "Lyrics and queue" expands it into the
+// next, shuffle and repeat, the position, volume, and speed. "Lyrics and up next" expands it into the
 // Now playing view (synced lyrics and the play order). Media keys work while the app has focus.
 // Playback resumes where a song stopped last time, unless it was near the start or the end.
 Rectangle {
@@ -84,8 +84,10 @@ Rectangle {
                 }
             }
         }
+        // The player's own error text is for the log; the notice says what to do instead.
         onErrorOccurred: function (error, errorString) {
-            appController.notice.emit("This song can't be played here: " + (errorString || "unknown error"))
+            playerController.logPlaybackError(bar._path, errorString)
+            appController.notice.emit("This song can't be played here. In the Library, right-click it and choose Open in another player.")
         }
     }
 
@@ -116,6 +118,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 2
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: bar.title
                 elide: Text.ElideRight
@@ -125,6 +128,7 @@ Rectangle {
                 color: Theme.text
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text: bar.artist
@@ -207,7 +211,7 @@ Rectangle {
         AppButton {
             kind: "ghost"; compact: true
             iconName: bar.expanded ? "chevronDown" : "lyrics"
-            toolTipText: bar.expanded ? "Back to the app" : "Lyrics and queue"
+            toolTipText: bar.expanded ? "Back to the app" : "Lyrics and up next"
             onClicked: bar.expanded = !bar.expanded
         }
         AppButton {

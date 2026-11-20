@@ -22,6 +22,11 @@ _SPONSOR_CATEGORIES = {code for _, code in FormatDefaults.SPONSORBLOCK_CATEGORIE
 _TUPLE_FIELDS = {"sponsorblock_categories", "audio_langs"}
 
 
+def _gone(choice: str) -> str:
+    """The message for a saved choice the app no longer offers (an old preset, a hand-edited file)."""
+    return f"The {choice} you chose isn't available any more. Pick another one."
+
+
 @dataclass(frozen=True)
 class DownloadOptions:
     """How one download is saved. The defaults reproduce the original script's command-line behavior."""
@@ -68,53 +73,55 @@ class DownloadOptions:
     def validate(self) -> DownloadOptions:
         """Return self, or raise ValueError naming the first value that can't be used."""
         if self.kind not in ("video", "audio"):
-            raise ValueError("The download type must be video or audio")
+            raise ValueError("Choose Video or Audio only as the type.")
         if self.max_height < 0 or self.max_height > 10000:
-            raise ValueError("The resolution limit must be between 0 and 10000")
+            raise ValueError(_gone("quality"))
         if self.container not in FormatDefaults.CONTAINERS:
-            raise ValueError(f"Unknown container: {self.container}")
+            raise ValueError(_gone("file type"))
         if self.codec_profile not in FormatDefaults.CODEC_PROFILES:
-            raise ValueError(f"Unknown codec preference: {self.codec_profile}")
+            raise ValueError(_gone("compatibility setting"))
         if self.audio_format not in FormatDefaults.AUDIO_FORMATS:
-            raise ValueError(f"Unknown audio format: {self.audio_format}")
+            raise ValueError(_gone("audio format"))
         if self.audio_quality not in FormatDefaults.AUDIO_QUALITIES:
-            raise ValueError(f"Unknown audio quality: {self.audio_quality} kbps")
+            raise ValueError(_gone("audio quality"))
         if self.cover not in FormatDefaults.COVER_SHAPES:
-            raise ValueError(f"Unknown cover shape: {self.cover}")
+            raise ValueError(_gone("cover shape"))
         if self.audio_tracks not in FormatDefaults.AUDIO_TRACK_MODES:
-            raise ValueError(f"Unknown audio track choice: {self.audio_tracks}")
+            raise ValueError(_gone("audio track setting"))
         if self.kind == "video" and self.audio_tracks != "original":
             if not self.audio_langs:
-                raise ValueError("Choose at least one more audio language")
+                raise ValueError("Choose at least one more audio language, or keep the original language only.")
             if len(self.audio_langs) > MAX_AUDIO_TRACKS:
-                raise ValueError(f"Choose at most {MAX_AUDIO_TRACKS} audio languages")
+                raise ValueError(f"Choose at most {MAX_AUDIO_TRACKS} audio languages.")
             bad = [code for code in self.audio_langs if not _LANG_CODE.fullmatch(code)]
             if bad:
-                raise ValueError(f"Audio languages must look like en, es-419: {bad[0]}")
+                raise ValueError(f"\"{bad[0]}\" isn't a language code. Type short codes that look like es or pt-BR, "
+                                 "separated by commas.")
             if self.container not in ("mp4", "mkv"):
-                raise ValueError("Several audio tracks need an MP4 or MKV file")
+                raise ValueError("To keep more than one language, choose MP4 or MKV as the file type.")
         if self.subtitle_format not in FormatDefaults.SUBTITLE_FORMATS:
-            raise ValueError(f"Unknown subtitle format: {self.subtitle_format}")
+            raise ValueError(_gone("subtitle file type"))
         if self.subtitles not in FormatDefaults.SUBTITLE_MODES:
-            raise ValueError(f"Unknown subtitle choice: {self.subtitles}")
+            raise ValueError(_gone("subtitle setting"))
         if self.subtitles != "none" and not _LANGS.fullmatch(self.subtitle_langs):
-            raise ValueError("Subtitle languages must look like en.*,ur")
+            raise ValueError("Type subtitle languages as short codes separated by commas, without spaces, "
+                             "such as en.*,ur.")
         if self.sponsorblock not in FormatDefaults.SPONSORBLOCK_MODES:
-            raise ValueError(f"Unknown SponsorBlock choice: {self.sponsorblock}")
+            raise ValueError(_gone("SponsorBlock setting"))
         if self.sponsorblock != "off":
             unknown = [cat for cat in self.sponsorblock_categories if cat not in _SPONSOR_CATEGORIES]
             if unknown or not self.sponsorblock_categories:
-                raise ValueError("Choose SponsorBlock categories from the list")
+                raise ValueError("Pick at least one kind of part for SponsorBlock to mark or cut.")
         if self.filename_style not in DownloadDefaults.FILENAME_STYLES:
-            raise ValueError(f"Unknown filename style: {self.filename_style}")
+            raise ValueError(_gone("file name style"))
         if not 1 <= self.fragments <= DownloadDefaults.MAX_FRAGMENTS:
-            raise ValueError(f"Fragments must be from 1 to {DownloadDefaults.MAX_FRAGMENTS}")
+            raise ValueError(f"Parts at once must be from 1 to {DownloadDefaults.MAX_FRAGMENTS}.")
         if self.limit_rate < 0:
-            raise ValueError("The speed limit can't be negative")
+            raise ValueError("The speed limit can't be below zero.")
         if self.proxy:
             check_proxy(self.proxy)
         if self.items and not _ITEMS.fullmatch(self.items):
-            raise ValueError("Playlist items must look like 1:5,8")
+            raise ValueError("Type the numbers of the videos to download, such as 1:5,8 (1 to 5, and 8).")
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -159,23 +166,33 @@ class DownloadOptions:
 
     @property
     def profile(self) -> str:
-        """The archive suffix: the original script's "1080p" for video; "audio-mp3-320k" or "audio-flac" for audio."""
+        """The archive suffix: "1080p" or "best" for MP4 video (the original script's names, so its archives
+        still match), "best-mkv" or "720p-webm" for the other file types, which are files of their own;
+        "audio-mp3-320k" or "audio-flac" for audio."""
         if self.kind == "audio":
             if self.lossless_audio:
                 return f"audio-{self.audio_format}"
             return f"audio-{self.audio_format}-{self.audio_quality}k"
-        return f"{self.max_height}p" if self.max_height else "best"
+        quality = f"{self.max_height}p" if self.max_height else "best"
+        return quality if self.container == "mp4" else f"{quality}-{self.container}"
+
+    @property
+    def extension(self) -> str:
+        """The file extension a download with these options ends in ("" when the site decides: Original audio)."""
+        if self.kind == "audio":
+            return {"vorbis": "ogg", "best": ""}.get(self.audio_format, self.audio_format)
+        return self.container
 
 
 def check_proxy(proxy: str) -> str:
     """Return a proxy URL yt-dlp accepts, or raise ValueError."""
     parsed = urlparse(proxy)
     if parsed.scheme not in _PROXY_SCHEMES or not parsed.hostname:
-        raise ValueError("The proxy must look like http://host:port or socks5://host:port")
+        raise ValueError("Type the proxy address with its port, such as http://proxy:8080 or socks5://proxy:1080.")
     try:
         _ = parsed.port
     except ValueError as exc:
-        raise ValueError("The proxy port must be a number") from exc
+        raise ValueError("The proxy's port must be a number, such as 8080.") from exc
     return proxy
 
 

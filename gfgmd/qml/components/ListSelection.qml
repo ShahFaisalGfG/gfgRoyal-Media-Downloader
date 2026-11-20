@@ -31,6 +31,11 @@ QtObject {
         selection.ids = next
     }
 
+    // Let go of several rows at once (a group's files).
+    function drop(dropIds) {
+        selection.ids = selection.ids.filter(id => dropIds.indexOf(id) < 0)
+    }
+
     function setAll(allIds) {
         selection.ids = allIds.slice()
     }

@@ -56,7 +56,7 @@ def parse_netscape(text: str) -> list[Cookie]:
         domain, subdomains, path, secure, expires, name, value = fields
         try:
             expiry = int(float(expires)) if expires else 0
-        except ValueError:
+        except (ValueError, OverflowError):  # not a number, or infinite
             continue
         if not domain or not name:
             continue
@@ -199,10 +199,15 @@ class SignInVault:
 
 
 def import_cookies(text: str, site: Site, now: float | None = None) -> list[Cookie]:
-    """The site's unexpired cookies from a cookies.txt; raises ValueError when it holds no sign-in."""
+    """The site's unexpired cookies from a cookies.txt.
+
+    Raises ValueError when it holds no sign-in; the message is written for the user.
+    """
     cookies = drop_expired(for_site(parse_netscape(text), site), now)
     if not cookies:
-        raise ValueError(f"The file has no {site.label} cookies")
+        raise ValueError(f"This file has no {site.label} sign-in in it. Save it again from your browser "
+                         f"while signed in to {site.label}.")
     if not signed_in(cookies, site):
-        raise ValueError(f"The {site.label} cookies in the file aren't from a signed-in session")
+        raise ValueError(f"This file was saved while signed out of {site.label}. Sign in, save the file again, "
+                         "and import the new one.")
     return cookies

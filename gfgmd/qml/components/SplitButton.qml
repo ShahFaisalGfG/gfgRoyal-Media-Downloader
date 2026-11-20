@@ -12,6 +12,8 @@ RowLayout {
     property string toolTipText: ""
     // The cap's tooltip, which is also its accessible name.
     property string capToolTipText: ""
+    // What a screen reader calls the arrow (it can say whether the options are open).
+    property string capAccessibleName: ""
     property bool capOpen: false
 
     signal clicked()
@@ -34,6 +36,7 @@ RowLayout {
         iconName: split.capOpen ? "chevronUp" : "chevronDown"
         toolTipText: split.capToolTipText
         Accessible.role: Accessible.ButtonDropDown
+        Accessible.name: split.capAccessibleName || split.capToolTipText
         onClicked: split.capClicked()
     }
 }

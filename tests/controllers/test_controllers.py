@@ -143,6 +143,55 @@ def test_library_filters_and_recycle_bin(qapp, context, tmp_path):
     assert library.total == 1
 
 
+def test_library_groups_a_playlists_files_in_order(qapp, context):
+    """A playlist's folder is one row that opens into its files in the playlist's order; singles stand alone."""
+    root = context.download_root("video")
+    folder = root / "Road Trip"
+    folder.mkdir(parents=True)
+    paths = []
+    for position, name in ((2, "Second"), (1, "First"), (3, "Third")):
+        path = folder / f"{name}.mp4"
+        path.write_bytes(b"v")
+        paths.append(path)
+        context.store.add_history(str(path), title=name, kind="video", site="youtube", position=position,
+                                  group_key=str(folder).casefold(), group_title="Road Trip", finished=100.0 + position)
+    single = root / "Talk.mp4"
+    single.write_bytes(b"v")
+    context.store.add_history(str(single), title="Talk", kind="video", site="youtube", group_key="", finished=50.0)
+    library = LibraryController(context)
+    rows = [library.model.get(i) for i in range(library.model.count)]
+    assert [(row["rowType"], row["title"]) for row in rows] == [("group", "Road Trip"), ("file", "Talk")]
+    assert rows[0]["countText"] == "3 videos" and rows[0]["fileCount"] == 3 and library.total == 4
+    key = rows[0]["groupKey"]
+    library.setExpanded(key, True)
+    rows = [library.model.get(i) for i in range(library.model.count)]
+    assert [(row["title"], row["number"], row["inGroup"]) for row in rows] == [
+        ("Road Trip", 0, False), ("First", 1, True), ("Second", 2, True), ("Third", 3, True), ("Talk", 0, False)]
+    assert library.groupPaths(key) == [str(folder / "First.mp4"), str(folder / "Second.mp4"), str(folder / "Third.mp4")]
+    assert len(library.groupIds(key)) == 3
+    # A search lists the group's matching files, open.
+    library.setExpanded(key, False)
+    library.setFilters("third", "", "")
+    rows = [library.model.get(i) for i in range(library.model.count)]
+    assert [(row["rowType"], row["title"]) for row in rows] == [("group", "Road Trip"), ("file", "Third")]
+
+
+def test_library_works_out_the_groups_of_older_files(qapp, context):
+    """Files saved before groups (or by 1.0.0) are grouped by their folder under the download folder."""
+    root = context.download_root("video")
+    channel = root / "Some Channel" / "Videos"
+    channel.mkdir(parents=True)
+    clip, loose = channel / "Clip.mp4", root / "Loose.mp4"
+    for path in (clip, loose):
+        path.write_bytes(b"v")
+    clip_id = context.store.add_history(str(clip), title="Clip", kind="video")
+    loose_id = context.store.add_history(str(loose), title="Loose", kind="video")
+    assert context.store.history_record(clip_id)["group_key"] is None
+    LibraryController(context)
+    assert context.store.history_record(clip_id)["group_title"] == "Some Channel · Videos"
+    assert context.store.history_record(loose_id)["group_key"] == ""
+
+
 def test_library_select_all_and_play_the_selection(qapp, context, tmp_path):
     """Select all takes every file the filters show; Play takes the picked files still there, newest first."""
     older, newer, gone = tmp_path / "older.mp3", tmp_path / "newer.mp4", tmp_path / "gone.mp3"
@@ -182,6 +231,44 @@ def test_subscription_starts_from_new_uploads_then_queues_them(qapp, context, pa
     subs.shutdown()
 
 
+def test_a_playlist_subscription_reads_the_whole_list(qapp, context, paused_queue, fake_ytdlp, tmp_path):
+    """Its first videos downloaded before, a playlist still learns its name, and a video at its end
+    (where new ones are added) is found: playlists are read whole, not stopped at a known video."""
+    from gfgmd.controllers.queue_ctrl import base_options
+    subs = SubscriptionsController(context, paused_queue, Notifier(lambda: None, lambda p: None))
+    url = "https://www.youtube.com/playlist?list=PLfake"
+    source = source_from_url(url)
+    archive = archive_path(Path(load_settings()["downloads"]["folder"]), source, base_options(load_settings()).profile)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_text("youtube nnnnnnnnnn3\nyoutube nnnnnnnnnn1\n", encoding="utf-8")
+    with patch.object(subscriptions_ctrl, "run_to_completion", fake_runner(fake_ytdlp + ["--paths", str(tmp_path)])):
+        assert subs.add(url, {}, 6, False, True)
+        assert wait_for(qapp, lambda: subs.model.count == 1 and "Watching" in subs.model.get(0)["resultText"])
+        assert subs.model.get(0)["title"] == "Fake Channel - Videos"  # its own name, not its link
+        archive.write_text("youtube nnnnnnnnnn3\nyoutube nnnnnnnnnn1\n", encoding="utf-8")  # "ooooooooooo" is new
+        subs.checkNow(context.store.subscriptions()[0]["id"])
+        assert wait_for(qapp, lambda: context.store.jobs() != [])
+    job = context.store.jobs()[0]
+    assert job["url"] == "https://www.youtube.com/watch?v=ooooooooooo" and job["folder"] == "Fake Channel - Videos"
+    subs.shutdown()
+
+
+def test_importing_twice_keeps_existing_subscriptions_as_they_are(qapp, context, paused_queue, fake_ytdlp, tmp_path):
+    """A second import doesn't count a watched channel again or start it over (which would mark its new
+    uploads as downloaded)."""
+    subs = SubscriptionsController(context, paused_queue, Notifier(lambda: None, lambda p: None))
+    notices = []
+    subs.notice.connect(notices.append)
+    takeout = "Channel Id,Channel Url,Channel Title\nUCfake,http://www.youtube.com/channel/UCfake,Fake\n"
+    with patch.object(subscriptions_ctrl, "run_to_completion", fake_runner(fake_ytdlp + ["--paths", str(tmp_path)])):
+        assert subs.importTakeout(takeout) == 1
+        assert wait_for(qapp, lambda: subs.model.count == 1 and "Watching" in subs.model.get(0)["resultText"])
+        assert subs.importTakeout(takeout) == 0
+    assert notices[-1] == "Subscribed to 0 channels. 1 was already in your list."
+    assert len(context.store.subscriptions()) == 1
+    subs.shutdown()
+
+
 def test_subscription_rejects_single_videos(qapp, context, paused_queue):
     subs = SubscriptionsController(context, paused_queue, Notifier(lambda: None, lambda p: None))
     notices = []
@@ -192,6 +279,18 @@ def test_subscription_rejects_single_videos(qapp, context, paused_queue):
     assert exported["subscriptions"] == []
     assert subs.importJson("not json") == 0
     subs.shutdown()
+
+
+def test_subscribe_says_why_a_link_cant_be_used(qapp, context, paused_queue, fake_ytdlp, tmp_path):
+    """Not a link, a single video, or one already watched: each is named before anything is added."""
+    subs = SubscriptionsController(context, paused_queue, Notifier(lambda: None, lambda p: None))
+    assert "https://" in subs.linkProblem("not-a-link")
+    assert "not a single video" in subs.linkProblem("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+    assert subs.linkProblem("www.youtube.com/@fake/videos") == ""  # typed without https:// is fine
+    with patch.object(subscriptions_ctrl, "run_to_completion", fake_runner(fake_ytdlp + ["--paths", str(tmp_path)])):
+        assert subs.add("https://www.youtube.com/@fake/videos", {}, 6, False, True)
+        assert wait_for(qapp, lambda: subs.model.count == 1)
+    assert subs.linkProblem("https://www.youtube.com/@fake/videos") == "You're already subscribed to this."
 
 
 # ── Sign-ins ──────────────────────────────────────────────────────────────
@@ -252,6 +351,26 @@ def test_companion_cookies_and_other_sites(qapp, context):
     signins.shutdown()
 
 
+# ── Tray ──────────────────────────────────────────────────────────────────
+
+def test_closing_to_the_tray_says_so_once(qapp, monkeypatch):
+    """The first close to the tray says the app goes on running there; later closes, or with
+    notifications off, say nothing."""
+    shown: list[str] = []
+    notifier = Notifier(lambda: None, lambda path: None)
+    monkeypatch.setattr(notifier, "notify", lambda title, body, path="": shown.append(title))
+    settings = get_default_settings()
+    settings["notifications"]["enabled"] = False
+    save_settings(settings)
+    notifier.tell_once_in_tray()
+    assert shown == [] and not load_settings()["tray"]["told_running"]
+    settings["notifications"]["enabled"] = True
+    save_settings(settings)
+    notifier.tell_once_in_tray()
+    notifier.tell_once_in_tray()
+    assert len(shown) == 1 and "still running" in shown[0] and load_settings()["tray"]["told_running"]
+
+
 # ── Preferences ───────────────────────────────────────────────────────────
 
 def test_preferences_save_and_presets(qapp, context):
@@ -288,13 +407,17 @@ def test_refused_youtube_sign_in_is_marked_for_signing_in_again(qapp, context, t
 
 def test_every_row_value_is_a_model_role(context, tmp_path):
     """A value missing from a model's roles never reaches QML, and a delegate requiring it isn't created."""
-    from gfgmd.controllers import library_ctrl, queue_ctrl
+    from gfgmd.controllers import library_ctrl, queue_rows
 
     clip = tmp_path / "Clip (720p).mp4"
     clip.write_bytes(b"v")
     context.store.add_history(str(clip), title="Clip", kind="video", site="youtube")
     record = context.store.history()[0]
     assert set(library_ctrl._row(record, "YouTube")) == set(library_ctrl.ROLES)
-    job_id = context.store.add_job("https://youtu.be/x", "video", "x", "youtube", {"kind": "video"}, str(tmp_path))
-    job_row = queue_ctrl._job_row(context.store.job(job_id), None, "YouTube")
-    assert set(job_row) == set(queue_ctrl.ROLES)
+    assert set(library_ctrl._group_row("k", [record], "YouTube", True)) == set(library_ctrl.ROLES)
+    job_id = context.store.add_job("https://youtu.be/x", "playlist", "x", "youtube", {"kind": "video"}, str(tmp_path),
+                                   items=[{"id": "a", "title": "A"}, {"id": "b", "title": "B"}])
+    job = context.store.job(job_id)
+    assert set(queue_rows.job_row(job, "YouTube", "", {}, True, "video")) == set(queue_rows.ROLES)
+    item = context.store.job_items(job_id)[0]
+    assert set(queue_rows.entry_row(job, item, 1, "video", "", None)) == set(queue_rows.ROLES)

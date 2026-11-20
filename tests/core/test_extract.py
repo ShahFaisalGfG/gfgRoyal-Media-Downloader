@@ -152,7 +152,7 @@ def test_failures_name_the_cause(tmp_path: Path, video: Path) -> None:
     full = run(spec_for(video, tmp_path), fake_ffmpeg(1, ("Error: No space left on device",)))
     assert full.state == "disk_full" and full.failure.category.key == "disk_full"
     broken = run(spec_for(video, tmp_path), fake_ffmpeg(1, ("Invalid data found when processing input",)))
-    assert broken.failure.category.key == "postprocess" and "Invalid data" in broken.failure.text
+    assert broken.failure.category.key == "extract_failed" and "Invalid data" in broken.failure.text
     silent = run(spec_for(video, tmp_path), fake_ffmpeg(), VideoProbe(duration=5.0))
     assert silent.state == "failed" and silent.failure.category.key == "no_audio"
     gone = run(spec_for(tmp_path / "missing.mp4", tmp_path), fake_ffmpeg())
@@ -169,3 +169,16 @@ def test_a_stopped_extraction_reports_its_unfinished_file(tmp_path: Path, video:
     result = extractor.run()
     partial = tmp_path / "Music" / ".incomplete" / "Morning Mix" / "Clip [abc] (requested-audio-mp3-320k).mp3"
     assert result.state == "stopped" and extractor.partial_files() == {str(partial)} and partial.is_file()
+
+
+def test_an_extraction_counts_songs(tmp_path: Path, video: Path) -> None:
+    result = AudioExtractor(spec_for(video, tmp_path), lambda: TOOLS, runner=fake_ffmpeg(0),
+                            probe=lambda ffprobe, path: PROBE).run()
+    assert result.state == "done" and result.message == "1 song saved"
+
+
+def test_an_extracted_song_drops_what_the_title_says_about_the_video() -> None:
+    from gfgmd.core.extract import audio_stem, song_tags
+    assert audio_stem(Path("C:/V/Song (Official Video) (1080p).mp4")) == "Song"
+    probe = VideoProbe(200.0, 1, "aac", -1, -1, {"title": "Artist - Song (Lyrics) [HD]"})
+    assert song_tags(probe, "", "Channel", "")["title"] == "Song" and song_tags(probe, "", "Channel", "")["artist"] == "Artist"

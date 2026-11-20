@@ -19,9 +19,9 @@ QtObject {
     readonly property color titleBar:     dark ? "#111317" : "#e9ebef"
     readonly property color border:       dark ? "#343a46" : "#d6dae1"
     readonly property color borderStrong: dark ? "#4a5263" : "#b7bec9"
-    // Outlines of text boxes, combo boxes, and switch tracks: at least 3:1 against surface
-    // (WCAG 1.4.11), where border is kept light for card edges and dividers.
-    readonly property color inputBorder:  dark ? "#646d7c" : "#7d8694"
+    // Outlines of text boxes, combo boxes, and switch tracks: at least 3:1 against surface and
+    // surfaceHover (WCAG 1.4.11), where border is kept light for card edges and dividers.
+    readonly property color inputBorder:  dark ? "#7a8394" : "#7d8694"
 
     // ── Text ─────────────────────────────────────────────────────────────────
     readonly property color text:      dark ? "#e8eaee" : "#1a1d23"
@@ -48,6 +48,13 @@ QtObject {
     // A media thumbnail's kind badge sits on a picture, so it is dark in both themes.
     readonly property color mediaBadge:     "#d914161b"
     readonly property color mediaBadgeText: "#ffffff"
+    // The video player's text and controls sit on the picture under a dark shade, so they are
+    // light in both themes; the hover, checked, and pressed fills are white washes over the video.
+    readonly property color overlayText:    "#ffffff"
+    readonly property color overlayAccent:  "#fda4af"
+    readonly property color overlayHover:   "#26ffffff"
+    readonly property color overlayChecked: "#33ffffff"
+    readonly property color overlayPressed: "#40ffffff"
     // Toasts use the opposite theme's colors so they stand out from the window.
     readonly property color inverseSurface: dark ? "#e8eaee" : "#22262e"
     readonly property color inverseText:    dark ? "#1a1d23" : "#ffffff"

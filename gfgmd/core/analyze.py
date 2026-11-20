@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterable
 from gfgmd.core.command import Auth, analyze_command
 from gfgmd.core.errors import Failure, classify
 from gfgmd.core.options import DownloadOptions
+from gfgmd.core.progress import is_container, pick_thumbnail, title_from_url
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.tools import ToolSet
 
@@ -83,17 +84,6 @@ class Analysis:
         return self.live_status in ("is_live", "is_upcoming")
 
 
-def _thumbnail(info: dict[str, Any]) -> str:
-    """A medium-size thumbnail URL (about 320 pixels wide when the site lists sizes)."""
-    thumbs = [thumb for thumb in info.get("thumbnails") or [] if isinstance(thumb, dict) and thumb.get("url")]
-    sized = [thumb for thumb in thumbs if isinstance(thumb.get("width"), int)]
-    if sized:
-        return str(min(sized, key=lambda thumb: abs(int(thumb["width"]) - 320))["url"])
-    if thumbs:
-        return str(thumbs[-1]["url"])
-    return str(info.get("thumbnail") or "")
-
-
 def _number(value: Any) -> float:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
 
@@ -107,25 +97,24 @@ def parse_info(info: dict[str, Any], options: DownloadOptions | None = None) -> 
         extractor=str(info.get("extractor_key") or info.get("extractor") or ""),
         webpage_url=str(info.get("webpage_url") or info.get("original_url") or ""),
         uploader=str(info.get("uploader") or info.get("channel") or info.get("playlist_uploader") or ""),
-        thumbnail=_thumbnail(info),
+        thumbnail=pick_thumbnail(info),
         duration=_number(info.get("duration")),
         live_status=str(info.get("live_status") or ""),
         release_timestamp=_number(info.get("release_timestamp")),
     )
     if playlist:
         entries = [entry for entry in info.get("entries") or [] if isinstance(entry, dict)]
-        result.selectable = not any(entry.get("_type") == "playlist" or str(entry.get("ie_key", "")).endswith("Tab")
-                                    for entry in entries)
+        result.selectable = not any(is_container(entry) for entry in entries)
         result.entries = [
             Entry(
                 id=str(entry.get("id") or ""),
-                title=str(entry.get("title") or entry.get("id") or "Untitled"),
+                title=str(entry.get("title") or title_from_url(str(entry.get("url") or "")) or "Untitled"),
                 index=int(entry.get("playlist_index") or position),
                 duration=_number(entry.get("duration")),
                 url=str(entry.get("url") or entry.get("webpage_url") or ""),
                 live_status=str(entry.get("live_status") or ""),
                 availability=str(entry.get("availability") or ""),
-                thumbnail=_thumbnail(entry),
+                thumbnail=pick_thumbnail(entry),
             )
             for position, entry in enumerate(entries, start=1) if entry.get("id")
         ]

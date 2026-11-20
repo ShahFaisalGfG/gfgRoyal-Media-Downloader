@@ -22,6 +22,7 @@ ColumnLayout {
         spacing: Theme.spaceMd
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: !root.fillControl
             Layout.preferredWidth: root.fillControl ? -1 : 1
             text: root.label
@@ -41,6 +42,7 @@ ColumnLayout {
     }
 
     Text {
+        textFormat: Text.PlainText
         visible: root.hint.length > 0
         Layout.fillWidth: true
         text: root.hint

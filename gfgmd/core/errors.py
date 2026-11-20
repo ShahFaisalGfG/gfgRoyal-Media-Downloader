@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Iterable
 
@@ -20,12 +21,22 @@ class Policy(Enum):
 
 @dataclass(frozen=True)
 class Category:
-    """One kind of failure and what the app does about it."""
+    """One kind of failure and what the app does about it.
+
+    `message` is what the user reads while the app handles it (for a temporary failure, while it
+    waits to try again); `final_message`, when given, replaces it once the app has given up.
+    """
 
     key: str
     policy: Policy
     message: str
     action: str = ""  # the button the UI offers: signin, update_tools, choose_folder, repair_tools
+    final_message: str = ""
+
+    @property
+    def final(self) -> str:
+        """What the user reads once nothing more will be tried."""
+        return self.final_message or self.message
 
 
 @dataclass(frozen=True)
@@ -38,31 +49,55 @@ class Failure:
 
 
 CATEGORIES = {category.key: category for category in (
-    Category("auth_required", Policy.STOP, "This video needs you to sign in to the site", "signin"),
-    Category("cookies_stale", Policy.STOP, "The saved sign-in has expired; sign in again", "signin"),
-    Category("bot_check", Policy.UPDATE, "The site asked to confirm you are not a bot", "signin"),
-    Category("rate_limited", Policy.RETRY, "The site is limiting requests; waiting before trying again"),
-    Category("private", Policy.SKIP, "Private video"),
-    Category("private_signin", Policy.STOP, "This is private. Sign in with an account that can see it", "signin"),
-    Category("no_video", Policy.SKIP, "This post has only pictures, no video"),
-    Category("removed", Policy.SKIP, "The video was removed or is unavailable"),
-    Category("geo", Policy.SKIP, "Not available in your country"),
-    Category("drm", Policy.SKIP, "Protected with DRM, which can't be downloaded"),
-    Category("format", Policy.SKIP, "No format matches the chosen quality and type"),
-    Category("unsupported", Policy.STOP, "This link isn't supported"),
-    Category("extractor_broken", Policy.UPDATE, "yt-dlp couldn't read the page; it may need an update",
-             "update_tools"),
-    Category("disk_full", Policy.PAUSE_QUEUE, "The disk is full", "choose_folder"),
-    Category("access_denied", Policy.STOP, "Windows refused to write to the download folder", "choose_folder"),
-    Category("file_locked", Policy.RETRY, "Another program has the file open"),
-    Category("tools", Policy.STOP, "A required tool is missing or damaged", "repair_tools"),
-    Category("upcoming", Policy.STOP, "The stream or premiere hasn't started yet"),
-    Category("postprocess", Policy.RETRY, "Converting or merging failed"),
+    Category("auth_required", Policy.STOP, "Sign in to this site to download this.", "signin"),
+    Category("cookies_stale", Policy.STOP, "Your sign-in to this site has expired. Sign in again.", "signin"),
+    Category("bot_check", Policy.UPDATE, "The site wants to check that you aren't a bot. Signing in to the site "
+             "usually fixes this.", "signin"),
+    Category("rate_limited", Policy.RETRY, "The site is getting too many downloads from you, so the app is waiting "
+             "before trying again.", final_message="The site turned away too many downloads. Try again later."),
+    Category("private", Policy.SKIP, "This is private."),
+    Category("private_signin", Policy.STOP, "This is private. Sign in with an account that can see it.", "signin"),
+    Category("no_video", Policy.SKIP, "This post has only pictures, no video."),
+    Category("removed", Policy.SKIP, "This was removed or isn't available."),
+    Category("geo", Policy.SKIP, "This isn't available in your country."),
+    Category("drm", Policy.SKIP, "The site copy-protects this, so it can't be downloaded."),
+    Category("format", Policy.SKIP, "This isn't offered in the quality or type you chose. Pick another and try again."),
+    # The site gave nothing at all to download (not a choice the user made).
+    Category("no_formats", Policy.SKIP, "The site offered nothing to download here. It may be protected or blocked "
+             "in your country."),
+    Category("empty_tab", Policy.SKIP, "This channel has nothing in that tab."),
+    Category("unsupported", Policy.STOP, "The app can't download from this link. Check that it opens a video, song, "
+             "or playlist."),
+    Category("extractor_broken", Policy.UPDATE, "The site changed and the app couldn't read it. Update the download "
+             "tools, then try again.", "update_tools"),
+    Category("disk_full", Policy.PAUSE_QUEUE, "The drive is full. Free up some space or choose another folder.",
+             "choose_folder"),
+    Category("access_denied", Policy.STOP, "The app isn't allowed to save in this folder. Choose another folder.",
+             "choose_folder"),
+    Category("folder_missing", Policy.STOP, "The download folder can't be reached. Plug in its drive or choose "
+             "another folder.", "choose_folder"),
+    Category("file_locked", Policy.RETRY, "Another program is using the file; trying again.",
+             final_message="Another program kept the file open. Close it and try again."),
+    Category("tools", Policy.STOP, "The download tools are missing or damaged. Update them, then try again.",
+             "repair_tools"),
+    Category("upcoming", Policy.STOP, "This stream hasn't started yet. Try again once it starts, or choose to wait "
+             "for it."),
+    Category("postprocess", Policy.RETRY, "The file couldn't be finished after downloading; trying again.",
+             final_message="The file couldn't be finished after downloading. Try again."),
     # Extracting the audio of a downloaded video (no site involved).
-    Category("no_audio", Policy.STOP, "The video has no sound to extract"),
-    Category("source_missing", Policy.STOP, "The video file is no longer there"),
-    Category("network", Policy.RETRY, "The connection failed; trying again"),
-    Category("unknown", Policy.RETRY, "The download failed"),
+    Category("no_audio", Policy.STOP, "The video has no audio to extract."),
+    Category("source_missing", Policy.STOP, "The video file is no longer there."),
+    Category("bad_video", Policy.STOP, "The video file couldn't be read. It may be damaged or open in another program."),
+    Category("extract_failed", Policy.STOP, "The audio couldn't be extracted. Try again; if it fails again, the video "
+             "file may be damaged."),
+    # A video's download server that stopped answering (see JobExecutor's stall check).
+    Category("stalled", Policy.RETRY, "The download server didn't answer; trying again soon.",
+             final_message="The download server didn't answer. Try again later."),
+    Category("network", Policy.RETRY, "The connection dropped; trying again.",
+             final_message="The connection kept dropping. Check your internet connection and try again."),
+    Category("unknown", Policy.RETRY, "Something went wrong; trying again.", "update_tools",
+             final_message="Something went wrong with this download. Try again; if it keeps happening, update the "
+             "download tools."),
 )}
 
 # Ordered: the first matching rule wins, so specific messages come before general ones.
@@ -77,7 +112,9 @@ _RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple((key, re.compile(pattern
     ("private", r"private video|video is private|this playlist is private"),
     ("no_video", r"there(?:.?s| is) no video in this|no video could be found|(?:post|tweet|pin) (?:has|contains) no video|"
                  r"(?:photo|image|slideshow) posts? (?:are|is) not supported"),
+    ("empty_tab", r"this channel does not have an? \w+ tab"),
     ("removed", r"has been removed|video unavailable|this video is unavailable|account .* terminated|"
+                r"live stream recording is not available|this live event has ended|"
                 r"does not exist|no longer available|has been deleted|copyright claim|"
                 r"this channel does not have|HTTP Error 404"),
     ("geo", r"not available in your country|geo.?restrict|blocked it in your country|"
@@ -85,7 +122,8 @@ _RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple((key, re.compile(pattern
     ("drm", r"\bDRM\b"),
     ("upcoming", r"will begin in|premieres? in|this live event will begin|scheduled to start|"
                  r"live stream (?:has )?not (?:yet )?started"),
-    ("format", r"requested format is not available|no video formats found|no formats? (?:found|available)"),
+    ("format", r"requested format is not available"),
+    ("no_formats", r"no video formats found|no formats? (?:found|available)"),
     ("unsupported", r"unsupported url|is not a valid url|no suitable (?:extractor|infoextractor)"),
     ("rate_limited", r"HTTP Error 429|too many requests|rate.?limit"),
     ("disk_full", r"no space left|not enough space|disk full|WinError 112|errno 28"),
@@ -144,6 +182,21 @@ class Verdict:
 
 
 _SEVERITY = (Policy.PAUSE_QUEUE, Policy.STOP, Policy.UPDATE, Policy.RETRY, Policy.SKIP)
+
+
+def folder_failure(error: OSError) -> Failure:
+    """A download folder that can't be written: the drive is full, the app isn't allowed, or the folder
+    isn't there (an unplugged drive, a share that went away)."""
+    if error.errno == errno.ENOSPC or getattr(error, "winerror", None) in (39, 112):
+        return Failure(CATEGORIES["disk_full"], str(error))
+    if isinstance(error, PermissionError):
+        return Failure(CATEGORIES["access_denied"], str(error))
+    return Failure(CATEGORIES["folder_missing"], str(error))
+
+
+def given_up(failure: Failure) -> Failure:
+    """The same failure, now skipped: a playlist's video that failed this way attempt after attempt."""
+    return replace(failure, category=replace(failure.category, policy=Policy.SKIP))
 
 
 def judge(failures: Iterable[Failure]) -> Verdict:

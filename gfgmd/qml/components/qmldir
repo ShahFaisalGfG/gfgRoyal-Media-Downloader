@@ -11,10 +11,14 @@ Card 1.0 Card.qml
 ChoiceMenu 1.0 ChoiceMenu.qml
 EmptyState 1.0 EmptyState.qml
 ExtractAudioDialog 1.0 ExtractAudioDialog.qml
+EntryItem 1.0 EntryItem.qml
 EntryList 1.0 EntryList.qml
+FocusScroll 1.0 FocusScroll.qml
 FormRow 1.0 FormRow.qml
 Icon 1.0 Icon.qml
 JobItem 1.0 JobItem.qml
+LibraryFileItem 1.0 LibraryFileItem.qml
+LibraryGroupItem 1.0 LibraryGroupItem.qml
 LinkField 1.0 LinkField.qml
 ListSelection 1.0 ListSelection.qml
 NowPlaying 1.0 NowPlaying.qml

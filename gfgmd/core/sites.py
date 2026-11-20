@@ -122,12 +122,37 @@ def site_by_key(key: str) -> Site | None:
     return _BY_KEY.get(key)
 
 
+# Names of well-known sites the app keeps no profile for, matched on the domain or a parent of it; any
+# other site is named by its host.
+_NAMES = {
+    "bandcamp.com": "Bandcamp", "bilibili.com": "Bilibili", "b23.tv": "Bilibili", "archive.org": "Internet Archive",
+    "streamable.com": "Streamable", "odysee.com": "Odysee", "rumble.com": "Rumble", "kick.com": "Kick",
+    "mixcloud.com": "Mixcloud", "audiomack.com": "Audiomack", "tumblr.com": "Tumblr", "imgur.com": "Imgur",
+    "bitchute.com": "BitChute", "ted.com": "TED", "nebula.tv": "Nebula", "loom.com": "Loom", "9gag.com": "9GAG",
+    "threads.net": "Threads", "threads.com": "Threads", "linkedin.com": "LinkedIn", "vk.com": "VK", "ok.ru": "OK",
+    "rutube.ru": "RUTUBE", "nicovideo.jp": "Niconico", "bbc.co.uk": "BBC", "cnn.com": "CNN", "nytimes.com": "The New York Times",
+    "dropbox.com": "Dropbox", "drive.google.com": "Google Drive", "patreon.com": "Patreon", "spotify.com": "Spotify",
+    "deezer.com": "Deezer", "tidal.com": "TIDAL", "apple.com": "Apple", "kakao.com": "Kakao", "naver.com": "NAVER",
+    "weibo.com": "Weibo", "douyin.com": "Douyin", "kuaishou.com": "Kuaishou", "likee.video": "Likee",
+    "triller.co": "Triller", "trovo.live": "Trovo", "dlive.tv": "DLive", "vidio.com": "Vidio", "iq.com": "iQIYI",
+    "youku.com": "Youku", "peertube.tv": "PeerTube", "jiosaavn.com": "JioSaavn", "gaana.com": "Gaana",
+}
+
+
+def site_name(host: str) -> str:
+    """A site's name for its host: a well-known one's name, else the host itself."""
+    host = host.lower().rstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    return next((name for domain, name in _NAMES.items() if host == domain or host.endswith("." + domain)), host)
+
+
 def generic_site(host: str) -> Site:
     """A profile for a site the app has no data for, keyed by its registrable-looking domain."""
     host = host.lower().rstrip(".")
     if host.startswith("www."):
         host = host[4:]
-    return Site(host, host, (host,), ("." + host,), f"https://{host}/")
+    return Site(host, site_name(host), (host,), ("." + host,), f"https://{host}/")
 
 
 def resolve_site(host: str) -> Site:

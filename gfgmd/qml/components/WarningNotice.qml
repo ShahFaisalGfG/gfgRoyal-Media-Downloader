@@ -32,6 +32,7 @@ Rectangle {
             color: Theme.warning
         }
         Text {
+            textFormat: Text.PlainText
             id: message
             Layout.fillWidth: true
             text: notice.text

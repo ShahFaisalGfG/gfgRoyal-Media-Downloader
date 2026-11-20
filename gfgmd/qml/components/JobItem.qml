@@ -5,13 +5,16 @@ import QtQuick.Layouts
 
 // One download in the queue: thumbnail, title, where it stands, and its buttons. Status is always
 // spelled out in text with an icon, never by color alone; a failure that the user can fix offers
-// its fix as a button (sign in, update the tools, choose another folder).
+// its fix as a button (sign in, update the tools, choose another folder). A playlist's button shows
+// or hides its videos, listed under it (EntryItem).
 Rectangle {
     id: job
 
     signal fixRequested(int jobId, string action)
     signal menuRequested(int jobId)
-    signal itemsRequested(int jobId, string title)
+    signal expandToggled(int jobId, bool expanded)
+    // Play a finished playlist's saved videos in order.
+    signal playAllRequested(int jobId)
     // Ctrl+click or its mark picks this download; Shift+click picks the rows up to it.
     signal selectToggled(int jobId, int index)
     signal rangeRequested(int index)
@@ -33,7 +36,8 @@ Rectangle {
     required property bool canPause
     required property bool canResume
     required property bool canRetry
-    required property bool hasItems
+    required property int entryCount
+    required property bool expanded
     required property string lastFile
     required property string format
     property bool current: false
@@ -41,6 +45,8 @@ Rectangle {
     // Some download is picked, so every row shows its mark.
     property bool selecting: false
 
+    // The keyboard's current row in a list that has focus.
+    readonly property bool _focused: job.current && !!job.ListView.view && job.ListView.view.activeFocus
     readonly property bool _running: job.jobState === "running" || job.jobState === "retry_wait"
     readonly property color _tone: {
         switch (job.jobState) {
@@ -71,12 +77,14 @@ Rectangle {
     implicitHeight: 76
     radius: Theme.radius
     color: job.selected ? Theme.accentSoft : hover.hovered || job.current ? Theme.surfaceHover : "transparent"
-    border.width: job.current && job.ListView.view && job.ListView.view.activeFocus ? 2 : 0
+    border.width: job._focused ? 2 : 0
     border.color: Theme.focusRing
 
     Accessible.role: Accessible.ListItem
     Accessible.name: job.title + ", " + (job.kind === "audio" ? "audio" : "video") + ", " + job.statusText
         + (job.detail ? ", " + job.detail : "")
+    Accessible.selectable: true
+    Accessible.selected: job.selected
 
     HoverHandler { id: hover }
 
@@ -95,7 +103,7 @@ Rectangle {
 
             SelectMark {
                 checked: job.selected
-                shown: job.selecting || hover.hovered
+                shown: job.selecting || hover.hovered || job._focused
                 itemName: job.title
                 onToggled: job.selectToggled(job.jobId, job.index)
             }
@@ -106,6 +114,7 @@ Rectangle {
             spacing: 3
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: job.title
                 font.family: Theme.fontFamily
@@ -128,6 +137,7 @@ Rectangle {
                     color: job._tone
                 }
                 Text {
+                    textFormat: Text.PlainText
                     text: job.statusText
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontCaption
@@ -135,6 +145,7 @@ Rectangle {
                     color: job._tone
                 }
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: [job.itemText, job.detail].filter(part => part.length > 0).join("  ·  ")
                     font.family: Theme.fontFamily
@@ -163,19 +174,21 @@ Rectangle {
             onClicked: job.fixRequested(job.jobId, job.action)
         }
         AppButton {
-            visible: job.hasItems
+            visible: job.entryCount > 0
             kind: "ghost"
             compact: true
-            iconName: "list"
-            toolTipText: "Show the videos in this download"
-            onClicked: job.itemsRequested(job.jobId, job.title)
+            text: job.entryCount + (job.kind === "audio" ? " songs" : " videos")
+            iconName: job.expanded ? "chevronDown" : "chevronRight"
+            toolTipText: (job.expanded ? "Hide the " : "Show the ") + text + " (Right and Left arrows)"
+            Accessible.name: (job.expanded ? "Hide the " : "Show the ") + text
+            onClicked: job.expandToggled(job.jobId, !job.expanded)
         }
         AppButton {
             visible: job.canPause
             kind: "ghost"
             compact: true
             iconName: "pause"
-            toolTipText: "Pause (Space); partial files are kept and it continues from where it stopped"
+            toolTipText: "Pause (Space). It continues from where it stopped."
             onClicked: queueController.pause(job.jobId)
         }
         AppButton {
@@ -192,7 +205,7 @@ Rectangle {
             compact: true
             iconName: "play"
             toolTipText: "Play what this download saved"
-            onClicked: playerController.play(job.lastFile)
+            onClicked: job.entryCount > 0 ? job.playAllRequested(job.jobId) : playerController.play(job.lastFile)
         }
         AppButton {
             visible: job.canRetry && job.jobState !== "done"

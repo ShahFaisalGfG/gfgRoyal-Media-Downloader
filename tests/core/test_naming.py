@@ -101,6 +101,34 @@ def test_inside_root(tmp_path: Path) -> None:
     assert not naming.inside_root(tmp_path / "rootx" / "b.mp4", root)
 
 
+def test_paths_elsewhere_are_refused_without_opening_them(tmp_path: Path) -> None:
+    """A network path or another drive fails the text check, so it is never resolved (which would open it)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    with patch.object(Path, "resolve", side_effect=AssertionError("resolved")):
+        assert not naming.inside_root(Path("//host/share/a.mp3"), root)
+        assert not naming.inside_root(Path(r"\\host\share\a.mp3"), root)
+        assert not naming.inside_root(Path("Z:/elsewhere/a.mp3"), root)
+
+
+def test_finalize_keeps_the_video_when_a_sidecar_is_held_open(tmp_path: Path) -> None:
+    """A subtitle file another program holds keeps its old name; the video is renamed and reported."""
+    staged = tmp_path / "Talk [aaaaaaaaaaa] (requested-1080p).mp4"
+    staged.write_bytes(b"v")
+    sidecar = tmp_path / "Talk [aaaaaaaaaaa] (requested-1080p).en.srt"
+    sidecar.write_text("1")
+    real_rename = Path.rename
+
+    def rename(self: Path, target: Path) -> Path:
+        if self.suffix == ".srt":
+            raise PermissionError(32, "The process cannot access the file")
+        return real_rename(self, target)
+
+    with patch.object(Path, "rename", rename), patch.object(naming, "video_quality", return_value=720):
+        final = naming.finalize_file(staged, tmp_path.parent, "ffprobe", label_quality=True)
+    assert final.name == "Talk (720p).mp4" and final.exists() and sidecar.exists()
+
+
 def test_format_labels_for_the_lists() -> None:
     """The file's own type once it exists, else the one asked for; nothing for the site's original audio."""
     assert naming.format_label("C:/Music/Song.mp3") == "MP3"

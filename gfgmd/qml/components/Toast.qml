@@ -1,7 +1,8 @@
 import QtQuick
 import QtQuick.Layouts
 
-// A short notice near the bottom of the window that fades out by itself (click to dismiss).
+// A short notice near the bottom of the window that fades out by itself (click to dismiss). Screen
+// readers announce it; it stays while the pointer is over it.
 Rectangle {
     id: toast
 
@@ -12,6 +13,7 @@ Rectangle {
         label.text = message
         toast.opacity = 1
         hideTimer.restart()
+        label.Accessible.announce(message)
     }
 
     implicitWidth: Math.min(row.implicitWidth + 2 * Theme.spaceLg, 560)
@@ -43,6 +45,7 @@ Rectangle {
             color: Theme.inverseText
         }
         Text {
+            textFormat: Text.PlainText
             id: label
             Layout.fillWidth: true
             Layout.maximumWidth: 500
@@ -57,6 +60,8 @@ Rectangle {
 
     MouseArea {
         anchors.fill: parent
+        hoverEnabled: true
         onClicked: toast.opacity = 0
+        onContainsMouseChanged: if (containsMouse) hideTimer.stop(); else if (toast.opacity > 0) hideTimer.restart()
     }
 }

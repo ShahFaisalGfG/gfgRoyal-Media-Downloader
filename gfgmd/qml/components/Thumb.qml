@@ -54,7 +54,7 @@ Rectangle {
         anchors.margins: 3
         width: badge.implicitWidth + 8
         height: 16
-        radius: 4
+        radius: Theme.radius
         color: Theme.mediaBadge
         Accessible.ignored: true
 
@@ -64,17 +64,23 @@ Rectangle {
             spacing: 3
 
             Icon {
+                id: badgeIcon
                 anchors.verticalCenter: parent.verticalCenter
                 name: thumb._kindIcon
                 size: Theme.iconXs
                 color: Theme.mediaBadgeText
             }
             Text {
+                textFormat: Text.PlainText
                 anchors.verticalCenter: parent.verticalCenter
+                // Never wider than the thumbnail leaves room for (less the badge's 3 px margins and
+                // 8 px padding, and the icon): a long label is cut short instead of spilling out.
+                width: Math.min(implicitWidth, thumb.width - 14 - badgeIcon.width - badge.spacing)
                 visible: thumb.label.length > 0
                 text: thumb.label
+                elide: Text.ElideRight
                 font.family: Theme.fontFamily
-                font.pixelSize: 10
+                font.pixelSize: Theme.fontCaption
                 font.weight: Font.DemiBold
                 color: Theme.mediaBadgeText
             }

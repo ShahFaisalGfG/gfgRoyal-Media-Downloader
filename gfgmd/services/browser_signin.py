@@ -1,4 +1,4 @@
-# browser_signin.py - sign in to a site in a real browser window, then read that window's cookies
+# browser_signin.py - sign in to a site in an installed browser's window, then read that window's cookies
 #
 # Google and other sites refuse sign-ins inside embedded browser frameworks, and browsers protect
 # their everyday profile's cookies from other programs. So the app opens one of the user's installed
@@ -60,7 +60,7 @@ _WM_CLOSE = 0x0010
 
 
 class SignInError(Exception):
-    """The browser sign-in couldn't be started or its cookies couldn't be read."""
+    """The browser sign-in couldn't be started or its cookies couldn't be read; the message suits the log."""
 
 
 @dataclass(frozen=True)
@@ -280,7 +280,7 @@ def _wait_for_endpoint(port_file: Path, timeout: float) -> str:
         except OSError:
             pass
         time.sleep(0.2)
-    raise SignInError("The browser didn't open its DevTools connection; close other windows of this sign-in")
+    raise SignInError("The browser didn't respond (no DevTools port); another window of this sign-in may be open")
 
 
 def _cookie(raw: dict) -> Cookie:

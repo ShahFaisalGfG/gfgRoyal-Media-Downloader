@@ -90,12 +90,15 @@ class ToolManager:
         return [package for package in packages(str(self._prefs().get("channel", "stable"))) if package.tool in wanted]
 
     def install(self, names: list[str], progress: Progress, cancel: threading.Event) -> list[str]:
-        """Install the packages for these programs; returns the tools installed. Raises ToolInstallError."""
+        """Install the packages for these programs; returns the tools installed.
+
+        Raises ToolInstallError, or OSError when the drive refuses a file.
+        """
         installed: list[str] = []
         with self._lock:
             chosen = self.packages_for(names)
             for index, package in enumerate(chosen, start=1):
-                prefix = f"{package.label} ({index} of {len(chosen)})"
+                prefix = f"{package.label} ({index} of {len(chosen)})" if len(chosen) > 1 else package.label
                 install(package, self._context.tools_root,
                         lambda stage, done, total, p=prefix: progress(f"{p}: {stage}", done, total),
                         cancel, channel=str(self._prefs().get("channel", "stable")))
@@ -104,16 +107,26 @@ class ToolManager:
         return installed
 
     def check_updates(self) -> list[str]:
-        """Managed programs with a newer release (reads only the small checksum files)."""
+        """Managed programs with a newer release (reads only the small checksum files).
+
+        Raises ToolInstallError when no program could be checked at all (usually no connection), so
+        an offline check never reads as "up to date".
+        """
         names = []
+        checked = 0
+        failure: ToolInstallError | None = None
         for package in packages(str(self._prefs().get("channel", "stable"))):
             if next(iter(package.programs)) not in managed_tools(self._context.tools_root):
                 continue
             try:
                 if update_available(package, self._context.tools_root):
                     names.append(package.tool)
+                checked += 1
             except ToolInstallError as error:
                 write_log(f"Update check for {package.label} failed: {error}", "general")
+                failure = error
+        if failure is not None and not checked:
+            raise failure
         return names
 
     def update_ytdlp(self, force: bool = False) -> bool:
@@ -138,7 +151,7 @@ class ToolManager:
             self.install(["yt-dlp"], lambda stage, done, total: None, threading.Event())
             write_log("yt-dlp was updated after a download failure", "general")
             return True
-        except ToolInstallError as error:
+        except (ToolInstallError, OSError) as error:
             write_log(f"yt-dlp update failed: {error}", "critical")
             return False
 

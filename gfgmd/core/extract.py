@@ -24,8 +24,8 @@ from typing import Any
 
 from gfgmd.config.defaults import FormatDefaults
 from gfgmd.core.captions import parse_file, sidecars, to_lrc
-from gfgmd.core.command import ARTIST_SUFFIX, ARTIST_TITLE, SQUARE_CROP
-from gfgmd.core.errors import CATEGORIES, Failure
+from gfgmd.core.command import ARTIST_SUFFIX, ARTIST_TITLE, MUSIC_TITLE_NOISE, SQUARE_CROP
+from gfgmd.core.errors import CATEGORIES, Failure, folder_failure
 from gfgmd.core.jobs import JobResult, Runner
 from gfgmd.core.lyrics import Fetch, add_lyrics
 from gfgmd.core.naming import finalize_file
@@ -48,6 +48,7 @@ MAX_COVER_BYTES = 8 * 1024 * 1024
 _QUALITY_LABEL = re.compile(r"\s*\(\d{3,4}p\)$")
 _ARTIST_TITLE = re.compile(ARTIST_TITLE)
 _ARTIST_NOISE = re.compile(ARTIST_SUFFIX)
+_TITLE_NOISE = re.compile(MUSIC_TITLE_NOISE)
 _FFMETADATA_SPECIAL = re.compile(r"([=;#\\\n])")
 _TIMEOUT = 120
 
@@ -151,8 +152,10 @@ def audio_encoding(options: DownloadOptions, source_codec: str) -> tuple[str, li
 
 
 def audio_stem(video: Path) -> str:
-    """The audio's name: the video's, without its quality label ("Song (1080p)" becomes "Song")."""
-    return _QUALITY_LABEL.sub("", video.stem) or video.stem
+    """The audio's name: the video's, without its quality label or what it says about the video
+    ("Song (Official Video) (1080p)" becomes "Song"), as audio downloads are named."""
+    stem = _QUALITY_LABEL.sub("", video.stem) or video.stem
+    return _TITLE_NOISE.sub("", stem).strip() or stem
 
 
 def song_tags(probe: VideoProbe, title: str, uploader: str, url: str) -> dict[str, str]:
@@ -165,7 +168,7 @@ def song_tags(probe: VideoProbe, title: str, uploader: str, url: str) -> dict[st
     channel = uploader.strip()
     artist = tags.get("artist", "").strip()
     named = bool(artist) and artist.casefold() not in (channel.casefold(), _ARTIST_NOISE.sub("", channel).casefold())
-    tags["title"] = tags.get("title") or title
+    tags["title"] = _TITLE_NOISE.sub("", tags.get("title") or title).strip() or tags.get("title") or title
     tags["artist"] = _ARTIST_NOISE.sub("", artist or channel).strip()
     match = None if named else _ARTIST_TITLE.match(tags["title"])
     if match:
@@ -258,7 +261,7 @@ class AudioExtractor:
     def run(self) -> JobResult:
         """Extract the audio; never raises for a damaged video, a missing tool, or a full disk."""
         spec = self._spec
-        result = JobResult("failed", attempts=1)
+        result = JobResult("failed", attempts=1, kind="audio")
         try:
             tools = self._tools()
         except RuntimeError as error:
@@ -270,7 +273,7 @@ class AudioExtractor:
         try:
             probe = (self._probe or probe_video)(tools.ffprobe, spec.video)
         except ExtractError as error:
-            result.failure = Failure(CATEGORIES["postprocess"], str(error))
+            result.failure = Failure(CATEGORIES["bad_video"], str(error))
             return result
         if probe.audio_stream < 0:
             result.failure = Failure(CATEGORIES["no_audio"], str(spec.video))
@@ -278,8 +281,9 @@ class AudioExtractor:
         self._duration = probe.duration
         try:
             final = self._convert(tools, probe, result)
-        except OSError as error:
-            result.failure = Failure(CATEGORIES["access_denied"], str(error))
+        except OSError as error:  # the audio folder is full, not allowed, or not there
+            result.failure = folder_failure(error)
+            result.state = "disk_full" if result.failure.category.key == "disk_full" else "failed"
             return result
         finally:
             shutil.rmtree(spec.scratch / "extract", ignore_errors=True)
@@ -327,7 +331,7 @@ class AudioExtractor:
             if any("No space left" in line for line in self._errors):
                 result.state, result.failure = "disk_full", Failure(CATEGORIES["disk_full"], detail)
             else:
-                result.failure = Failure(CATEGORIES["postprocess"], detail)
+                result.failure = Failure(CATEGORIES["extract_failed"], detail)
             return None
         placed = spec.root / spec.folder / name
         placed.parent.mkdir(parents=True, exist_ok=True)

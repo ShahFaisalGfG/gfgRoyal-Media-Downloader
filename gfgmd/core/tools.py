@@ -18,10 +18,10 @@ _VERSION_ARGS = {"yt-dlp": ["--version"], "ffmpeg": ["-version"], "ffprobe": ["-
 
 
 class ToolsMissing(RuntimeError):
-    """One or more required programs could not be found."""
+    """One or more required programs could not be found; `missing` names them for the log."""
 
     def __init__(self, missing: list[str]) -> None:
-        super().__init__(f"Missing required programs: {', '.join(missing)}")
+        super().__init__("The download tools aren't installed yet.")
         self.missing = missing
 
 
@@ -71,10 +71,19 @@ def managed_tools(tools_root: Path | None) -> dict[str, str]:
 
 
 def path_tools() -> dict[str, str]:
-    """The programs found on PATH, by tool name."""
+    """The programs found on PATH, by tool name.
+
+    Programs only (.exe on Windows), and never from the current folder: Windows looks there first
+    unless told not to, so a file dropped where the command line runs could stand in for a tool.
+    """
+    if os.name == "nt":
+        os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
+    # Only folders named in full: an empty or relative PATH entry would mean the current folder.
+    search = os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep)
+                             if entry and os.path.isabs(entry))
     found: dict[str, str] = {}
     for name in TOOL_NAMES:
-        location = shutil.which(name)
+        location = shutil.which(f"{name}.exe" if os.name == "nt" else name, path=search)
         if location:
             found[name] = os.path.abspath(location)
     return found

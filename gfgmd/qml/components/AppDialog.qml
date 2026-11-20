@@ -42,6 +42,7 @@ Dialog {
     }
 
     header: Text {
+        textFormat: Text.PlainText
         visible: text.length > 0
         text: dialog.title
         leftPadding: Theme.spaceXl

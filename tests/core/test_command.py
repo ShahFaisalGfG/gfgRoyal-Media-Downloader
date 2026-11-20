@@ -42,9 +42,12 @@ def test_download_is_resumable_mp4_like_version_1(tmp_path: Path) -> None:
     """Keep the original script's format rules, resume flags, archive, and folder names."""
     command = download_command(URL, source_from_url(URL), DownloadOptions(), TOOLS, paths(tmp_path))
 
+    # The original rules, each trying full-range audio first: YouTube's later "-drc" copies squeeze it.
+    full = "ba[format_id!*=drc]"
     assert value(command, "--format") == (
-        "bv[width<=1080][aspect_ratio<1]+ba/b[width<=1080][aspect_ratio<1]/"
-        "bv[height<=1080]+ba/b[height<=1080]/bv[height<=?1080]+ba/b[height<=?1080]"
+        f"bv[width<=1080][aspect_ratio<1]+{full}/bv[width<=1080][aspect_ratio<1]+ba/b[width<=1080][aspect_ratio<1]/"
+        f"bv[height<=1080]+{full}/bv[height<=1080]+ba/b[height<=1080]/"
+        f"bv[height<=?1080]+{full}/bv[height<=?1080]+ba/b[height<=?1080]"
     )
     assert value(command, "--format-sort") == "lang,res,proto:m3u8,vcodec:h264,acodec:aac"
     assert value(command, "--merge-output-format") == "mp4"
@@ -109,7 +112,7 @@ def test_audio_download(tmp_path: Path) -> None:
     """MP3 at 320 kbps by default, with a square cover, the artist cleaned up, and lyrics as LRC."""
     options = DownloadOptions(kind="audio", embed_thumbnail=True, embed_metadata=True)
     command = download_command(VIDEO_URL, source_from_url(VIDEO_URL), options, TOOLS, paths(tmp_path))
-    assert value(command, "--format") == "ba[acodec^=mp3]/ba/b"
+    assert value(command, "--format") == "ba[acodec^=mp3]/ba[format_id!*=drc]/ba/b"
     assert value(command, "--format-sort") == "lang,abr,asr"
     assert value(command, "--audio-format") == "mp3"
     assert value(command, "--audio-quality") == "320K"
@@ -117,7 +120,7 @@ def test_audio_download(tmp_path: Path) -> None:
     # The square cover, then ffmpeg's progress file for the conversion (the app shows how far it got).
     progress = (tmp_path / ".gfgmd" / "jobs" / "j" / "convert.progress").as_posix()
     assert values(command, "--postprocessor-args") == [SQUARE_COVER, f'ExtractAudio+ffmpeg_o:-progress "{progress}"']
-    assert value(command, "--replace-in-metadata") == "uploader"
+    assert values(command, "--replace-in-metadata") == ["title", "uploader"]  # the song title, then the artist
     assert value(command, "--convert-subs") == "lrc" and value(command, "--sub-langs") == "en.*"
     assert "--write-auto-subs" not in command
     assert "--merge-output-format" not in command
@@ -151,8 +154,8 @@ def test_video_keeps_dubbed_audio_tracks(tmp_path: Path) -> None:
     options = DownloadOptions(container="mkv", audio_tracks="languages", audio_langs=("es", "pt-BR"))
     command = download_command(VIDEO_URL, source_from_url(VIDEO_URL), options, TOOLS, paths(tmp_path))
     selector = value(command, "--format")
-    assert selector.startswith("bv[width<=1080][aspect_ratio<1]+ba+ba[language^=es]+ba[language^=pt-BR]/"
-                               "bv[width<=1080][aspect_ratio<1]+ba/")
+    assert selector.startswith("bv[width<=1080][aspect_ratio<1]+ba[format_id!*=drc]+ba[language^=es][format_id!*=drc]"
+                               "+ba[language^=pt-BR][format_id!*=drc]/bv[width<=1080][aspect_ratio<1]+ba[format_id!*=drc]/")
     assert "--audio-multistreams" in command
     assert "--embed-metadata" in command  # it labels each track with its language
     single = download_command(VIDEO_URL, source_from_url(VIDEO_URL), DownloadOptions(), TOOLS, paths(tmp_path))
@@ -245,7 +248,7 @@ def test_print_rejects_unknown_stage() -> None:
 
 def test_best_quality_has_no_height_limit() -> None:
     """Take the best streams when the limit is 0."""
-    assert format_selector(DownloadOptions(max_height=0)) == "bv*+ba/b"
+    assert format_selector(DownloadOptions(max_height=0)) == "bv*+ba[format_id!*=drc]/bv*+ba/b"
 
 
 def test_subscription_check_and_batch_file(tmp_path: Path) -> None:
@@ -258,6 +261,14 @@ def test_subscription_check_and_batch_file(tmp_path: Path) -> None:
     assert value(command, "--batch-file") == str(tmp_path / "urls.txt")
     assert "--" not in command
     assert batch.splitlines() == urls
+
+
+def test_a_playlist_check_reads_the_whole_list(tmp_path: Path) -> None:
+    """A playlist's new videos come last, so its check passes over downloaded ones instead of stopping."""
+    command, _ = check_command(["https://www.youtube.com/playlist?list=PLx"], TOOLS, tmp_path / "a.txt", tmp_path,
+                               tmp_path, newest=2000, whole=True)
+    assert "--break-on-existing" not in command and "--break-per-input" not in command
+    assert value(command, "--playlist-items") == "1:2000" and value(command, "--download-archive") == str(tmp_path / "a.txt")
 
 
 def test_escape_template() -> None:
@@ -276,3 +287,22 @@ def test_facebook_titles_lose_their_counts(tmp_path: Path) -> None:
     assert re.sub(pattern, "", "1,204 plays | Clip") == "Clip"
     youtube = download_command(VIDEO_URL, source_from_url(VIDEO_URL), DownloadOptions(), TOOLS, paths(tmp_path))
     assert "--replace-in-metadata" not in youtube
+
+
+
+@pytest.mark.parametrize(("title", "song"), [
+    ("Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)", "Rick Astley - Never Gonna Give You Up"),
+    ("Osman Al Safi - Tabalagh Bil Qaleel (Lyrics)", "Osman Al Safi - Tabalagh Bil Qaleel"),
+    ("Song [Official Music Video] [HD]", "Song"), ("Track (Official Audio)", "Track"),
+    ("Song (Lyric Video)", "Song"), ("Song (Remastered 2011)", "Song"),
+    ("Song (Live)", "Song (Live)"), ("Song (Remix)", "Song (Remix)"), ("Audio Engineering 101", "Audio Engineering 101"),
+])
+def test_songs_leave_out_what_the_title_says_about_the_video(title: str, song: str) -> None:
+    import re
+    from gfgmd.core.command import MUSIC_TITLE_NOISE
+    assert re.sub(MUSIC_TITLE_NOISE, "", title) == song
+    command = download_command("https://youtu.be/x", source_from_url("https://youtu.be/dQw4w9WgXcQ"),
+                               DownloadOptions(kind="audio"), TOOLS, RunPaths(Path("C:/D"), Path("C:/D/a.txt"),
+                                                                              Path("C:/D/j"), Path("C:/D/c")))
+    at = command.index("--extract-audio")
+    assert command[at:at + 7][3:6] == ["--replace-in-metadata", "title", MUSIC_TITLE_NOISE]

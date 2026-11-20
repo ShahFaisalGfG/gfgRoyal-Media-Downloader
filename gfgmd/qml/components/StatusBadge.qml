@@ -51,6 +51,7 @@ Rectangle {
             color: badge._fg
         }
         Text {
+            textFormat: Text.PlainText
             text: badge.text
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption

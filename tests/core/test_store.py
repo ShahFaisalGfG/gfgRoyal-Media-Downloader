@@ -142,3 +142,91 @@ def test_records_naming_jobs_removed_earlier_are_released_on_open(tmp_path: Path
         assert again.history()[0]["job_id"] is None
     finally:
         again.close()
+
+
+def test_listed_videos_fill_in_and_keep_their_state(store: Store) -> None:
+    """A playlist's list arrives on every attempt: new videos are added, known ones keep their state."""
+    job = add(store, "p", items=[{"id": "x", "title": "X", "index": 1}])
+    store.set_item_state(job, "x", "done")
+    store.add_items(job, [{"id": "x", "title": "Renamed", "index": 1, "url": "https://youtu.be/x", "thumbnail": "t.jpg"},
+                          {"id": "y", "title": "Y", "index": 2, "duration": 61}])
+    items = store.job_items(job)
+    assert [(i["item_id"], i["title"], i["state"], i["url"], i["thumbnail"]) for i in items] == [
+        ("x", "X", "done", "https://youtu.be/x", "t.jpg"), ("y", "Y", "pending", "", "")]
+    assert store.job(job)["items_total"] == 2
+
+
+def test_item_states_in_bulk(store: Store) -> None:
+    job = add(store, "p", items=[{"id": "x", "title": "X"}, {"id": "y", "title": "Y"}])
+    store.set_item_state(job, "x", "done")
+    # A later attempt's archive check names a video this run saved; it stays saved.
+    store.set_item_states(job, [("x", "archived", ""), ("y", "deferred", "No answer"), ("z", "done", "")])
+    assert {i["item_id"]: i["state"] for i in store.job_items(job)} == {"x": "done", "y": "deferred", "z": "done"}
+    assert store.job_items(job)[-1]["idx"] == 3 and store.job(job)["items_total"] == 3
+    assert store.item_counts(job) == {"done": 2, "deferred": 1}
+    store.reset_items(job, ("deferred", "failed"))
+    assert store.item_counts(job) == {"done": 2, "pending": 1}
+    store.drop_item(job, "y")
+    assert [i["item_id"] for i in store.job_items(job)] == ["x", "z"] and store.job(job)["items_total"] == 2
+
+
+def test_new_columns_reach_a_library_made_before_them(tmp_path: Path) -> None:
+    """Folder, batch, song links, Library groups, and kept uploads are added in place, with their
+    lookup indexes, without a new layout number."""
+    db = Store(tmp_path / "library.db")
+    add(db, "a")
+    db.add_history("C:/D/a.mp4", title="a")
+    db.close()
+    raw = sqlite3.connect(tmp_path / "library.db")
+    for index in ("history_by_job", "history_by_group", "history_by_video"):
+        raw.execute(f"DROP INDEX {index}")
+    for table, column in (("jobs", "folder"), ("jobs", "batch"), ("job_items", "url"), ("job_items", "thumbnail"),
+                          ("history", "group_key"), ("history", "group_title"), ("history", "position"),
+                          ("subscription_seen", "url"), ("subscription_seen", "title")):
+        raw.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    raw.commit()
+    raw.close()
+    again = Store(tmp_path / "library.db")
+    try:
+        record = again.history()[0]
+        assert record["group_key"] is None and record["position"] == 0  # to be worked out by the Library
+        job = add(again, "b", folder="Mix", batch=True, items=[{"id": "q", "url": "https://youtu.be/q"}])
+        assert (again.job(job)["folder"], again.job(job)["batch"]) == ("Mix", 1)
+        assert again.job_items(job)[0]["url"] == "https://youtu.be/q"
+        indexes = {row["name"] for row in again._rows("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        assert {"history_by_job", "history_by_group", "history_by_video"} <= indexes
+    finally:
+        again.close()
+
+
+def test_uploads_kept_for_download_new_keep_their_links(tmp_path: Path) -> None:
+    """Pending uploads hold their own link and title; marking them queued leaves the pending list."""
+    db = Store(tmp_path / "library.db")
+    try:
+        sub = db.add_subscription("https://soundcloud.com/artist", "Artist", "soundcloud", {}, "C:/D", 6, False, None, 0.0)
+        db.mark_pending(sub, [{"id": "123", "url": "https://soundcloud.com/artist/song", "title": "Song"}])
+        assert db.pending_uploads(sub) == [{"id": "123", "url": "https://soundcloud.com/artist/song", "title": "Song"}]
+        db.mark_seen(sub, ["123"], "queued")
+        assert db.pending_uploads(sub) == [] and db.seen(sub) == {"123": "queued"}
+    finally:
+        db.close()
+
+
+def test_many_video_ids_are_looked_up_in_parts(tmp_path: Path) -> None:
+    """A channel's thousands of IDs stay under SQLite's limit on query values."""
+    db = Store(tmp_path / "library.db")
+    try:
+        db.add_history("C:/D/a.mp4", title="a", video_id="v1199", site="youtube")
+        ids = [f"v{number}" for number in range(40000)]
+        assert [row["video_id"] for row in db.history_of_video("youtube", ids, "")] == ["v1199"]
+    finally:
+        db.close()
+
+
+def test_a_videos_place_in_its_list(tmp_path: Path) -> None:
+    db = Store(tmp_path / "library.db")
+    try:
+        job = add(db, "a", items=[{"id": "x"}, {"id": "y"}, {"id": "z"}])
+        assert [db.item_number(job, item) for item in ("x", "z", "missing")] == [1, 3, 0]
+    finally:
+        db.close()

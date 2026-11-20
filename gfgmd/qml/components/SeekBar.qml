@@ -16,11 +16,12 @@ RowLayout {
 
     signal seek(real ms)
 
-    readonly property color _text: bar.light ? "#ffffff" : Theme.textMuted
+    readonly property color _text: bar.light ? Theme.overlayText : Theme.textMuted
 
     spacing: Theme.spaceSm
 
     Text {
+        textFormat: Text.PlainText
         text: MediaTime.format(slider.pressed ? slider.value : bar.position)
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontCaption
@@ -38,6 +39,8 @@ RowLayout {
         focusPolicy: Qt.TabFocus
         hoverEnabled: true
         Accessible.name: "Position"
+        // The slider's own value is in milliseconds; screen readers get the time as the labels show it.
+        Accessible.description: MediaTime.format(slider.value) + " of " + MediaTime.format(bar.duration)
         // Follow playback, except while the user drags the handle.
         Binding on value {
             when: !slider.pressed
@@ -58,6 +61,7 @@ RowLayout {
     }
 
     Text {
+        textFormat: Text.PlainText
         text: MediaTime.format(bar.duration)
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontCaption

@@ -46,6 +46,7 @@ Popup {
         spacing: 0
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.margins: Theme.spaceSm
             visible: menu.title.length > 0
@@ -92,6 +93,7 @@ Popup {
                         opacity: choice.index === menu.current ? 1 : 0
                     }
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: String(choice.modelData)
                         font.family: Theme.fontFamily

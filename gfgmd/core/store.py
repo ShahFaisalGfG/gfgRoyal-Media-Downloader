@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     options_json TEXT NOT NULL,
     output_root TEXT NOT NULL,
     input_path TEXT NOT NULL DEFAULT '',
+    folder TEXT NOT NULL DEFAULT '',
+    batch INTEGER NOT NULL DEFAULT 0,
     account_id INTEGER,
     subscription_id INTEGER,
     state TEXT NOT NULL,
@@ -72,6 +74,8 @@ CREATE TABLE IF NOT EXISTS job_items (
     duration REAL NOT NULL DEFAULT 0,
     state TEXT NOT NULL DEFAULT 'pending',
     message TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    thumbnail TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (job_id, item_id)
 );
 CREATE TABLE IF NOT EXISTS history (
@@ -88,7 +92,10 @@ CREATE TABLE IF NOT EXISTS history (
     duration REAL NOT NULL DEFAULT 0,
     size INTEGER NOT NULL DEFAULT 0,
     thumbnail TEXT NOT NULL DEFAULT '',
-    finished REAL NOT NULL
+    finished REAL NOT NULL,
+    group_key TEXT,
+    group_title TEXT,
+    position INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS history_by_time ON history (finished DESC);
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -112,6 +119,8 @@ CREATE TABLE IF NOT EXISTS subscription_seen (
     sub_id INTEGER NOT NULL REFERENCES subscriptions (id) ON DELETE CASCADE,
     video_id TEXT NOT NULL,
     status TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (sub_id, video_id)
 );
 CREATE TABLE IF NOT EXISTS accounts (
@@ -130,11 +139,23 @@ CREATE TABLE IF NOT EXISTS accounts (
 
 _JOB_FIELDS = {"title", "thumbnail", "options_json", "output_root", "account_id", "state", "position", "attempts",
                "not_before", "message", "error_key", "action", "files_done", "items_total", "skip_ids_json",
-               "finished", "url"}
+               "finished", "url", "folder"}
 _SUB_FIELDS = {"title", "site", "options_json", "output_root", "interval_hours", "enabled", "auto_download",
                "account_id", "last_check", "next_check", "last_result", "new_count"}
 _ACCOUNT_FIELDS = {"label", "method", "browser", "domains_json", "status", "refreshed", "expires"}
 
+
+# Lookups the Library and the queue make often: a download's files, a playlist's files in order, and a
+# video's earlier files. 1.0.0 ignores them, so they need no new schema version.
+_INDEXES = (
+    ("history", "history_by_job", ("job_id",)),
+    ("history", "history_by_group", ("group_key", "position")),
+    ("history", "history_by_video", ("site", "video_id")),
+)
+
+
+# How many video IDs one lookup names (SQLite allows 32,766 values in a query).
+_IDS_PER_QUERY = 500
 
 class Store:
     """Thread-safe access to library.db."""
@@ -160,24 +181,53 @@ class Store:
     def _migrate(self) -> None:
         version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
         if version > SCHEMA_VERSION:
-            raise RuntimeError("The library was created by a newer version of the app")
+            raise RuntimeError("Your downloads list was saved by a newer version of this app. Install the newest "
+                               "version to open it.")
         if version < 1:
             self._db.executescript("BEGIN;" + _SCHEMA + _PLAYBACK + f"PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;")
+            self._add_indexes()
             return
         if version < 2:
             # Version 2 remembers where playback stopped in each file.
             self._db.executescript("BEGIN;" + _PLAYBACK + "PRAGMA user_version = 2; COMMIT;")
         self._add_columns()
+        self._add_indexes()
         # 1.0.0 left records naming jobs it had removed; they belong to no job.
         self._db.execute("UPDATE history SET job_id = NULL WHERE job_id IS NOT NULL AND job_id NOT IN "
                          "(SELECT id FROM jobs)")
 
+    def _add_indexes(self) -> None:
+        """Create the lookup indexes (see _INDEXES) on the tables that have their columns."""
+        for table, name, columns in _INDEXES:
+            present = {str(row[1]) for row in self._db.execute(f"PRAGMA table_info({table})")}
+            if set(columns) <= present:
+                self._db.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({', '.join(columns)})")
+
     def _add_columns(self) -> None:
-        """Add the columns made after 1.0.0, which 1.0.0 ignores (it reads rows by name)."""
-        jobs = {str(row[1]) for row in self._db.execute("PRAGMA table_info(jobs)")}
-        if "input_path" not in jobs:
-            # The file a job works on: a video whose audio it extracts.
-            self._db.execute("ALTER TABLE jobs ADD COLUMN input_path TEXT NOT NULL DEFAULT ''")
+        """Add the columns made after 1.0.0, which 1.0.0 ignores (it reads rows by name).
+
+        A new library gets them from _SCHEMA; keep the two in step.
+        """
+        added = {
+            # The file a job works on (a video whose audio it extracts); a folder named outright; and
+            # whether it downloads its items' own links (a subscription's new uploads).
+            "jobs": ("input_path TEXT NOT NULL DEFAULT ''", "folder TEXT NOT NULL DEFAULT ''",
+                     "batch INTEGER NOT NULL DEFAULT 0"),
+            # Each listed video's link and thumbnail.
+            "job_items": ("url TEXT NOT NULL DEFAULT ''", "thumbnail TEXT NOT NULL DEFAULT ''"),
+            # The playlist or channel folder a file belongs to (NULL until worked out; '' for none), its
+            # name, and the file's place in it.
+            "history": ("group_key TEXT", "group_title TEXT", "position INTEGER NOT NULL DEFAULT 0"),
+            # An upload a subscription found and keeps for Download new: its own link and title.
+            "subscription_seen": ("url TEXT NOT NULL DEFAULT ''", "title TEXT NOT NULL DEFAULT ''"),
+        }
+        for table, columns in added.items():
+            present = {str(row[1]) for row in self._db.execute(f"PRAGMA table_info({table})")}
+            if not present:
+                continue  # a table this library never had; nothing reads it
+            for column in columns:
+                if column.split()[0] not in present:
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
 
     def _transaction(self) -> _Transaction:
         return _Transaction(self._db, self._lock)
@@ -196,28 +246,43 @@ class Store:
                 output_root: str, tab: str = "", title: str = "", thumbnail: str = "",
                 items: list[dict[str, Any]] | None = None, account_id: int | None = None,
                 subscription_id: int | None = None, state: str = "queued", not_before: float = 0.0,
-                input_path: str = "") -> int:
+                input_path: str = "", folder: str = "", batch: bool = False) -> int:
         """Add a job at the end of the queue; returns its id.
 
         `input_path` is set for a job that works on a file on disk instead of downloading: a video
-        whose audio it extracts (`url` is then the video's page, for its link).
+        whose audio it extracts (`url` is then the video's page, for its link). `folder` names the
+        download's folder outright; `batch` downloads the items' own links (a subscription's uploads).
         """
         now = time.time()
         with self._transaction() as db:
             top = db.execute("SELECT COALESCE(MAX(position), 0) FROM jobs").fetchone()[0]
             cursor = db.execute(
                 "INSERT INTO jobs (url, source_kind, source_id, site, tab, title, thumbnail, options_json, output_root,"
-                " input_path, account_id, subscription_id, state, position, not_before, items_total, created, updated)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " input_path, folder, batch, account_id, subscription_id, state, position, not_before, items_total,"
+                " created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (url, source_kind, source_id, site, tab, title, thumbnail, json.dumps(options), output_root,
-                 input_path, account_id, subscription_id, state, top + 1, not_before, len(items or []), now, now))
+                 input_path, folder, int(batch), account_id, subscription_id, state, top + 1, not_before,
+                 len(items or []), now, now))
             job_id = int(cursor.lastrowid or 0)
             if items:
-                db.executemany(
-                    "INSERT OR IGNORE INTO job_items (job_id, item_id, idx, title, duration) VALUES (?, ?, ?, ?, ?)",
-                    [(job_id, str(item.get("id", "")), int(item.get("index", i + 1)), str(item.get("title") or ""),
-                      float(item.get("duration") or 0)) for i, item in enumerate(items) if item.get("id")])
+                self._insert_items(db, job_id, items)
         return job_id
+
+    @staticmethod
+    def _insert_items(db: sqlite3.Connection, job_id: int, items: list[dict[str, Any]]) -> None:
+        """Add listed videos to a job (filling in what an earlier listing left blank) and recount them."""
+        db.executemany(
+            "INSERT INTO job_items (job_id, item_id, idx, title, duration, url, thumbnail) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (job_id, item_id) DO UPDATE SET"
+            " title = CASE WHEN title = '' THEN excluded.title ELSE title END,"
+            " duration = CASE WHEN duration = 0 THEN excluded.duration ELSE duration END,"
+            " url = CASE WHEN url = '' THEN excluded.url ELSE url END,"
+            " thumbnail = CASE WHEN thumbnail = '' THEN excluded.thumbnail ELSE thumbnail END",
+            [(job_id, str(item["id"]), int(item.get("index") or i + 1), str(item.get("title") or ""),
+              float(item.get("duration") or 0), str(item.get("url") or ""), str(item.get("thumbnail") or ""))
+             for i, item in enumerate(items) if item.get("id")])
+        db.execute("UPDATE jobs SET items_total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?) WHERE id = ?",
+                   (job_id, job_id))
 
     def job(self, job_id: int) -> dict[str, Any] | None:
         """One job."""
@@ -279,9 +344,64 @@ class Store:
 
     def set_item_state(self, job_id: int, item_id: str, state: str, message: str = "") -> None:
         """Record one item's outcome."""
+        self.set_item_states(job_id, [(item_id, state, message)])
+
+    def add_items(self, job_id: int, items: list[dict[str, Any]]) -> None:
+        """Add videos a playlist listed (id, title, index, duration, url, thumbnail) to a job."""
+        if items:
+            with self._transaction() as db:
+                self._insert_items(db, job_id, items)
+
+    def set_item_states(self, job_id: int, states: Iterable[tuple[str, str, str]]) -> None:
+        """Record items' outcomes, (item id, state, message), adding an item the job hadn't listed.
+
+        A video this run saved stays saved when a later attempt's archive check calls it "archived".
+        """
+        rows = [(job_id, item_id, job_id, state, message) for item_id, state, message in states if item_id]
+        if not rows:
+            return
         with self._transaction() as db:
-            db.execute("UPDATE job_items SET state = ?, message = ? WHERE job_id = ? AND item_id = ?",
-                       (state, message, job_id, item_id))
+            db.executemany(
+                "INSERT INTO job_items (job_id, item_id, idx, state, message) VALUES (?, ?,"
+                " (SELECT COALESCE(MAX(idx), 0) + 1 FROM job_items WHERE job_id = ?), ?, ?)"
+                " ON CONFLICT (job_id, item_id) DO UPDATE SET state = excluded.state, message = excluded.message"
+                " WHERE NOT (job_items.state = 'done' AND excluded.state = 'archived')", rows)
+            db.execute("UPDATE jobs SET items_total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?) WHERE id = ?",
+                       (job_id, job_id))
+
+    def reset_items(self, job_id: int, states: Iterable[str]) -> None:
+        """Put items in these states back to waiting (Try again, Download again, Resume)."""
+        wanted = tuple(states)
+        if not wanted:
+            return
+        marks = ",".join("?" * len(wanted))
+        with self._transaction() as db:
+            db.execute(f"UPDATE job_items SET state = 'pending', message = '' WHERE job_id = ? AND state IN ({marks})",
+                       (job_id, *wanted))
+
+    def retitle_item(self, job_id: int, item_id: str, title: str) -> None:
+        """Give a listed video its own title once known (a list may name none, or only a guess from its link)."""
+        with self._transaction() as db:
+            db.execute("UPDATE job_items SET title = ? WHERE job_id = ? AND item_id = ? AND title != ?",
+                       (title, job_id, item_id, title))
+
+    def drop_item(self, job_id: int, item_id: str) -> None:
+        """Remove a listed entry that turned out to be a list of its own (its videos are listed instead)."""
+        with self._transaction() as db:
+            db.execute("DELETE FROM job_items WHERE job_id = ? AND item_id = ? AND state = 'pending'", (job_id, item_id))
+            db.execute("UPDATE jobs SET items_total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?) WHERE id = ?",
+                       (job_id, job_id))
+
+    def item_number(self, job_id: int, item_id: str) -> int:
+        """Where a video is in its job's list, from 1 (0 when the list doesn't hold it)."""
+        row = self._one("SELECT COUNT(*) AS n FROM job_items WHERE job_id = ? AND idx <= "
+                        "(SELECT idx FROM job_items WHERE job_id = ? AND item_id = ?)", (job_id, job_id, item_id))
+        return int(row["n"]) if row else 0
+
+    def item_counts(self, job_id: int) -> dict[str, int]:
+        """How many of a job's items are in each state."""
+        return {str(row["state"]): int(row["n"]) for row in self._rows(
+            "SELECT state, COUNT(*) AS n FROM job_items WHERE job_id = ? GROUP BY state", (job_id,))}
 
     # ── History ───────────────────────────────────────────────────────────
 
@@ -300,19 +420,21 @@ class Store:
         return self._rows("SELECT * FROM history WHERE job_id = ? ORDER BY finished, id", (job_id,))
 
     def history_of_video(self, site: str, video_ids: Iterable[str], url: str) -> list[dict[str, Any]]:
-        """Library records of one video (by its ID on the site, or its link), newest first."""
+        """Library records of one video (by its ID on the site, or its link), newest first.
+
+        Many IDs (a channel's thousands) are asked in parts, under SQLite's limit on query values.
+        """
         ids = [video_id for video_id in video_ids if video_id]
-        clauses, params = [], []
-        if ids:
-            clauses.append(f"(site = ? AND video_id IN ({', '.join('?' * len(ids))}))")
-            params += [site, *ids]
+        rows: dict[int, dict[str, Any]] = {}
+        for start in range(0, len(ids), _IDS_PER_QUERY):
+            part = ids[start:start + _IDS_PER_QUERY]
+            for row in self._rows(f"SELECT * FROM history WHERE site = ? AND video_id IN ({', '.join('?' * len(part))})",
+                                  [site, *part]):
+                rows[int(row["id"])] = row
         if url:
-            clauses.append("url = ?")
-            params.append(url)
-        if not clauses:
-            return []
-        return self._rows(f"SELECT * FROM history WHERE {' OR '.join(clauses)} ORDER BY finished DESC, id DESC",
-                          params)
+            for row in self._rows("SELECT * FROM history WHERE url = ?", (url,)):
+                rows[int(row["id"])] = row
+        return sorted(rows.values(), key=lambda row: (row["finished"], row["id"]), reverse=True)
 
     def history_for_path(self, filepath: str) -> dict[str, Any] | None:
         """The library record of a file, if it was downloaded here."""
@@ -342,7 +464,7 @@ class Store:
     def add_history(self, filepath: str, **fields: Any) -> int:
         """Record a finished file (replacing an older record of the same path)."""
         allowed = {"job_id", "video_id", "site", "kind", "title", "uploader", "url", "height", "duration", "size",
-                   "thumbnail"}
+                   "thumbnail", "group_key", "group_title", "position"}
         values = {key: value for key, value in fields.items() if key in allowed and value is not None}
         values["filepath"] = filepath
         values["finished"] = fields.get("finished") or time.time()
@@ -369,6 +491,45 @@ class Store:
         where, params = self._history_filter(query, kind, site)
         row = self._one(f"SELECT COUNT(*) AS n FROM history {where}", params)
         return int(row["n"]) if row else 0
+
+    # A Library row: a playlist or channel folder's files together, or one file of its own. Files not
+    # yet given a group (NULL) stand alone until the Library works theirs out.
+    _UNIT = "COALESCE(NULLIF(group_key, ''), 'f:' || id)"
+
+    def history_units(self, query: str = "", kind: str = "", site: str = "", offset: int = 0,
+                      limit: int = 100) -> list[dict[str, Any]]:
+        """The Library's rows, newest first: {unit, group_key, newest, files} for each group or single file.
+
+        `unit` is "f:<id>" for a file of its own, else its group's key; only files the filters match count.
+        """
+        where, params = self._history_filter(query, kind, site)
+        return self._rows(f"SELECT {self._UNIT} AS unit, MAX(group_key) AS group_key, MAX(finished) AS newest,"
+                          f" COUNT(*) AS files, MIN(id) AS first_id FROM history {where} GROUP BY unit"
+                          f" ORDER BY newest DESC, first_id DESC LIMIT ? OFFSET ?", (*params, limit, offset))
+
+    def history_unit_count(self, query: str = "", kind: str = "", site: str = "") -> int:
+        """How many Library rows the filters give (groups count once)."""
+        where, params = self._history_filter(query, kind, site)
+        row = self._one(f"SELECT COUNT(DISTINCT {self._UNIT}) AS n FROM history {where}", params)
+        return int(row["n"]) if row else 0
+
+    def group_history(self, group_key: str, query: str = "", kind: str = "", site: str = "") -> list[dict[str, Any]]:
+        """A group's files the filters match, in playlist order (then oldest first)."""
+        where, params = self._history_filter(query, kind, site)
+        extra = ("AND " + where[len("WHERE "):]) if where else ""
+        return self._rows(f"SELECT * FROM history WHERE group_key = ? {extra}"
+                          " ORDER BY CASE WHEN position > 0 THEN 0 ELSE 1 END, position, finished, id",
+                          (group_key, *params))
+
+    def history_without_group(self) -> list[dict[str, Any]]:
+        """Files whose playlist or channel folder hasn't been worked out (saved by 1.0.0 or before groups)."""
+        return self._rows("SELECT * FROM history WHERE group_key IS NULL")
+
+    def set_history_groups(self, groups: Iterable[tuple[int, str, str]]) -> None:
+        """Record files' groups: (history id, group key or "", group title or "")."""
+        with self._transaction() as db:
+            db.executemany("UPDATE history SET group_key = ?, group_title = ? WHERE id = ?",
+                           [(key, title, history_id) for history_id, key, title in groups])
 
     def history_sites(self) -> list[str]:
         """The sites in the library, for the filter."""
@@ -435,6 +596,19 @@ class Store:
         """Stop watching (downloaded files and the archive stay)."""
         with self._transaction() as db:
             db.execute("DELETE FROM subscriptions WHERE id = ?", (sub_id,))
+
+    def mark_pending(self, sub_id: int, uploads: Iterable[dict[str, Any]]) -> None:
+        """Keep uploads a check found for Download new, with their own links and titles."""
+        with self._transaction() as db:
+            db.executemany("INSERT OR REPLACE INTO subscription_seen (sub_id, video_id, status, url, title) "
+                           "VALUES (?, ?, 'pending', ?, ?)",
+                           [(sub_id, str(upload["id"]), str(upload.get("url") or ""), str(upload.get("title") or ""))
+                            for upload in uploads if upload.get("id")])
+
+    def pending_uploads(self, sub_id: int) -> list[dict[str, Any]]:
+        """The uploads waiting for Download new: id, url, and title (url and title "" for ones kept by 1.0.0)."""
+        return self._rows("SELECT video_id AS id, url, title FROM subscription_seen WHERE sub_id = ? AND "
+                          "status = 'pending'", (sub_id,))
 
     def seen(self, sub_id: int) -> dict[str, str]:
         """Items a subscription already queued or skipped: {video id: status}."""

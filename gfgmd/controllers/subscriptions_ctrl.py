@@ -17,14 +17,14 @@ from typing import Any
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 from gfgmd.core.archive import append_archive, archive_path, read_archive_ids
-from gfgmd.core.command import EXIT_BREAK_ON_EXISTING, Auth, check_command
-from gfgmd.core.errors import classify
+from gfgmd.core.command import EXIT_BREAK_ON_EXISTING, Auth, check_command, run_marker
+from gfgmd.core.errors import CATEGORIES, classify
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import ProgressTracker
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.schedule import live_launch_time, next_check
 from gfgmd.core.secret_store import SecretError
-from gfgmd.core.sources import Source, source_from_url
+from gfgmd.core.sources import Source, as_link, check_url, source_from_url
 from gfgmd.core.subscriptions import check_urls, parse_takeout, sort_entries
 from gfgmd.controllers.queue_ctrl import QueueController, base_options
 from gfgmd.models.list_model import DictListModel
@@ -37,7 +37,17 @@ from gfgmd.utils.settings import load_settings
 TIMER_MS = 60_000
 MAX_PARALLEL = 2
 ROLES = ("subId", "title", "url", "site", "active", "autoDownload", "intervalText", "lastText", "nextText",
-         "resultText", "newCount", "checking")
+         "resultText", "newCount", "checking", "failed")
+# What a check that failed shows; the reason, when it is one of the app's own, follows.
+_CHECK_FAILED = "Couldn't check for new uploads."
+_KNOWN_REASONS = {category.final for category in CATEGORIES.values()}
+
+
+def _interval(hours: int) -> str:
+    """How often a subscription is checked: "Every hour", "Every 6 hours", "Daily"."""
+    if hours >= 24:
+        return "Daily" if hours == 24 else f"Every {hours // 24} days"
+    return "Every hour" if hours == 1 else f"Every {hours} hours"
 
 
 def _when(timestamp: float) -> str:
@@ -47,13 +57,33 @@ def _when(timestamp: float) -> str:
     return moment.strftime("%H:%M") if moment.date() == datetime.now().date() else moment.strftime("%d %b, %H:%M")
 
 
+def _already_text(count: int) -> str:
+    """" 2 were already in your list." after an import (nothing when there were none)."""
+    if not count:
+        return ""
+    return f" {count} {'was' if count == 1 else 'were'} already in your list."
+
+
+# The most entries a playlist subscription reads on each check (a playlist is read whole).
+PLAYLIST_LIMIT = 2000
+
+def _upload(entry: dict[str, Any], source: Source) -> dict[str, Any]:
+    """An upload a check found, as the queue lists it: id, title, link, length, and thumbnail."""
+    video_id = str(entry.get("id") or "")
+    thumbnail = f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg" if source.site == "youtube" and video_id else ""
+    return {"id": video_id, "title": str(entry.get("title") or ""), "url": _entry_url(entry, source),
+            "duration": entry.get("duration") or 0, "thumbnail": thumbnail}
+
+
 def _entry_url(entry: dict[str, Any], source: Source) -> str:
+    """The upload's own link: an https link the link box would take, or "" when it has none."""
     url = str(entry.get("url") or "")
-    if url.startswith("https://"):
-        return url
-    if source.site == "youtube" and entry.get("id"):
-        return f"https://www.youtube.com/watch?v={entry['id']}"
-    return url
+    if not url.startswith("https://") and source.site == "youtube" and entry.get("id"):
+        url = f"https://www.youtube.com/watch?v={entry['id']}"
+    try:
+        return check_url(url) if url.startswith("https://") else ""
+    except ValueError:
+        return ""
 
 
 class SubscriptionsController(QObject):
@@ -89,17 +119,46 @@ class SubscriptionsController(QObject):
 
     # ── Managing subscriptions ────────────────────────────────────────────
 
+    @Slot(str, result=str)
+    def linkProblem(self, url: str) -> str:
+        """Why this link can't be subscribed to, or "" when it can (the Subscribe dialog asks first)."""
+        url = as_link(url)
+        try:
+            source = source_from_url(url)
+        except ValueError as error:
+            return str(error)
+        if not source.is_collection:
+            return "Subscribe to a channel or a playlist, not a single video."
+        if self._subscribed(url):
+            return "You're already subscribed to this."
+        return ""
+
+    def _subscribed(self, url: str) -> bool:
+        """True when this link is watched already."""
+        url = as_link(url)
+        return any(sub["url"] == url for sub in self._context.store.subscriptions())
+
     @Slot(str, "QVariantMap", int, bool, bool, result=bool)
     def add(self, url: str, options: dict[str, Any], interval_hours: int, download_existing: bool,
             auto_download: bool) -> bool:
         """Watch a channel or playlist. Without download_existing, only uploads from now on download."""
+        problem = self.linkProblem(url)
+        if problem:
+            self.notice.emit(problem)
+            return False
+        return self._subscribe(as_link(url), options, interval_hours, download_existing, auto_download)
+
+    def _subscribe(self, url: str, options: dict[str, Any], interval_hours: int, download_existing: bool,
+                   auto_download: bool) -> bool:
+        """Add a subscription to a checked link (see linkProblem); False when the link can't be used or
+        is already watched (an import run twice must not start an existing one over)."""
         try:
             source = source_from_url(url)
-        except ValueError as error:
-            self.notice.emit(str(error))
+        except ValueError:
+            return False
+        if self._subscribed(url):
             return False
         if not source.is_collection:
-            self.notice.emit("Subscribe to a channel or a playlist, not a single video.")
             return False
         picked = DownloadOptions.from_dict({**base_options(load_settings()).to_dict(), **options})
         chosen = picked.to_dict()
@@ -155,15 +214,18 @@ class SubscriptionsController(QObject):
         sub = self._context.store.subscription(sub_id)
         if sub is None:
             return
-        pending = [video_id for video_id, status in self._context.store.seen(sub_id).items() if status == "pending"]
+        store = self._context.store
         source = source_from_url(sub["url"])
-        urls = [f"https://www.youtube.com/watch?v={video_id}" if source.site == "youtube" else video_id
-                for video_id in pending]
+        uploads = [_upload(dict(row), source) for row in store.pending_uploads(sub_id)]
+        ready = [upload for upload in uploads if upload["url"]]
         options = DownloadOptions.from_dict(json.loads(sub["options_json"]))
-        self._queue.add_subscription_items([u for u in urls if u.startswith("https://")], source, options, sub_id,
-                                           sub["account_id"])
-        self._context.store.mark_seen(sub_id, pending, "queued")
-        self._context.store.update_subscription(sub_id, new_count=0)
+        self._queue.add_subscription_items(ready, source, options, sub_id, sub["account_id"],
+                                           title=sub["title"], url=sub["url"], folder=self._folder(sub, source))
+        store.mark_seen(sub_id, [upload["id"] for upload in ready], "queued")
+        if len(ready) < len(uploads):
+            write_log(f"{len(uploads) - len(ready)} new upload(s) of {sub['url']} had no link to download", "general")
+        store.mark_seen(sub_id, [upload["id"] for upload in uploads if not upload["url"]], "skipped")
+        store.update_subscription(sub_id, new_count=0)
         self._sync()
 
     @Slot(str, result=int)
@@ -176,8 +238,10 @@ class SubscriptionsController(QObject):
             return 0
         hours = int(load_settings().get("subscriptions", {}).get("interval_hours", 6))
         auto = bool(load_settings().get("subscriptions", {}).get("auto_download", True))
-        added = sum(1 for url, _title in pairs if self.add(url + "/videos", {}, hours, False, auto))
-        self.notice.emit(f"Subscribed to {added} channel(s).")
+        links = [url + "/videos" for url, _title in pairs]
+        already = sum(1 for url in links if self._subscribed(url))
+        added = sum(1 for url in links if self._subscribe(url, {}, hours, False, auto))
+        self.notice.emit(f"Subscribed to {added} channel{'s' if added != 1 else ''}." + _already_text(already))
         return added
 
     @Slot(result=str)
@@ -200,12 +264,13 @@ class SubscriptionsController(QObject):
             self.notice.emit("That file isn't a subscriptions export from this app.")
             return 0
         added = 0
+        already = sum(1 for row in rows if isinstance(row, dict) and self._subscribed(str(row.get("url") or "")))
         for row in rows:
             if isinstance(row, dict) and isinstance(row.get("url"), str):
                 options: dict[str, Any] = row["options"] if isinstance(row.get("options"), dict) else {}
                 hours = int(row.get("interval_hours", 6)) if isinstance(row.get("interval_hours"), int) else 6
-                added += bool(self.add(row["url"], options, hours, False, bool(row.get("auto_download", True))))
-        self.notice.emit(f"Subscribed to {added} channel(s) or playlist(s).")
+                added += self._subscribe(row["url"], options, hours, False, bool(row.get("auto_download", True)))
+        self.notice.emit(f"Restored {added} subscription{'s' if added != 1 else ''}." + _already_text(already))
         return added
 
     # ── Checking ──────────────────────────────────────────────────────────
@@ -227,7 +292,9 @@ class SubscriptionsController(QObject):
         try:
             tools = self._context.tools()
         except RuntimeError as error:
-            self._context.store.update_subscription(sub_id, last_result=str(error))
+            write_log(f"Subscription check {sub_id} can't start: {error}", "critical")
+            self._context.store.update_subscription(
+                sub_id, last_result=f"{_CHECK_FAILED} The download tools aren't installed yet.")
             self._sync()
             return
         self._checking.add(sub_id)
@@ -255,30 +322,45 @@ class SubscriptionsController(QObject):
                 auth = Auth(cookies_file=str(checkout.path))
             except (SecretError, OSError, TimeoutError):
                 checkout = None
-        command, batch = check_command(check_urls(source, sub["url"]), tools, archive, context.cache_dir, job_dir,
-                                       auth, newest=200 if seed else 60)
-        if batch:
-            (job_dir / "urls.txt").write_text(batch, encoding="utf-8")
-        tracker = ProgressTracker()
+        marker = run_marker()
+        tracker = ProgressTracker(marker=marker)
         try:
+            # A playlist is read whole (its new videos are added at the end); a channel newest first.
+            whole = source.kind not in ("channel", "profile")
+            command, batch = check_command(check_urls(source, sub["url"]), tools, archive, context.cache_dir,
+                                           job_dir, auth, newest=PLAYLIST_LIMIT if whole else 200 if seed else 60,
+                                           marker=marker, whole=whole)
+            if batch:
+                (job_dir / "urls.txt").write_text(batch, encoding="utf-8")
             code, _ = run_to_completion(command, tracker.feed, self._stop)
         finally:
             if checkout is not None and account is not None:
                 context.vault.checkin(account["id"], checkout)
         if code not in (0, EXIT_BREAK_ON_EXISTING) and not tracker.entries:
             reason = tracker.errors[-1].text if tracker.errors else f"yt-dlp exited with status {code}"
-            raise RuntimeError(classify(reason).category.message)
+            write_log(f"Subscription check of {sub['url']} failed: {reason}", "critical")
+            raise RuntimeError(classify(reason).category.final)
         result = sort_entries(tracker.entries, read_archive_ids(archive), context.store.seen(sub["id"]))
         listing = tracker.playlist
-        title = str(listing.get("channel") or listing.get("uploader") or listing.get("title") or sub["title"]
-                    or sub["url"])
+        # A playlist is called by its own name; a channel (a tab such as "Name - Videos") by its owner's.
+        names = ("title", "channel", "uploader") if source.kind == "playlist" else ("channel", "uploader", "title")
+        title = next((str(listing[name]) for name in names if listing.get(name)), "") or sub["title"]
         if seed:
             extractor = str(next((e.get("ie_key") for e in tracker.entries if e.get("ie_key")), source.site))
             seeded = append_archive(archive, extractor, [str(e["id"]) for e in result.new])
             context.store.mark_seen(sub["id"], [str(e["id"]) for e in result.upcoming + result.unreachable], "skipped")
             return {"title": title, "seeded": seeded, "new": [], "upcoming": [], "unreachable": []}
         return {"title": title, "seeded": 0, "new": result.new, "upcoming": result.upcoming,
-                "unreachable": result.unreachable}
+                "unreachable": result.unreachable, "list_title": str(listing.get("title") or "")}
+
+    def _folder(self, sub: dict[str, Any], source: Source, list_title: str = "") -> str:
+        """The folder a YouTube playlist's uploads go in, named outright: its own links carry no playlist name.
+
+        Channels need none; each video names its channel.
+        """
+        if source.kind != "playlist" or source.site != "youtube":
+            return ""
+        return list_title or sub["title"]
 
     def _checked(self, sub_id: int, result: dict[str, Any]) -> None:
         self._checking.discard(sub_id)
@@ -290,24 +372,29 @@ class SubscriptionsController(QObject):
         options = DownloadOptions.from_dict(json.loads(sub["options_json"]))
         store = self._context.store
         new = [entry for entry in result["new"] if _entry_url(entry, source)]
+        folder = self._folder(sub, source, str(result.get("list_title") or ""))
         if new and sub["auto_download"]:
-            self._queue.add_subscription_items([_entry_url(e, source) for e in new], source, options, sub_id,
-                                               sub["account_id"])
+            self._queue.add_subscription_items([_upload(e, source) for e in new], source, options, sub_id,
+                                               sub["account_id"], title=result["title"] or sub["title"],
+                                               url=sub["url"], folder=folder)
             store.mark_seen(sub_id, [str(e["id"]) for e in new], "queued")
         elif new:
-            store.mark_seen(sub_id, [str(e["id"]) for e in new], "pending")
+            store.mark_pending(sub_id, [_upload(e, source) for e in new])
         live_options = options.with_changes(wait_for_video=True, live_from_start=source.site == "youtube")
         for entry in result["upcoming"]:
             when = float(entry.get("release_timestamp") or 0)
-            self._queue.add_subscription_items([_entry_url(entry, source)], source, live_options, sub_id,
-                                               sub["account_id"], live_launch_time(when, time.time()) if when else 0.0)
+            self._queue.add_subscription_items([_upload(entry, source)], source, live_options, sub_id,
+                                               sub["account_id"], live_launch_time(when, time.time()) if when else 0.0,
+                                               folder=folder)
         store.mark_seen(sub_id, [str(e["id"]) for e in result["upcoming"]], "upcoming")
         store.mark_seen(sub_id, [str(e["id"]) for e in result["unreachable"]], "skipped")
         pending = sum(1 for status in store.seen(sub_id).values() if status == "pending")
         if result["seeded"]:
-            summary = f"Watching from now on ({result['seeded']} earlier uploads skipped)"
+            seeded = int(result["seeded"])
+            summary = f"Watching from now on ({seeded} earlier upload{'s' if seeded != 1 else ''} skipped)"
         elif new:
-            summary = f"{len(new)} new upload(s)" + (" queued" if sub["auto_download"] else " found")
+            uploads = f"{len(new)} new upload{'s' if len(new) != 1 else ''}"
+            summary = uploads + (" added to Downloads" if sub["auto_download"] else " found")
         else:
             summary = "No new uploads"
         store.update_subscription(sub_id, title=result["title"][:200], last_check=time.time(),
@@ -322,8 +409,10 @@ class SubscriptionsController(QObject):
         sub = self._context.store.subscription(sub_id)
         if sub is not None:
             # Try again sooner than the full interval, but not in a tight loop.
+            again = datetime.fromtimestamp(time.time() + 1800).strftime("%H:%M")
+            reason = f" {message}" if message in _KNOWN_REASONS else ""
             self._context.store.update_subscription(sub_id, last_check=time.time(),
-                                                    last_result=f"Check failed: {message}",
+                                                    last_result=f"{_CHECK_FAILED}{reason} Trying again at {again}.",
                                                     next_check=time.time() + 1800)
         write_log(f"Subscription check {sub_id} failed: {message}", "critical")
         self._sync()
@@ -335,11 +424,12 @@ class SubscriptionsController(QObject):
                 "subId": sub["id"], "title": sub["title"] or sub["url"], "url": sub["url"],
                 "site": self._context.site(sub["site"]).label, "active": bool(sub["enabled"]),
                 "autoDownload": bool(sub["auto_download"]),
-                "intervalText": f"Every {sub['interval_hours']} h" if sub["interval_hours"] < 24 else "Daily",
+                "intervalText": _interval(sub["interval_hours"]),
                 "lastText": _when(sub["last_check"]),
                 "nextText": _when(sub["next_check"]) if sub["enabled"] else "Off",
                 "resultText": sub["last_result"], "newCount": sub["new_count"],
                 "checking": sub["id"] in self._checking,
+                "failed": str(sub["last_result"]).startswith(_CHECK_FAILED),
             })
         self._model.sync(rows)
         self.changed.emit()

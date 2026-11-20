@@ -22,6 +22,8 @@ Rectangle {
         + (langs.text.trim() || "en.*")
 
     signal closed()
+    // The link was added to the queue with these choices.
+    signal queued()
 
     function _pref(key) { return prefsController.value(key) }
 
@@ -98,6 +100,20 @@ Rectangle {
 
     onVisibleChanged: if (visible) panel.reset()
 
+    // The keys the buttons' tooltips name: Esc closes the options, Ctrl+Enter adds the download. An
+    // open list or dialog takes Esc first, so Esc there closes only that.
+    Shortcut {
+        sequence: "Escape"
+        enabled: panel.visible && !presetDialog.opened
+        onActivated: closeButton.clicked()
+    }
+    Shortcut {
+        sequences: ["Ctrl+Return", "Ctrl+Enter"]
+        enabled: panel.visible && addButton.enabled && !presetDialog.opened
+        onActivated: addButton.clicked()
+    }
+    FocusScroll { flickable: scroller }
+
     // The panel scrolls inside maxHeight, so a long playlist never squeezes the queue below it; the
     // action row stays pinned below the scrolling part. A Flickable rather than a ScrollView: the
     // content's width must not depend on whether the scroll bar shows. A ScrollView narrows its content
@@ -142,6 +158,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: Theme.spaceXs
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: analyzeController.busy ? "Reading the link..." : analyzeController.title
                         font.family: Theme.fontFamily
@@ -153,6 +170,7 @@ Rectangle {
                         elide: Text.ElideRight
                     }
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: analyzeController.busy ? analyzeController.status
                             : [analyzeController.uploader, analyzeController.siteLabel, analyzeController.details]
@@ -185,6 +203,7 @@ Rectangle {
                     }
                 }
                 AppButton {
+                    id: closeButton
                     Layout.alignment: Qt.AlignTop
                     kind: "ghost"
                     compact: true
@@ -217,7 +236,7 @@ Rectangle {
                         Layout.fillWidth: true
                         model: prefsController.options.kind
                         accessibleName: "Type"
-                        toolTipText: "Download the video, or only its sound"
+                        toolTipText: "Download the video, or only its audio"
                         onActivated: analyzeController.refreshArchived(panel.options())
                     }
                 }
@@ -240,7 +259,7 @@ Rectangle {
                         visible: kindBox.currentValue === "audio"
                         model: prefsController.options.audio
                         accessibleName: "Audio format"
-                        toolTipText: "MP3 plays everywhere; FLAC and WAV are lossless; Original keeps the site's own sound unconverted"
+                        toolTipText: "MP3 plays everywhere; FLAC and WAV keep full quality (bigger files); Original keeps the site's sound as it is"
                         onActivated: analyzeController.refreshArchived(panel.options())
                     }
                 }
@@ -254,7 +273,7 @@ Rectangle {
                         Layout.fillWidth: true
                         model: prefsController.options.audioQuality
                         accessibleName: "Audio quality"
-                        toolTipText: "Sites stream about 128-256 kbps; a higher bitrate keeps all of it but can't add detail"
+                        toolTipText: "Higher numbers sound better and make bigger files; above 256 the sound can't get better than the site's"
                         onActivated: analyzeController.refreshArchived(panel.options())
                     }
                 }
@@ -279,35 +298,35 @@ Rectangle {
                     AppSwitch {
                         id: lyricsSwitch
                         accessibleName: "Save lyrics"
-                        toolTipText: "Save timed lyrics (.lrc) from the site's captions"
-                            + (prefsController.value("formats.lyrics_online") ? ", else from LRCLIB" : "")
+                        toolTipText: "Save lyrics that follow along with the song, from the site's captions"
+                            + (prefsController.value("formats.lyrics_online") ? " or a free online lyrics service" : "")
                             + "; the audio player shows them line by line"
                     }
                 }
                 FormRow {
                     Layout.fillWidth: true
                     visible: kindBox.currentValue !== "audio"
-                    label: "Container"
+                    label: "File type"
                     labelWidth: 110
                     StyledComboBox {
                         id: containerBox
                         Layout.fillWidth: true
                         model: prefsController.options.container
-                        accessibleName: "Container"
-                        toolTipText: "MP4 plays everywhere; MKV keeps any codec, subtitles, and chapters"
+                        accessibleName: "File type"
+                        toolTipText: "MP4 plays everywhere; MKV keeps the best picture, subtitles, and chapters"
                     }
                 }
                 FormRow {
                     Layout.fillWidth: true
                     visible: kindBox.currentValue !== "audio"
-                    label: "Codecs"
+                    label: "Compatibility"
                     labelWidth: 110
                     StyledComboBox {
                         id: codecBox
                         Layout.fillWidth: true
                         model: prefsController.options.codec
-                        accessibleName: "Codec preference"
-                        toolTipText: "Compatible prefers H.264 video and AAC sound, which every player handles; best quality allows AV1 and VP9"
+                        accessibleName: "Compatibility"
+                        toolTipText: "Plays everywhere picks what every player handles; Best quality may not play on older devices"
                     }
                 }
                 FormRow {
@@ -351,12 +370,14 @@ Rectangle {
                             Layout.fillWidth: true
                             visible: tracksBox.currentValue === "languages" && analyzeController.audioTracks.length <= 1
                             placeholderText: "es, fr"
-                            toolTipText: "Language codes, comma separated; a video without them keeps its original track"
+                            accessibleName: "Extra audio languages"
+                            toolTipText: "Short language codes separated by commas, such as es for Spanish; a video without them keeps its original language"
                         }
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             visible: tracksBox.currentValue !== "original" && containerBox.currentValue === "webm"
-                            text: "Several audio tracks are saved as MKV."
+                            text: "Videos with more than one language are saved as MKV."
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontCaption
                             color: Theme.textMuted
@@ -384,24 +405,26 @@ Rectangle {
                             Layout.preferredWidth: 130
                             visible: subtitlesBox.currentValue === "sidecar" || subtitlesBox.currentValue === "both"
                             model: prefsController.options.subtitleFormat
-                            accessibleName: "Subtitle file format"
-                            toolTipText: "SRT works in most players; WebVTT keeps more styling"
+                            accessibleName: "Subtitle file type"
+                            toolTipText: "SRT works in most players; VTT keeps more of the text styling"
                         }
                         StyledTextField {
                             id: langs
                             Layout.preferredWidth: 110
                             visible: subtitlesBox.currentValue !== "none"
                             placeholderText: "en.*"
-                            toolTipText: "Languages, comma separated: en.* is every English variant"
+                            accessibleName: "Subtitle languages"
+                            toolTipText: "Short language codes separated by commas, without spaces: en.* is every kind of English"
                                 + (analyzeController.subtitleLangs.length
-                                   ? ". This video has: " + analyzeController.subtitleLangs.slice(0, 12).join(", ") : "")
+                                   ? ". This video has: " + analyzeController.subtitleLangs.slice(0, 12)
+                                       .map(code => playerController.languageName(code) + " (" + code + ")").join(", ") : "")
                         }
                     }
                 }
                 FormRow {
                     Layout.fillWidth: true
                     visible: !panel.audio && subtitlesBox.currentValue !== "none" && analyzeController.subtitleLangs.length > 0
-                    label: "Languages here"
+                    label: "This video has"
                     labelWidth: 110
                     // This video's subtitle languages: a click adds or removes one from the list above.
                     Flow {
@@ -414,8 +437,9 @@ Rectangle {
                                 readonly property var codes: langs.text.split(",").map(code => code.trim())
                                 compact: true
                                 kind: codes.indexOf(modelData) >= 0 ? "primary" : "ghost"
-                                text: modelData
-                                toolTipText: codes.indexOf(modelData) >= 0 ? "Leave out " + modelData : "Add " + modelData
+                                readonly property string name: playerController.languageName(modelData)
+                                text: name
+                                toolTipText: codes.indexOf(modelData) >= 0 ? "Leave out " + name : "Add " + name
                                 onClicked: {
                                     var list = codes.filter(code => code.length > 0 && code !== modelData)
                                     if (codes.indexOf(modelData) < 0) list.push(modelData)
@@ -438,7 +462,7 @@ Rectangle {
                 }
                 FormRow {
                     Layout.fillWidth: true
-                    label: "Embed"
+                    label: "In the file"
                     labelWidth: 110
                     RowLayout {
                         spacing: Theme.spaceLg
@@ -474,9 +498,10 @@ Rectangle {
             }
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: analyzeController.liveStatus === "is_upcoming"
-                text: "The stream hasn't started. It waits in the queue and begins recording when the stream starts."
+                text: "The stream hasn't started yet. It waits in Downloads and starts recording when the stream begins."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted
@@ -490,10 +515,11 @@ Rectangle {
             }
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: analyzeController.isPlaylist && !analyzeController.selectable
                 // A channel's tabs, or a signed-in account's own playlists: lists of lists.
-                text: "Each list here downloads whole, into a folder of its own."
+                text: "Each playlist here downloads whole, into a folder of its own."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted
@@ -515,17 +541,21 @@ Rectangle {
             kind: "ghost"
             text: "Save as preset"
             iconName: "add"
-            toolTipText: "Keep these choices as a preset next to the link box"
+            toolTipText: "Keep these choices in the list next to the Download button"
             onClicked: presetDialog.open()
         }
         Item { Layout.fillWidth: true }
         AppButton {
+            id: addButton
             kind: "primary"
             text: analyzeController.liveStatus === "is_upcoming" ? "Wait and record"
                 : analyzeController.liveStatus === "is_live" ? "Record" : "Add to queue"
             iconName: analyzeController.liveStatus ? "live" : "download"
-            toolTipText: "Queue this download with the choices above (Ctrl+Enter)"
-            onClicked: if (analyzeController.addToQueue(panel.options())) panel.closed()
+            toolTipText: "Add this download with the choices above (Ctrl+Enter)"
+            onClicked: if (analyzeController.addToQueue(panel.options())) {
+                panel.queued()
+                panel.closed()
+            }
         }
     }
 

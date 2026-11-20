@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gfgmd.controllers.player_ctrl import PlayerController
+from gfgmd.controllers.player_ctrl import PlayerController, language_name
 from gfgmd.core.store import SCHEMA_VERSION, Store
 from gfgmd.core.tools import ToolSet
 from gfgmd.services.context import AppContext
@@ -102,7 +102,7 @@ def test_sidecar_subtitles_and_lyrics(player, tmp_path):
     video = files(tmp_path, "Talk (1080p).mp4")[0]
     (tmp_path / "Talk (1080p).en.srt").write_text("1\n00:00:01,000 --> 00:00:02,500\nHello\n", encoding="utf-8")
     player.playVideo(video, [])
-    assert player.captionFiles == ["en.srt"] and player.captionFile == -1
+    assert player.captionFiles == ["English"] and player.captionFile == -1
     player.setCaptionFile(0)
     assert player.captionAt(1500) == "Hello" and player.captionAt(3000) == ""
     song = files(tmp_path, "Song.mp3")[0]
@@ -111,6 +111,45 @@ def test_sidecar_subtitles_and_lyrics(player, tmp_path):
     assert player.lyrics == ["One", "Two"]
     assert [player.lyricLine(ms) for ms in (500, 2000, 6000)] == [-1, 0, 1]
     assert player.lyricStart(1) == 5000
+
+
+def test_subtitle_files_are_named_by_language(player, tmp_path):
+    """The subtitle menu shows language names, numbered when two files share one, never file suffixes."""
+    video = files(tmp_path, "Talk.mp4")[0]
+    for name in ("Talk.en.srt", "Talk.en.vtt", "Talk.en-orig.vtt", "Talk.es-419.srt", "Talk.srt", "Talk.xx.srt"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    player.playVideo(video, [])
+    assert sorted(player.captionFiles) == sorted(["English 1", "English 2", "English (original)",
+                                                  "Spanish (Latin America)", "Subtitles 1", "Subtitles 2"])
+
+
+@pytest.mark.parametrize(("code", "name"), [("en", "English"), ("pt-BR", "Portuguese (Brazil)"),
+                                            ("zh-Hans", "Chinese (Simplified Han)"), ("en-nP7-2PuUl7o", "English"),
+                                            ("xx", ""), ("live_chat", "")])
+def test_language_names(player, code, name):
+    """Codes become names; a code that names no language stays as it is for Download options."""
+    assert language_name(code) == name
+    assert player.languageName(code) == (name or code)
+
+
+def test_open_in_another_player_failures_read_plainly(player, tmp_path, monkeypatch):
+    """Windows' error text goes to the log; the notice says what happened."""
+    notices, logged = [], []
+    player.notice.connect(notices.append)
+    monkeypatch.setattr("gfgmd.controllers.player_ctrl.write_log", lambda message, level: logged.append(message))
+    no_program = OSError(22, "No application is associated with the specified file for this operation")
+    no_program.winerror = 1155  # type: ignore[attr-defined]
+    for error in (no_program, FileNotFoundError(2, "not found"), PermissionError(13, "denied")):
+        def startfile(_path: str, error: OSError = error) -> None:
+            raise error
+        monkeypatch.setattr("gfgmd.controllers.player_ctrl.os.startfile", startfile, raising=False)
+        player.openInSystem(str(tmp_path / "clip.mkv"))
+    assert notices == ["Windows has no program set up to play this file.",
+                       "The file isn't there any more; it may have been moved or deleted.",
+                       "Couldn't open the file in another player."]
+    assert len(logged) == 3 and "No application is associated" in logged[0]
+    player.logPlaybackError(str(tmp_path / "clip.mkv"), "Could not open codec")
+    assert "Could not open codec" in logged[-1]
 
 
 def test_cover_beside_the_song_is_used(qapp, player, tmp_path):
