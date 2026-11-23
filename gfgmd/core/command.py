@@ -347,9 +347,12 @@ def _audio_args(source: Source, options: DownloadOptions) -> list[str]:
     if not options.lossless_audio:
         args += ["--audio-quality", f"{options.audio_quality}K"]
     if options.embed_thumbnail:
-        # WAV can't hold a cover, so the cover is saved beside it as "<name>.jpg".
-        args += ["--write-thumbnail" if options.audio_format == "wav" else "--embed-thumbnail",
-                 "--convert-thumbnails", "jpg"]
+        # WAV can't hold a cover, so the cover is saved beside it as "<name>.jpg". The empty template
+        # leaves out the list's own cover, which yt-dlp would save in the list's folder; that file
+        # belongs to no song and would keep the folder once its songs were deleted.
+        cover = ["--write-thumbnail", "--output", "pl_thumbnail:"] if options.audio_format == "wav" \
+            else ["--embed-thumbnail"]
+        args += [*cover, "--convert-thumbnails", "jpg"]
         if options.cover == "square":
             args += ["--postprocessor-args", SQUARE_COVER]
     if options.embed_metadata:

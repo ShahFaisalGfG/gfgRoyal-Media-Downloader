@@ -31,7 +31,7 @@ from gfgmd.core.command import SESSION_ARCHIVE, Auth, RunPaths, folder_name
 from gfgmd.core.extract import AudioExtractor, ExtractSpec
 from gfgmd.core.jobs import STALL_SECONDS, JobExecutor, JobResult, JobSpec, Runner
 from gfgmd.core.lyrics import Fetch
-from gfgmd.core.naming import AUDIO_EXTENSIONS, format_label, group_of, remove_partials
+from gfgmd.core.naming import AUDIO_EXTENSIONS, format_label, group_of, remove_empty_scratch, remove_partials
 from gfgmd.core.options import DownloadOptions, options_from_preset
 from gfgmd.core.progress import Event, Snapshot
 from gfgmd.core.runner import run_to_completion
@@ -43,7 +43,7 @@ from gfgmd.models.list_model import DictListModel
 from gfgmd.services import power
 from gfgmd.services.context import VAULT_METHODS, AppContext
 from gfgmd.services.notifier import Notifier
-from gfgmd.services.recycle import recycle_media
+from gfgmd.services.recycle import recycle_saved
 from gfgmd.services.taskbar import INDETERMINATE, NORMAL, PAUSED, TaskbarProgress
 from gfgmd.services.tasks import TaskRunner
 from gfgmd.services.thumbnails import cache_file
@@ -80,6 +80,7 @@ class _Running:
     archive: str
     site: str  # "" for an audio extraction, which no site limits
     live: bool
+    root: str = ""  # the download folder it saves into
     executor: JobExecutor | AudioExtractor | None = None
     stop_reason: str = ""
     files: list[tuple[dict[str, Any], str]] = field(default_factory=list)
@@ -792,7 +793,7 @@ class QueueController(QObject):
         options = options.with_changes(
             proxy=str(network.get("proxy", "")), force_ipv4=bool(network.get("force_ipv4", False)),
             limit_rate=rate, fragments=1 if rate else fragments)
-        running = _Running(job["id"], archive, "" if job["input_path"] else job["site"], live)
+        running = _Running(job["id"], archive, "" if job["input_path"] else job["site"], live, job["output_root"])
         self._running[job["id"]] = running
         self._worked = True
         self._context.store.update_job(job["id"], state="running", message="", error_key="", action="")
@@ -878,17 +879,11 @@ class QueueController(QObject):
 
     def _mirror_folder(self, video: Path, record: dict[str, Any]) -> str:
         """The video's folder below its download root (a playlist's, or "" for the root), which the audio mirrors."""
-        roots = [self._context.download_root("video")]
-        job = self._context.store.job(record["job_id"]) if record.get("job_id") else None
-        if job is not None:
-            roots.insert(0, Path(job["output_root"]))
-        for root in roots:
-            try:
-                folder = video.parent.relative_to(root)
-            except ValueError:
-                continue
-            return "" if folder == Path(".") else folder.as_posix()
-        return ""  # a video saved elsewhere: its audio goes straight into the audio folder
+        root = self._context.roots_of([{**record, "filepath": str(video)}])[0]
+        if root is None:
+            return ""  # a video saved elsewhere: its audio goes straight into the audio folder
+        folder = video.parent.relative_to(root)
+        return "" if folder == Path(".") else folder.as_posix()
 
     def _take_updates(self, running: _Running) -> bool:
         """Store what the download learned about its videos (its list, skips, stalls); True when any changed."""
@@ -961,7 +956,8 @@ class QueueController(QObject):
                 duration=float(duration) if isinstance(duration, (int, float)) else 0.0,
                 size=size, thumbnail=str(info.get("thumbnail") or (job or {}).get("thumbnail", "")),
                 group_key=group_key, group_title=group_title,
-                position=position if isinstance(position, int) else 0)
+                position=position if isinstance(position, int) else 0,
+                output_root=job["output_root"] if job else "")
             if job is not None and info.get("id") and source_of(job).is_collection:
                 # A video the list didn't name (a site without a playlist file) is added as it is saved.
                 self._context.store.add_items(running.job_id, [{
@@ -1011,6 +1007,7 @@ class QueueController(QObject):
                 self._record_result(job, result)
                 if result.state == "done":
                     self._tidy_partials(job)
+                    self._tidy_scratch(job["output_root"])
 
     def _record_result(self, job: dict[str, Any], result: JobResult) -> None:
         job_id = job["id"]
@@ -1105,15 +1102,31 @@ class QueueController(QObject):
         else:
             self._note_partials(job["id"], set())
         remove_partials(partials | saved, Path(job["output_root"]) / ".incomplete")
+        self._tidy_scratch(job["output_root"])
+
+    def _tidy_scratch(self, root: str) -> None:
+        """Remove the empty folders yt-dlp left in a download folder's unfinished-file folder.
+
+        Not while another download into that folder runs: it may have made its folder there and not
+        yet written into it.
+        """
+        if any(os.path.normcase(running.root) == os.path.normcase(root) for running in self._running.values()):
+            return
+        try:
+            remove_empty_scratch(Path(root) / ".incomplete")
+        except OSError as error:
+            write_log(f"Empty folders in {root} couldn't be removed: {error}", "general")
 
     def _recycle_saved(self, job: dict[str, Any]) -> bool:
-        """Move a download's saved files to the Recycle Bin and take them out of the Library.
+        """Move a download's saved files to the Recycle Bin and take them out of the Library; its
+        playlist's or channel's folder goes too once it is empty.
 
         False when Windows didn't move them (a file open in a player), so the download stays listed.
         """
         records = self._context.store.history_for_job(job["id"])
-        saved = [record["filepath"] for record in records if os.path.isfile(record["filepath"])]
-        if not recycle_media(saved):
+        paths = [str(record["filepath"]) for record in records]
+        saved = [path for path in paths if os.path.isfile(path)]
+        if not recycle_saved(list(zip(paths, self._context.roots_of(records)))):
             self.notice.emit("Windows couldn't move the files to the Recycle Bin; they may be open in a player.")
             return False
         self._context.store.delete_history(record["id"] for record in records)

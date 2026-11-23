@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS history (
     finished REAL NOT NULL,
     group_key TEXT,
     group_title TEXT,
-    position INTEGER NOT NULL DEFAULT 0
+    position INTEGER NOT NULL DEFAULT 0,
+    output_root TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS history_by_time ON history (finished DESC);
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -216,8 +217,10 @@ class Store:
             # Each listed video's link and thumbnail.
             "job_items": ("url TEXT NOT NULL DEFAULT ''", "thumbnail TEXT NOT NULL DEFAULT ''"),
             # The playlist or channel folder a file belongs to (NULL until worked out; '' for none), its
-            # name, and the file's place in it.
-            "history": ("group_key TEXT", "group_title TEXT", "position INTEGER NOT NULL DEFAULT 0"),
+            # name, and the file's place in it; and the download folder it was saved under ('' when
+            # saved before it was recorded), which deleting the file's playlist folder never removes.
+            "history": ("group_key TEXT", "group_title TEXT", "position INTEGER NOT NULL DEFAULT 0",
+                        "output_root TEXT NOT NULL DEFAULT ''"),
             # An upload a subscription found and keeps for Download new: its own link and title.
             "subscription_seen": ("url TEXT NOT NULL DEFAULT ''", "title TEXT NOT NULL DEFAULT ''"),
         }
@@ -466,7 +469,7 @@ class Store:
     def add_history(self, filepath: str, **fields: Any) -> int:
         """Record a finished file (replacing an older record of the same path)."""
         allowed = {"job_id", "video_id", "site", "kind", "title", "uploader", "url", "height", "duration", "size",
-                   "thumbnail", "group_key", "group_title", "position"}
+                   "thumbnail", "group_key", "group_title", "position", "output_root"}
         values = {key: value for key, value in fields.items() if key in allowed and value is not None}
         values["filepath"] = filepath
         values["finished"] = fields.get("finished") or time.time()

@@ -137,7 +137,8 @@ def test_yt_dlp_errors_reach_the_log(qapp, queue, context):
 
 def test_a_finished_download_deletes_its_saved_videos_leftovers(qapp, queue, context):
     """A part an earlier attempt left of a video since saved (another stream) goes when the download
-    finishes; a skipped video's part stays for Try again until the download leaves the list."""
+    finishes; a skipped video's part stays for Try again until the download leaves the list, and the
+    emptied folder goes with it."""
     queue.pauseAll()
     queue.addLinks("https://fake.test/playlist", "video-best-mp4")
     job = context.store.jobs()[0]
@@ -155,7 +156,7 @@ def test_a_finished_download_deletes_its_saved_videos_leftovers(qapp, queue, con
     assert wait_for(qapp, lambda: states(context) == ["done"])
     assert sorted(path.name for path in folder.iterdir()) == [skipped_part.name]
     queue.clearFinished()
-    assert list(folder.iterdir()) == []
+    assert not folder.exists() and folder.parent.is_dir()
 
 
 def test_full_disk_pauses_the_queue(qapp, queue, context):
@@ -347,6 +348,58 @@ def test_remove_with_files_sends_them_to_the_recycle_bin(qapp, queue, context):
     recycle.assert_called_once_with([saved])
     assert context.store.jobs() == [] and context.store.history() == [] and removed == [True]
     assert not context.job_dir(job_id).exists()  # a later job given the same id starts clean
+
+
+def _moved_out(paths: list[str]) -> bool:
+    """Windows moving files to the Recycle Bin, as far as their folder sees it."""
+    for path in paths:
+        Path(path).unlink()
+    return True
+
+
+def test_removing_a_playlist_with_its_files_removes_its_emptied_folder(qapp, queue, context):
+    """The playlist's folder goes with its last file and the download folder stays; yt-dlp's emptied
+    folder in .incomplete went when the download finished."""
+    queue.addLinks("https://fake.test/listed", "video-best-mp4")
+    assert wait_for(qapp, lambda: states(context) == ["done"] and len(context.store.history()) == 3)
+    root = Path(load_settings()["downloads"]["folder"])
+    folder = root / "Fake List"
+    assert folder.is_dir() and not (root / ".incomplete" / "Fake List").exists()
+    assert {record["output_root"] for record in context.store.history()} == {str(root)}
+    with patch.object(recycle_module, "to_recycle_bin", side_effect=_moved_out):
+        queue.remove(context.store.jobs()[0]["id"], True)
+    assert context.store.history() == [] and not folder.exists() and root.is_dir()
+
+
+def test_emptied_scratch_folders_stay_while_another_download_there_runs(qapp, queue, context):
+    """Another download into the same folder may have just made its folder in .incomplete."""
+    from gfgmd.controllers.queue_ctrl import _Running
+    root = load_settings()["downloads"]["folder"]
+    left = Path(root) / ".incomplete" / "Fake List"
+    left.mkdir(parents=True)
+    queue._running[99] = _Running(99, "archive", "youtube", False, root)
+    queue._tidy_scratch(root)
+    assert left.is_dir()
+    del queue._running[99]
+    queue._tidy_scratch(root)
+    assert not left.exists() and left.parent.is_dir()
+
+
+def test_the_pc_stays_awake_while_downloading_unless_turned_off(qapp, queue, context):
+    """On while a download runs, off once nothing does, and off straight away when the setting is."""
+    calls: list[bool] = []
+    settings = load_settings()
+    with patch("gfgmd.controllers.queue_ctrl.power.keep_awake", side_effect=calls.append):
+        queue.addLinks("https://fake.test/slow", "video-best-mp4")
+        assert wait_for(qapp, lambda: calls == [True])
+        settings["downloads"]["keep_awake"] = False
+        save_settings(settings)
+        assert wait_for(qapp, lambda: calls == [True, False])
+        settings["downloads"]["keep_awake"] = True
+        save_settings(settings)
+        assert wait_for(qapp, lambda: calls == [True, False, True])
+        queue.cancel(context.store.jobs()[0]["id"])
+        assert wait_for(qapp, lambda: queue.runningCount == 0 and calls == [True, False, True, False])
 
 
 def test_removing_a_running_download_with_files_deletes_its_unfinished_files(qapp, queue, context):

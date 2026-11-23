@@ -141,13 +141,16 @@ def test_audio_download(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("audio_format", ["flac", "wav", "best"])
 def test_lossless_audio_has_no_bitrate(tmp_path: Path, audio_format: str) -> None:
-    """FLAC, WAV, and the original stream ignore the bitrate; WAV gets its cover as a separate file."""
+    """FLAC, WAV, and the original stream ignore the bitrate; WAV gets its cover as a separate file,
+    without the list's own cover beside its songs."""
+    url = "https://www.youtube.com/playlist?list=PLabcdefghijklmnop"
     options = DownloadOptions(kind="audio", audio_format=audio_format, embed_thumbnail=True, cover="original")
-    command = download_command(VIDEO_URL, source_from_url(VIDEO_URL), options, TOOLS, paths(tmp_path))
+    command = download_command(url, source_from_url(url), options, TOOLS, paths(tmp_path))
     assert "--audio-quality" not in command
     assert [arg.split(":")[0] for arg in values(command, "--postprocessor-args")] == ["ExtractAudio+ffmpeg_o"]
     assert ("--write-thumbnail" in command) == (audio_format == "wav")
     assert ("--embed-thumbnail" in command) == (audio_format != "wav")
+    assert ("pl_thumbnail:" in values(command, "--output")) == (audio_format == "wav")
     assert f"(requested-audio-{audio_format})" in value(command, "--output")
 
 

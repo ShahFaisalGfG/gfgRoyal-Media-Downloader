@@ -143,6 +143,36 @@ def test_library_filters_and_recycle_bin(qapp, context, tmp_path):
     assert library.total == 1
 
 
+def test_library_recycle_bin_removes_the_folders_it_empties(qapp, context, tmp_path):
+    """A channel tab's last file takes its folder, and the channel's once its other tab goes; a file
+    saved before its download folder was recorded finds today's; the download folder, and a folder
+    outside every download folder, stay."""
+    root = context.download_root("video")
+    videos, shorts = root / "Channel" / "Videos", root / "Channel" / "Shorts"
+    elsewhere = tmp_path / "Elsewhere" / "List"
+    ids = {}
+    for folder, name, recorded in ((videos, "A", str(root)), (shorts, "B", ""), (elsewhere, "C", "")):
+        folder.mkdir(parents=True)
+        path = folder / f"{name}.mp4"
+        path.write_bytes(b"v")
+        (folder / f"{name}.en.srt").write_text("1")
+        ids[name] = context.store.add_history(str(path), title=name, kind="video", site="youtube",
+                                              group_key=str(folder).casefold(), group_title=name, output_root=recorded)
+    library = LibraryController(context)
+
+    def moved_out(paths: list[str]) -> bool:
+        for path in paths:
+            Path(path).unlink()
+        return True
+
+    with patch.object(recycle_module, "to_recycle_bin", side_effect=moved_out):
+        library.deleteFiles([ids["A"]])
+        assert not videos.exists() and shorts.is_dir()  # the channel still holds its Shorts
+        library.deleteFiles([ids["B"], ids["C"]])
+    assert not (root / "Channel").exists() and root.is_dir()
+    assert elsewhere.is_dir() and not any(elsewhere.iterdir()) and library.total == 0
+
+
 def test_library_groups_a_playlists_files_in_order(qapp, context):
     """A playlist's folder is one row that opens into its files in the playlist's order; singles stand alone."""
     root = context.download_root("video")

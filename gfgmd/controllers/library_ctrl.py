@@ -18,7 +18,7 @@ from gfgmd.core.naming import format_label, group_of
 from gfgmd.core.sources import source_from_url
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services.context import AppContext
-from gfgmd.services.recycle import recycle_media
+from gfgmd.services.recycle import recycle_saved
 from gfgmd.utils.format import format_bytes, format_duration, media_noun
 from gfgmd.utils.logging import write_log
 
@@ -193,14 +193,9 @@ class LibraryController(QObject):
         records = store.history_without_group()
         if not records:
             return
-        roots = [self._context.download_root("video"), self._context.download_root("audio")]
         groups: list[tuple[int, str, str]] = []
-        for record in records:
-            path = Path(record["filepath"])
-            job = store.job(record["job_id"]) if record["job_id"] else None
-            candidates = ([Path(job["output_root"])] if job is not None else []) + roots
-            root = next((candidate for candidate in candidates if _inside(path, candidate)), None)
-            key, title = group_of(path, root)
+        for record, root in zip(records, self._context.roots_of(records)):
+            key, title = group_of(Path(record["filepath"]), root)
             groups.append((int(record["id"]), key, title))
         try:
             store.set_history_groups(groups)
@@ -307,20 +302,17 @@ class LibraryController(QObject):
 
     @Slot("QVariantList")
     def deleteFiles(self, history_ids: list[int]) -> None:
-        """Move files (with their captions, lyrics, and covers) to the Recycle Bin and take them off the list."""
-        records = [self._record(int(item)) for item in history_ids]
-        paths = [record["path"] for record in records if record and not record["missing"]]
-        if not recycle_media(paths):
+        """Move files (with their captions, lyrics, and covers) to the Recycle Bin and take them off the list.
+
+        A playlist's or channel's folder goes too once it is empty; the download folder always stays.
+        """
+        found = (self._context.store.history_record(int(item)) for item in history_ids)
+        records = [record for record in found if record is not None]
+        paths = [str(record["filepath"]) for record in records]
+        present = sum(1 for path in paths if os.path.isfile(path))
+        if not recycle_saved(list(zip(paths, self._context.roots_of(records)))):
             self.notice.emit("Windows couldn't move the files to the Recycle Bin; they may be open in a player.")
             return
         self._context.store.delete_history(int(item) for item in history_ids)
-        self.notice.emit(f"Moved {len(paths)} file{'s' if len(paths) != 1 else ''} to the Recycle Bin.")
+        self.notice.emit(f"Moved {present} file{'s' if present != 1 else ''} to the Recycle Bin.")
         self.reload()
-
-
-def _inside(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True

@@ -339,6 +339,7 @@ AppWindow {
                         }
                         SettingRow {
                             label: "Keep the PC awake while downloading"
+                            hint: "Windows doesn't sleep or hibernate on its own while downloads run or wait to try again. The screen can still turn off, and Sleep in the Start menu still works."
                             AppSwitch {
                                 checked: prefsWin.v("downloads.keep_awake")
                                 accessibleName: "Keep the PC awake while downloading"

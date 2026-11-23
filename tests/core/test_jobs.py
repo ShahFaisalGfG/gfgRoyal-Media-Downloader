@@ -169,7 +169,9 @@ def test_a_video_that_fails_without_the_sign_in_too_is_tried_so_once(fake_ytdlp:
 
 def test_a_video_whose_server_never_answers_is_skipped(fake_ytdlp: list[str], tmp_path: Path,
                                                        monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stalling attempt after attempt, it is left out after ITEM_ATTEMPTS stalls; the rest is saved."""
+    """Stalling attempt after attempt, it is left out after ITEM_ATTEMPTS stalls; the rest is saved.
+    What yt-dlp wrote for it before any data came (thumbnail, empty part, fragment list) is known, so
+    it goes with the download's other unfinished files."""
     monkeypatch.setenv("FAKE_STALLS", "9")
     spec = make_spec(tmp_path, "stall", kind="playlist")
     executor = JobExecutor(spec, lambda: TOOLS, runner=fake_runner(fake_ytdlp), stall_seconds=1.0)
@@ -177,6 +179,10 @@ def test_a_video_whose_server_never_answers_is_skipped(fake_ytdlp: list[str], tm
     assert result.state == "done" and len(result.files) == 2
     assert [failure.item_id for failure in result.skipped] == ["bbbbbbbbbbb"]
     assert result.skipped[0].category.final == "The download server didn't answer. Try again later."
+    scratch = spec.paths.incomplete / "Fake List"
+    assert sorted(path.suffix for path in scratch.iterdir()) == [".jpg", ".part", ".ytdl"]
+    assert naming.remove_partials(executor.partial_files(), spec.paths.incomplete) == 3
+    assert list(scratch.iterdir()) == []
 
 
 def test_an_error_about_the_list_names_no_video(tmp_path: Path) -> None:

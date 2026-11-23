@@ -136,3 +136,48 @@ def test_format_labels_for_the_lists() -> None:
     assert naming.format_label("", {"kind": "audio", "audio_format": "best"}) == ""
     assert naming.format_label("", {"kind": "video", "container": "mkv"}) == "MKV"
     assert naming.format_label("C:/Videos/Talk (1080p).webm", {"kind": "video", "container": "mp4"}) == "WEBM"
+
+
+def test_emptied_list_folders_go_and_the_download_folder_stays(tmp_path: Path) -> None:
+    """A playlist's folder goes with its last file, a channel's with its last tab folder; the download
+    folder, folders holding anything, and folders outside it stay."""
+    root = tmp_path / "Videos"
+    playlist, videos, shorts = root / "Road Trip", root / "Channel" / "Videos", root / "Channel" / "Shorts"
+    for folder in (playlist, videos, shorts):
+        folder.mkdir(parents=True)
+    (shorts / "Clip (720p).mp4").write_bytes(b"v")
+    outside = tmp_path / "Elsewhere"
+    outside.mkdir()
+    removed = naming.remove_empty_folders([playlist, videos, root, outside], root)
+    assert removed == 2 and not playlist.exists() and not videos.exists()
+    assert shorts.exists() and root.is_dir() and outside.is_dir()
+    (shorts / "Clip (720p).mp4").unlink()
+    assert naming.remove_empty_folders([shorts], root) == 2  # Shorts, then the channel's folder
+    assert not (root / "Channel").exists() and root.is_dir()
+    assert naming.remove_empty_folders([root / "Gone"], root) == 0  # a folder already gone
+
+
+@pytest.mark.skipif(not hasattr(Path, "is_junction"), reason="needs Path.is_junction")
+def test_a_linked_folder_is_never_removed(tmp_path: Path) -> None:
+    """A junction inside the download folder stays, even when the folder it leads to is empty."""
+    _winapi = pytest.importorskip("_winapi")
+    root, target = tmp_path / "Videos", tmp_path / "Target"
+    root.mkdir()
+    target.mkdir()
+    link = root / "Linked"
+    _winapi.CreateJunction(str(target), str(link))
+    assert naming.remove_empty_folders([link], root) == 0
+    assert link.is_junction() and target.is_dir()
+
+
+def test_empty_scratch_folders_go_and_unfinished_files_stay(tmp_path: Path) -> None:
+    """yt-dlp's emptied list folders in .incomplete go; one holding an unfinished file stays, as does .incomplete."""
+    incomplete = tmp_path / ".incomplete"
+    (incomplete / "Fake List").mkdir(parents=True)
+    (incomplete / "Channel" / "Videos").mkdir(parents=True)
+    paused = incomplete / "Paused List"
+    paused.mkdir()
+    (paused / "Song [aaaaaaaaaaa] (requested-audio-mp3).webm.part").write_bytes(b"p")
+    assert naming.remove_empty_scratch(incomplete) == 3
+    assert sorted(entry.name for entry in incomplete.iterdir()) == ["Paused List"]
+    assert naming.remove_empty_scratch(tmp_path / "missing") == 0

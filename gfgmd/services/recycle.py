@@ -5,10 +5,12 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+from collections.abc import Sequence
 from ctypes import wintypes
 from pathlib import Path
 
 from gfgmd.core.captions import companion_files
+from gfgmd.core.naming import remove_empty_folders
 
 _FO_DELETE = 0x0003
 _FOF_SILENT = 0x0004
@@ -51,3 +53,21 @@ def recycle_media(paths: list[str]) -> bool:
     files = [str(entry) for path in paths if os.path.isfile(path)
              for entry in (Path(path), *companion_files(Path(path)))]
     return not files or to_recycle_bin(files)
+
+
+def recycle_saved(files: Sequence[tuple[str, Path | None]]) -> bool:
+    """Send downloaded files to the Recycle Bin (see recycle_media), then remove the playlist and
+    channel folders they leave empty.
+
+    Each file comes with the download folder it was saved under, which stays, as does every folder
+    above it; a file without one (None) keeps its folder. False when Windows didn't move the files.
+    """
+    if not recycle_media([path for path, _ in files]):
+        return False
+    emptied: dict[Path, set[Path]] = {}
+    for path, root in files:
+        if root is not None:
+            emptied.setdefault(root, set()).add(Path(path).parent)
+    for root, folders in emptied.items():
+        remove_empty_folders(folders, root)
+    return True
