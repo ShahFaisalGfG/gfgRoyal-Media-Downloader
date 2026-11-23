@@ -254,6 +254,7 @@ A subscription shares its archive with downloads of the same channel, so nothing
 - **Start downloads at** (Preferences > Network and schedule): new downloads wait until that time; **Start now** in the bottom bar overrides it.
 - **Speed limits by time of day**: for example 500 KB/s from 09:00 to 18:00. The limit is shared by every running download; live recordings are never slowed.
 - **When downloads finish**: quit the app, sleep, hibernate, or shut down, chosen in the bottom bar, after a 60-second countdown you can cancel.
+- **Keep the PC awake while downloading** (Preferences > Downloads, on by default): Windows doesn't sleep or hibernate on its own while downloads run or wait to try again. The screen can still turn off, and Sleep in the Start menu still works.
 
 ---
 
@@ -331,6 +332,8 @@ A single download goes straight into that folder; anything holding several video
 | A TikTok, Instagram, or X profile | `<account>\` |
 
 Files are named after the title and the quality measured from the finished file, such as `Episode 001 (1080p).mp4`: a 1080p request that was only offered at 720p ends in `(720p)`, and videos that share a title get ` (2)`, ` (3)` instead of overwriting each other. Preferences offers other name styles (title only, date first, playlist number first). Unfinished files wait in the `.incomplete` folder, and per-playlist, per-format archives in `.archives` record what is done; both folders are hidden.
+
+Moving files to the Recycle Bin, from the Library or with **Remove** in Downloads, takes their captions, lyrics, and covers with them, and a playlist's, channel's, or profile's folder goes too once nothing else is in it. The download folder itself always stays.
 
 A video downloaded before isn't downloaded twice: its entry reads **Already downloaded**, and **Play** opens the file you have. When that file is gone (you deleted it), the video downloads again. **Download again** in its menu, or in the Library, downloads it once more anyway.
 
@@ -472,6 +475,8 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🔁 A playlist video that keeps breaking off with an error that doesn't name it (a missing part, "HTTP Error 403") is given up on like any other, so the list finishes; a download waiting to try again says why ("Trying again in 5 minutes · The connection dropped"); a list's videos you already have show **Downloaded before** as the list is read (yt-dlp's current wording, which names each one, wasn't recognized), and the summary leaves out a count of nothing saved ("7 downloaded before, 1 couldn't be downloaded"); a finished download deletes what earlier attempts left unfinished of the videos it saved, and a download leaving the list takes its other unfinished files with it
 - ⌨️ Where a message points at the app's window (sign in, choose a folder, wait for a stream), `gfgmd` names its own option instead (`--cookies`, `--output-dir`, `--wait-for-video`)
 - 🔏 A [privacy policy](PRIVACY.md) lists every connection the app makes; the installers show it and let you turn off app update checks, download tool updates, and online lyrics, and connecting the companion extension is an installer choice too. Every exe carries the app's name and version, and releases are ready to be signed through SignPath ([Code signing policy](#code-signing-policy))
+- 🗑️ Moving a playlist's, channel's, subscription's, or profile's files to the Recycle Bin removes its folder once it is empty (a channel's folder goes with its last tab folder; the download folder stays); WAV playlists no longer save the playlist's own cover beside their songs, which kept the folder; the empty folders yt-dlp leaves in `.incomplete` are removed when a download ends; and a video whose server never sent anything no longer leaves its thumbnail and empty part there once its download leaves the list
+- ☕ **Keep the PC awake while downloading** (on by default) explains in Preferences what it does: no sleep or hibernation on its own while downloads run or wait to try again
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry
 
 ### v1.0.0 - November 2026 *(current)*

@@ -185,7 +185,7 @@ def test_new_columns_reach_a_library_made_before_them(tmp_path: Path) -> None:
         raw.execute(f"DROP INDEX {index}")
     for table, column in (("jobs", "folder"), ("jobs", "batch"), ("job_items", "url"), ("job_items", "thumbnail"),
                           ("history", "group_key"), ("history", "group_title"), ("history", "position"),
-                          ("subscription_seen", "url"), ("subscription_seen", "title")):
+                          ("history", "output_root"), ("subscription_seen", "url"), ("subscription_seen", "title")):
         raw.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
     raw.commit()
     raw.close()
@@ -193,6 +193,9 @@ def test_new_columns_reach_a_library_made_before_them(tmp_path: Path) -> None:
     try:
         record = again.history()[0]
         assert record["group_key"] is None and record["position"] == 0  # to be worked out by the Library
+        assert record["output_root"] == ""  # not known for a file saved before it was recorded
+        again.add_history("C:/D/List/b.mp4", title="b", output_root="C:/D")
+        assert again.history_for_path("C:/D/List/b.mp4")["output_root"] == "C:/D"
         job = add(again, "b", folder="Mix", batch=True, items=[{"id": "q", "url": "https://youtu.be/q"}])
         assert (again.job(job)["folder"], again.job(job)["batch"]) == ("Mix", 1)
         assert again.job_items(job)[0]["url"] == "https://youtu.be/q"

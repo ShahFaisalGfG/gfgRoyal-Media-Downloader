@@ -547,6 +547,7 @@ class JobExecutor:
         self._pull_tracker()
         if event.kind == "item":
             self._note_place(event.data)
+            self._note_scratch(tracker, event.data)
         elif event.kind == "file":
             self._finish_queue.put(dict(event.data))
         elif event.kind == "error" and event.data.get("id") and not self._is_list(str(event.data["id"])):
@@ -568,6 +569,22 @@ class JobExecutor:
             return  # never outside the download folder
         with self._updates_lock:
             self._places[video_id] = (link, "" if folder == Path(".") else folder.as_posix())
+
+    def _note_scratch(self, tracker: ProgressTracker, data: dict[str, Any]) -> None:
+        """Note where yt-dlp keeps a video's unfinished files before any progress line names them.
+
+        It writes the thumbnail, an empty part, and the fragment list there first, so a video whose
+        server never sends a byte (it stalls, or is cancelled first) still has them deleted with the
+        download's other unfinished files.
+        """
+        filename = str(data.get("filename") or "")
+        if not filename:
+            return
+        try:
+            relative = Path(filename).relative_to(self._spec.paths.root)
+        except ValueError:
+            return  # never outside the download folder
+        tracker.partials.add(str(self._spec.paths.incomplete / relative))
 
     def _video_id(self, item_id: str) -> str:
         """The ID an error names when it is a video's; "" for the list's own (an error about the list)."""

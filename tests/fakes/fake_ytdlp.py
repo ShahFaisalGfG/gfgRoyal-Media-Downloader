@@ -55,6 +55,7 @@ class Fake:
         self.args = args
         self.state = state
         self.root = Path(next(value for value in option(args, "--paths") if not value.startswith("temp:")))
+        self.temp = next((Path(value[5:]) for value in option(args, "--paths") if value.startswith("temp:")), None)
         self.archive = Path(option(args, "--download-archive")[0]) if option(args, "--download-archive") else None
         self.template = (option(args, "--output") or ["%(title)s [%(id)s].%(ext)s"])[0]
         files = [i for i, arg in enumerate(args) if arg == "--print-to-file"]
@@ -108,6 +109,9 @@ class Fake:
         target = self.root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"video")
+        if self.temp is not None:
+            # yt-dlp writes the file under the temp folder, moves it out, and leaves the folder it made there.
+            (self.temp / relative).parent.mkdir(parents=True, exist_ok=True)
         if self.archive is not None:
             self.archive.parent.mkdir(parents=True, exist_ok=True)
             with self.archive.open("a", encoding="utf-8") as handle:
@@ -137,8 +141,19 @@ class Fake:
                         encoding="utf-8")
 
     def stall(self, video_id: str, title: str) -> None:
-        """Start a video and then hang without a byte more, as a download whose server stopped answering."""
-        out(MARKER + "item " + json.dumps({"id": video_id, "title": title, "n_entries": 3}))
+        """Start a video and then hang without a byte more, as a download whose server stopped answering.
+
+        As yt-dlp does, it has written the thumbnail, an empty part, and the fragment list in the temp
+        folder first, and no progress line names them.
+        """
+        relative = render(self.template, self.details(video_id, title, {"n_entries": 3}))
+        out(MARKER + "item " + json.dumps({"id": video_id, "title": title, "n_entries": 3,
+                                            "filename": str(self.root / relative)}))
+        if self.temp is not None:
+            staged = self.temp / relative
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            for leftover in (staged.with_suffix(".jpg"), Path(f"{staged}.part"), Path(f"{staged}.ytdl")):
+                leftover.write_bytes(b"")
         out(MARKER + "dl " + json.dumps({"p": {"status": "downloading", "downloaded_bytes": 0, "total_bytes": 1000,
                                                "fragment_index": 0, "fragment_count": 9},
                                          "i": {"id": video_id, "format_id": "137"}}))

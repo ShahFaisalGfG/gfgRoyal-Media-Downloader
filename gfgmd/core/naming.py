@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 from gfgmd.core.archive import read_archive_ids
@@ -195,6 +196,35 @@ def remove_partials(partials: set[str], incomplete: Path) -> int:
                 except OSError:
                     continue
     return removed
+
+
+def remove_empty_folders(folders: Iterable[Path], root: Path) -> int:
+    """Remove the folders below `root` left empty, each with the folders above it that it empties.
+
+    A playlist's folder goes with its last file, and a channel's folder with the last of its tab
+    folders. `root` itself, any folder outside it, and links stay; a folder that holds anything
+    stays, as Windows removes only empty ones. Returns how many folders went.
+    """
+    removed = 0
+    for folder in sorted(set(folders), key=lambda path: len(path.parts), reverse=True):
+        while inside_root(folder, root) and not folder.is_symlink() and not folder.is_junction():
+            try:
+                folder.rmdir()
+            except OSError:
+                break  # it still holds something, is in use, or went with a folder below it
+            removed += 1
+            folder = folder.parent
+    return removed
+
+
+def remove_empty_scratch(incomplete: Path) -> int:
+    """Remove the empty folders in a download folder's `.incomplete` folder, which stays.
+
+    yt-dlp makes a list's folder there and leaves it once the last unfinished file is moved out.
+    """
+    if not incomplete.is_dir():
+        return 0
+    return remove_empty_folders((Path(folder) for folder, _, _ in os.walk(incomplete)), incomplete)
 
 
 def group_of(path: Path, root: Path | None) -> tuple[str, str]:

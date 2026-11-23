@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,22 @@ class AppContext:
         custom = {"yt-dlp": prefs.get("ytdlp_path", ""), "ffmpeg": prefs.get("ffmpeg_path", ""),
                   "ffprobe": _beside(prefs.get("ffmpeg_path", ""), "ffprobe"), "deno": prefs.get("deno_path", "")}
         return resolve_tools(str(prefs.get("source", "managed")), self.tools_root, custom)
+
+    def roots_of(self, records: Sequence[dict[str, Any]]) -> list[Path | None]:
+        """The download folder each library file was saved under, in order.
+
+        That is the folder the record names, else its download's, else today's video or audio folder
+        when the file is in it; None for a file elsewhere.
+        """
+        today = [self.download_root("video"), self.download_root("audio")]
+        roots: list[Path | None] = []
+        for record in records:
+            path = Path(record["filepath"])
+            job = self.store.job(record["job_id"]) if record.get("job_id") else None
+            named = [str(record.get("output_root") or ""), str(job["output_root"]) if job is not None else ""]
+            candidates = [Path(root) for root in named if root] + today
+            roots.append(next((root for root in candidates if path.is_relative_to(root)), None))
+        return roots
 
     def job_dir(self, job_id: int) -> Path:
         """A job's scratch folder (its yt-dlp journal and link list)."""
