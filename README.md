@@ -468,9 +468,6 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 
 ## Changelog
 
-### Unreleased
-- 🤖 `gfgmd --json` reports in JSON lines for scripts and AI agents, `gfgmd --help` shows examples, and `gfgmd skill install` installs the [Agent Skill](skills/gfgmd/SKILL.md) that teaches Claude Code, Codex, Cursor, and other agents to use `gfgmd`
-
 ### v1.0.0 - November 2026 *(current)*
 - 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
 - 🌐 Every site yt-dlp supports, with YouTube channels and their tabs, and TikToks, Reels, X posts, and other short-form links
@@ -513,6 +510,7 @@ Re-released on 23 November 2026 with these changes since its first build of 19 N
 - 🗑️ Moving a playlist's, channel's, subscription's, or profile's files to the Recycle Bin removes its folder once it is empty (a channel's folder goes with its last tab folder; the download folder stays); WAV playlists no longer save the playlist's own cover beside their songs, which kept the folder; the empty folders yt-dlp leaves in `.incomplete` are removed when a download ends; and a video whose server never sent anything no longer leaves its thumbnail and empty part there once its download leaves the list
 - ☕ **Keep the PC awake while downloading** (on by default) explains in Preferences what it does: no sleep or hibernation on its own while downloads run or wait to try again
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry
+- 🤖 `gfgmd --json` reports in JSON lines for scripts and AI agents, `gfgmd --help` shows examples, and `gfgmd skill install` installs the [Agent Skill](skills/gfgmd/SKILL.md) that teaches Claude Code, Codex, Cursor, and other agents to use `gfgmd`
 
 [Full release notes →](release_notes/)
 

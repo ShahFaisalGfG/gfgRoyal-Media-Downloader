@@ -39,6 +39,7 @@ v1.0.0 was published again on 23 November 2026 with the changes below. The in-ap
 - **Privacy.** A [privacy policy](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/blob/main/PRIVACY.md) lists every connection the app makes, and the installers let you turn off update checks, tool updates, and online lyrics.
 - **Plain words and the keyboard.** Every status and message is in plain words, and the keyboard and screen readers reach every list, menu, and Preferences section.
 - **Keep the PC awake while downloading** (on by default) says in Preferences what it does.
+- **A command line for scripts and AI agents.** `gfgmd --json` reports one JSON event per line, and `gfgmd skill install` installs the Agent Skill that teaches Claude Code, Codex, Cursor, and other coding agents to use `gfgmd`.
 - Many fixes; the [changelog](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/blob/main/README.md#changelog) lists them all.
 
 ## Coming from the YouTube Video Downloader script
