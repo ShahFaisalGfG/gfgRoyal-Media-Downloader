@@ -312,8 +312,29 @@ gfgmd "https://vimeo.com/123456" --subs "en.*" --embed-subs --limit-rate 2M
 | `--live-from-start`, `--wait-for-video` | | Live streams |
 | `--strict` | | Exit with status 1 when any video couldn't be downloaded |
 | `-v`, `--verbose` | | Also print yt-dlp's warnings and its own error text |
+| `--json` | | One JSON object per line on stdout, for scripts and AI agents (below) |
 
 Progress reads like `Video 2 of 8  Downloading  45% of 40.0 MB  2.1 MB/s  about 1 minute left`, and a video that can't be downloaded is named with the reason. Exit status: `0` when every available video was saved (private or removed ones are listed but don't fail the run unless `--strict`), `1` when failures remain after `--max-attempts`, `2` when the link, the tools, or the folders can't be used, and `130` after Ctrl+C. The command line uses the app's managed tools when the app is installed, otherwise yt-dlp, FFmpeg, and Deno on PATH. It needs only Python's standard library, so it also runs on Linux.
+
+### For Scripts and AI Agents
+
+With `--json`, stdout carries one JSON object per line and nothing else: `start`, `item`, `progress`, `file` (each saved path), `skipped`, `error`, `warning`, `retry`, and last a `done` event with `ok`, `exit_code`, and the counts. Titles and paths are escaped, so they arrive exact whatever the console's code page.
+
+```powershell
+gfgmd "https://youtu.be/VIDEO_ID" --json --max-attempts 3
+```
+
+The repository's [`skills/gfgmd`](skills/gfgmd/SKILL.md) is an [Agent Skill](https://agentskills.io) that teaches AI coding agents (Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, and others) to use `gfgmd`: finding it, the common downloads, reading the JSON, and when to ask you first. `gfgmd.exe` carries it:
+
+| Command | What it does |
+|---|---|
+| `gfgmd skill install` | Copies it into `~/.agents/skills` and `~/.claude/skills`, which Codex, Claude Code, Cursor, Cline, and others read |
+| `gfgmd skill install --agent NAME` | Into one agent's own folder: `codex`, `cursor`, `copilot`, `gemini`, `windsurf`, `opencode`, `goose`, and more (`gfgmd skill install --help` lists them) |
+| `gfgmd skill install --dir FOLDER` | Into any skills folder |
+| `gfgmd skill uninstall`, `gfgmd skill path` | Remove it, or list where it is |
+| `gfgmd skill show` | Print it, to paste into the instructions of an agent that can't load skills |
+
+Without the app, `npx skills add ShahFaisalGfG/gfgRoyal-Media-Downloader` installs it for any of the agents the open `skills` installer knows.
 
 ---
 
@@ -446,6 +467,9 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 ---
 
 ## Changelog
+
+### Unreleased
+- 🤖 `gfgmd --json` reports in JSON lines for scripts and AI agents, `gfgmd --help` shows examples, and `gfgmd skill install` installs the [Agent Skill](skills/gfgmd/SKILL.md) that teaches Claude Code, Codex, Cursor, and other agents to use `gfgmd`
 
 ### v1.0.0 - November 2026 *(current)*
 - 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates

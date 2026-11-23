@@ -182,13 +182,15 @@ function New-ConsoleExe {
         gfgmd.exe is the command-line tool (the installers can add its folder to PATH).
         gfgRoyal-Media-Downloader-host.exe is started by the browser for the companion extension and
         hands its requests to the running app. Both are one file, placed beside the app's exe in the
-        onedir bundle so the installers ship them, and neither includes Qt.
+        onedir bundle so the installers ship them, and neither includes Qt. -Skill bundles the
+        repository's skills\<name> folder, which `<name> skill install` copies for AI coding agents.
     #>
     param(
         [Parameter(Mandatory)] [string]$BundleDir,
         [Parameter(Mandatory)] [string]$Name,
         [Parameter(Mandatory)] [string]$Entry,
-        [Parameter(Mandatory)] [string]$Description
+        [Parameter(Mandatory)] [string]$Description,
+        [switch]$Skill
     )
     $root = Split-Path -Parent $PSScriptRoot
     Write-Step "Building $Name"
@@ -205,9 +207,14 @@ function New-ConsoleExe {
         "--distpath",  $BundleDir,
         "--workpath",  "$root\build\pyinstaller",
         "--specpath",  "$root\build\pyinstaller",
-        "--noconfirm", "--clean",
-        "$root\$Entry"
+        "--noconfirm", "--clean"
     )
+    if ($Skill) {
+        $skillDir = "$root\skills\$Name"
+        if (-not (Test-Path "$skillDir\SKILL.md")) { Fail "The $Name skill is missing: $skillDir\SKILL.md" }
+        $pyArgs += @("--add-data", "$skillDir;skills\$Name")
+    }
+    $pyArgs += "$root\$Entry"
     & $pyinstaller @pyArgs | Out-Host
     if ($LASTEXITCODE -ne 0) { Fail "PyInstaller failed for $Name (exit $LASTEXITCODE)." }
     $exe = Join-Path $BundleDir "$Name.exe"
@@ -223,10 +230,12 @@ function New-ConsoleExes {
     #>
     param([Parameter(Mandatory)] [string]$BundleDir)
     $app = (Get-AppMeta).AppName
-    $cli = New-ConsoleExe -BundleDir $BundleDir -Name "gfgmd" -Entry "gfgmd\cli.py" -Description "$app command line"
+    $cli = New-ConsoleExe -BundleDir $BundleDir -Name "gfgmd" -Entry "gfgmd\cli.py" -Description "$app command line" -Skill
     $version = & $cli --version
     if ($LASTEXITCODE -ne 0 -or $version -notmatch '^gfgmd \d+\.\d+\.\d+$') { Fail "gfgmd.exe --version failed: $version" }
-    Write-Host "   $version" -ForegroundColor DarkGray
+    $skill = & $cli skill show --json | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $skill.files.'SKILL.md') { Fail "gfgmd.exe doesn't carry its agent skill" }
+    Write-Host "   $version, with its agent skill" -ForegroundColor DarkGray
     New-ConsoleExe -BundleDir $BundleDir -Name "gfgRoyal-Media-Downloader-host" -Entry "gfgmd\host_entry.py" `
         -Description "$app browser extension connector" | Out-Null
 }
