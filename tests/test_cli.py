@@ -1,6 +1,10 @@
 """The command-line tool: the original script's options, defaults, exit codes, and the new options."""
 
+import argparse
 import io
+import json
+import re
+import shlex
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -241,3 +245,114 @@ def test_titles_in_any_script_print_on_any_console(monkeypatch: pytest.MonkeyPat
     print("Saved: MET THE LOVE OF MY LIFE ＊caught on camera＊ (720p).mp4")
     stdout.flush()
     assert stdout.buffer.getvalue().endswith(b"?caught on camera? (720p).mp4\n")
+
+
+def json_events(text: str) -> list[dict]:
+    """Every stdout line as JSON (a line that isn't JSON fails the test)."""
+    return [json.loads(line) for line in text.splitlines()]
+
+
+def test_json_reports_events_and_ends_with_done(fake_ytdlp: list[str], tmp_path: Path,
+                                                capsys: pytest.CaptureFixture[str]) -> None:
+    """With --json, stdout is only JSON: the start, each video, its file, a skipped one, and the closing done."""
+    assert run_fake(fake_ytdlp, ["https://fake.test/playlist", "--output-dir", str(tmp_path), "--json"]) == 0
+    captured = capsys.readouterr()
+    events = json_events(captured.out)
+    assert captured.err == ""
+    assert events[0] == {"event": "start", "url": "https://fake.test/playlist", "kind": "video",
+                         "output_dir": str(tmp_path.resolve())}
+    kinds = [event["event"] for event in events]
+    assert "item" in kinds and "error" in kinds and kinds[-1] == "done"
+    files = [event for event in events if event["event"] == "file"]
+    assert files and all(Path(event["path"]).is_file() for event in files)
+    skipped = [event for event in events if event["event"] == "skipped"]
+    assert skipped[0]["id"] == "bbbbbbbbbbb" and skipped[0]["reason"] == CATEGORIES["private"].final
+    done = events[-1]
+    assert done["ok"] is True and done["exit_code"] == 0 and done["state"] == "done"
+    assert (done["saved"], done["skipped"], done["output_dir"]) == (len(files), 1, str(tmp_path.resolve()))
+
+
+def test_json_failure_names_its_reason_and_status(fake_ytdlp: list[str], tmp_path: Path,
+                                                  capsys: pytest.CaptureFixture[str]) -> None:
+    """A failed download's done event carries the exit status, the reason, and its kind."""
+    assert run_fake(fake_ytdlp, ["https://fake.test/private", "--output-dir", str(tmp_path), "--json"]) == 1
+    done = json_events(capsys.readouterr().out)[-1]
+    assert done["ok"] is False and done["exit_code"] == 1 and done["category"] == "private"
+    assert done["message"].endswith(CATEGORIES["private"].final)
+
+
+def test_json_progress_and_retries(fake_ytdlp: list[str], tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A retry is an event of its own, and progress carries numbers rather than a sentence."""
+    with patch.object(cli, "_PROGRESS_EVERY", 0.0):
+        assert run_fake(fake_ytdlp, ["https://fake.test/flaky", "--output-dir", str(tmp_path), "--retry-delay", "2",
+                                     "--json"]) == 0
+    events = json_events(capsys.readouterr().out)
+    assert {"event": "retry", "attempt": 1, "wait_seconds": 2} in events
+    progress = next(event for event in events if event["event"] == "progress")
+    assert {"fraction", "overall", "downloaded", "total", "speed", "eta", "stage"} <= set(progress)
+
+
+def test_json_invalid_input_and_ctrl_c(capsys: pytest.CaptureFixture[str]) -> None:
+    """A link that can't be used, and Ctrl+C, each end in one done event with their status."""
+    assert cli.main(["ftp://example.com/x", "--json"]) == 2
+    done = json_events(capsys.readouterr().out)
+    assert len(done) == 1 and done[0]["event"] == "done" and done[0]["exit_code"] == 2 and "https://" in done[0]["message"]
+    with patch.object(cli, "run", side_effect=KeyboardInterrupt):
+        assert cli.main([URL, "--json"]) == 130
+    done = json_events(capsys.readouterr().out)
+    assert done == [{"event": "done", "ok": False, "exit_code": 130, "state": "stopped",
+                     "message": "Stopped. Run the same command to resume later."}]
+
+
+def test_the_skill_command_runs_before_a_link_is_read(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`gfgmd skill ...` installs and lists the skill; any other first word is still a link."""
+    assert cli.main(["skill", "install", "--dir", str(tmp_path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["installed"] == [str(tmp_path / "gfgmd")]
+    assert (tmp_path / "gfgmd" / "SKILL.md").is_file()
+    assert cli.main(["skill", "path", "--dir", str(tmp_path)]) == 0
+    assert "(installed)" in capsys.readouterr().out
+
+
+SKILL_DIR = Path(__file__).resolve().parents[1] / "skills" / "gfgmd"
+
+
+def skill_command_lines() -> list[list[str]]:
+    """Every gfgmd command in the skill's code blocks, split as a shell would."""
+    lines = []
+    for doc in sorted(SKILL_DIR.rglob("*.md")):
+        for block in re.findall(r"```powershell\n(.*?)```", doc.read_text(encoding="utf-8"), re.DOTALL):
+            lines += [shlex.split(line, posix=False) for line in block.splitlines() if line.startswith("gfgmd ")]
+    return [[part.strip('"') for part in line] for line in lines]
+
+
+def test_every_command_in_the_skill_parses() -> None:
+    """The skill can't drift from the tool: each command it shows is accepted by the real parser."""
+    commands = skill_command_lines()
+    assert len(commands) >= 15
+    skill_parser = argparse.ArgumentParser(prog="gfgmd skill")
+    cli.agent_skills.add_skill_commands(skill_parser, "gfgmd")
+    for argv in commands:
+        if argv[1] == "skill":
+            skill_parser.parse_args(argv[2:])
+        elif argv[1] not in ("URL",):
+            cli.parse_args(argv[1:])
+
+
+def test_the_skill_documents_every_option_and_no_others() -> None:
+    """Each option of gfgmd is in the command reference, and every option the skill names exists."""
+    reference = (SKILL_DIR / "references" / "commands.md").read_text(encoding="utf-8")
+    options = {flag for action in cli.build_parser()._actions for flag in action.option_strings
+               if flag.startswith("--") and flag != "--help"}
+    named = set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]+", "".join(
+        doc.read_text(encoding="utf-8") for doc in SKILL_DIR.rglob("*.md"))))
+    skill_options = {"--agent", "--dir"}
+    assert options <= set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]+", reference))
+    assert named <= options | skill_options
+
+
+def test_json_stays_exact_on_any_console(capsys: pytest.CaptureFixture[str]) -> None:
+    """Non-ASCII titles and paths are escaped, so a console's code page can't turn them into "?"."""
+    path = str(Path("C:/Music") / "\u0646\u0639\u062a \u2014 Live \uff0a.mp3")
+    cli._Console(json_lines=True).saved({"id": "x", "title": "\u0646\u0639\u062a"}, Path(path))
+    line = capsys.readouterr().out
+    assert line.isascii() and json.loads(line)["path"] == path

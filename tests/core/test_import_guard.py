@@ -9,6 +9,7 @@ MODULES = [
     "gfgmd.utils.launch",
     "gfgmd.utils.paths",
     "gfgmd.utils.format",
+    "gfgmd.utils.agent_skills",
     "gfgmd.services.companion",
     "gfgmd.host_entry",
     "gfgmd.core.analyze",
