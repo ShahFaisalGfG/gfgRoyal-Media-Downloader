@@ -246,13 +246,18 @@ function New-PortableArchive {
         Packs a onedir bundle as the portable .7z, with its licences and the portable marker.
     .DESCRIPTION
         The marker file next to the exe makes that copy keep its data in a
-        "gfgRoyal Media Downloader data" folder beside itself.
+        "gfgRoyal Media Downloader data" folder beside itself. The archive holds the bundle's
+        contents at its top level, beside the marker and the licences.
     #>
     param(
         [Parameter(Mandatory)] [string]$BundleDir,
         [Parameter(Mandatory)] [string]$ArchivePath
     )
     $root = Split-Path -Parent $PSScriptRoot
+    if (-not (Test-Path $BundleDir -PathType Container)) { Fail "Bundle folder not found: $BundleDir" }
+    # 7-Zip stores a relative path's folders ("dist\gfgRoyal-Media-Downloader\...") but drops an
+    # absolute path's, so the bundle is passed as a full path to keep the exe next to the marker.
+    $BundleDir = (Resolve-Path $BundleDir).Path
     $command = Get-Command 7z -ErrorAction SilentlyContinue
     $sevenZip = if ($command) { $command.Source } else { "$env:ProgramFiles\7-Zip\7z.exe" }
     if (-not (Test-Path $sevenZip)) { Fail "7-Zip not found (looked for 7z on PATH and $sevenZip)" }
