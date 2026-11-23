@@ -447,7 +447,18 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 
 ## Changelog
 
-### Unreleased
+### v1.0.0 - November 2026 *(current)*
+- 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
+- 🌐 Every site yt-dlp supports, with YouTube channels and their tabs, and TikToks, Reels, X posts, and other short-form links
+- 🎵 Music as MP3 320 kbps or other formats and bitrates, with square covers, tags, and synced lyrics
+- ▶️ Built-in video and music players
+- 🗣️ Dubbed audio tracks and subtitle choices for videos
+- 🔑 Website sign-ins, subscriptions, scheduling, live recording, and the companion extension
+- 🧰 yt-dlp, FFmpeg, and Deno downloaded, verified, and kept current by the app
+- ⌨️ `gfgmd` replaces the YouTube Video Downloader script (`download_playlist.py`) with the same options and new ones; yt-dlp configuration files and plugins are always ignored (the script still loaded `config.txt`), and private or removed videos no longer keep a run retrying forever; Python 3.12 or later
+
+Re-released on 23 November 2026 with these changes since its first build of 19 November. The in-app updater sees the same version number, so install this build over the first one to get them; your library, settings, and sign-ins stay.
+
 - 🎵 **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download
 - 🗑️ **Remove** deletes a download's unfinished parts, asks only for unfinished downloads or ones with saved files, and can move saved files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
 - 🎬 The default preset is **Video, best quality MP4**, which replaces the 1080p and 720p MP4 presets
@@ -478,16 +489,6 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🗑️ Moving a playlist's, channel's, subscription's, or profile's files to the Recycle Bin removes its folder once it is empty (a channel's folder goes with its last tab folder; the download folder stays); WAV playlists no longer save the playlist's own cover beside their songs, which kept the folder; the empty folders yt-dlp leaves in `.incomplete` are removed when a download ends; and a video whose server never sent anything no longer leaves its thumbnail and empty part there once its download leaves the list
 - ☕ **Keep the PC awake while downloading** (on by default) explains in Preferences what it does: no sleep or hibernation on its own while downloads run or wait to try again
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry
-
-### v1.0.0 - November 2026 *(current)*
-- 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
-- 🌐 Every site yt-dlp supports, with YouTube channels and their tabs, and TikToks, Reels, X posts, and other short-form links
-- 🎵 Music as MP3 320 kbps or other formats and bitrates, with square covers, tags, and synced lyrics
-- ▶️ Built-in video and music players
-- 🗣️ Dubbed audio tracks and subtitle choices for videos
-- 🔑 Website sign-ins, subscriptions, scheduling, live recording, and the companion extension
-- 🧰 yt-dlp, FFmpeg, and Deno downloaded, verified, and kept current by the app
-- ⌨️ `gfgmd` replaces the YouTube Video Downloader script (`download_playlist.py`) with the same options and new ones; yt-dlp configuration files and plugins are always ignored (the script still loaded `config.txt`), and private or removed videos no longer keep a run retrying forever; Python 3.12 or later
 
 [Full release notes →](release_notes/)
 

@@ -26,6 +26,21 @@ v1.0.0 is the first release of gfgRoyal Media Downloader, which grew out of the 
 - **Companion extension.** Download the current page or a right-clicked link, and sign sites in, from Chrome, Edge, Opera, Brave, or Vivaldi.
 - **App.** Light and dark themes, keyboard shortcuts, tray icon, notifications, Start with Windows, in-app signed updates, and portable builds.
 
+## Changes since the first build
+
+v1.0.0 was published again on 23 November 2026 with the changes below. The in-app updater sees the same version number, so if you installed v1.0.0 before then, run this build's installer over it; your library, settings, and sign-ins stay.
+
+- **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download.
+- **Playlists show their videos.** A playlist, channel, or several new subscription uploads list every video under one download, numbered, with its state, progress, and Play button. The Library groups each playlist's and channel's files in one row, in the playlist's order, with Play all.
+- **Select several** downloads or library files and pause, resume, try again, remove, play, or extract audio together.
+- **Remove and the Recycle Bin.** Remove deletes a download's unfinished parts and can move its saved files to the Recycle Bin. Moving a playlist's or channel's files there removes its folder once it is empty.
+- **Downloads that keep going.** A video whose server stops answering waits while the rest of the list downloads, then tries again; one that keeps failing is skipped, so the list finishes. A signed-in playlist's video that fails with the sign-in is downloaded once more without it.
+- **Already downloaded.** A video you have reads Already downloaded and plays your file; Download again fetches it anyway.
+- **Privacy.** A [privacy policy](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/blob/main/PRIVACY.md) lists every connection the app makes, and the installers let you turn off update checks, tool updates, and online lyrics.
+- **Plain words and the keyboard.** Every status and message is in plain words, and the keyboard and screen readers reach every list, menu, and Preferences section.
+- **Keep the PC awake while downloading** (on by default) says in Preferences what it does.
+- Many fixes; the [changelog](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/blob/main/README.md#changelog) lists them all.
+
 ## Coming from the YouTube Video Downloader script
 
 - `download_playlist.py` is replaced by the `gfgmd` command (`gfgmd.exe` in the installed app, `python -m gfgmd.cli` from source) with the same options and defaults, plus new ones. Python 3.12 or later.
