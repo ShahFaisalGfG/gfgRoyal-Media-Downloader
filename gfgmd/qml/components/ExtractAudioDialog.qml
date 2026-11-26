@@ -89,7 +89,6 @@ AppDialog {
                 Layout.fillWidth: true
                 model: prefsController.options.audio
                 accessibleName: "Audio format"
-                toolTipText: "MP3 plays everywhere; FLAC and WAV keep full quality (bigger files); Original keeps the video's sound as it is"
             }
         }
         FormRow {
@@ -101,7 +100,6 @@ AppDialog {
                 Layout.fillWidth: true
                 model: prefsController.options.audioQuality
                 accessibleName: "Audio quality"
-                toolTipText: "Higher numbers sound better and make bigger files; above 256 the sound can't get better than the video's"
             }
         }
         FormRow {
@@ -136,9 +134,9 @@ AppDialog {
                 labelWidth: 120
                 RowLayout {
                     spacing: Theme.spaceLg
-                    AppCheckBox { id: embedCover; text: "Cover"; toolTipText: "Show the thumbnail as the song's cover (WAV songs get it as a picture next to the file)" }
+                    AppCheckBox { id: embedCover; text: "Cover" }
                     AppCheckBox { id: embedDetails; text: "Details"; toolTipText: "Title, artist, date, and description inside the file" }
-                    AppCheckBox { id: embedChapters; text: "Chapters"; toolTipText: "The video's chapter marks, which players can jump to" }
+                    AppCheckBox { id: embedChapters; text: "Chapters" }
                 }
             }
             FormRow {
@@ -151,7 +149,6 @@ AppDialog {
                     Layout.fillWidth: true
                     model: prefsController.options.cover
                     accessibleName: "Cover shape"
-                    toolTipText: "The video's thumbnail becomes the song's cover; square crops it like an album cover"
                 }
             }
         }

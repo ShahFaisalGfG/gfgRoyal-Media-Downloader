@@ -44,6 +44,7 @@ SpinBox {
         radius: Theme.radius
         color: spin.down.pressed ? Theme.border : spin.down.hovered ? Theme.surfaceHover : "transparent"
         opacity: spin.value > spin.from ? 1 : 0.4
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
 
         Icon {
             anchors.centerIn: parent
@@ -59,6 +60,7 @@ SpinBox {
         radius: Theme.radius
         color: spin.up.pressed ? Theme.border : spin.up.hovered ? Theme.surfaceHover : "transparent"
         opacity: spin.value < spin.to ? 1 : 0.4
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
 
         Icon {
             anchors.centerIn: parent
@@ -72,5 +74,6 @@ SpinBox {
         color: spin.enabled ? Theme.surface : Theme.surfaceAlt
         border.width: spin.activeFocus ? 2 : 1
         border.color: spin.activeFocus ? Theme.focusRing : spin.enabled ? Theme.inputBorder : Theme.border
+        Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
     }
 }

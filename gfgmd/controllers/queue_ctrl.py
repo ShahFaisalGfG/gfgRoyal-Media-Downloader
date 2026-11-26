@@ -31,13 +31,15 @@ from gfgmd.core.command import SESSION_ARCHIVE, Auth, RunPaths
 from gfgmd.core.extract import AudioExtractor, ExtractSpec
 from gfgmd.core.jobs import STALL_SECONDS, JobExecutor, JobResult, JobSpec, Runner
 from gfgmd.core.lyrics import Fetch
+from gfgmd.core.quick_info import Fetch as QuickFetch, QuickInfo, quick_info
 from gfgmd.core.naming import AUDIO_EXTENSIONS, group_of, remove_empty_scratch, remove_partials
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import Event, Snapshot
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.schedule import limit_at, next_queue_start, per_job_limit
 from gfgmd.core.secret_store import SecretError, wipe
-from gfgmd.core.sources import Source, as_link, canonical_url, single_video, source_from_url, video_link
+from gfgmd.core.sources import (Source, as_link, canonical_url, playlist_link, single_video, source_from_url,
+                                 video_link)
 from gfgmd.core.store import ACTIVE_STATES
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services import power
@@ -67,9 +69,9 @@ EXTRACT_CHOICES = ("audio_format", "audio_quality", "cover", "lyrics", "lyrics_o
 PARTIALS_FILE = "partials.json"
 
 
-# How strongly each reason stops a running download: a later, weaker one (Pause all after Cancel, the
-# app quitting after Remove) doesn't replace it.
-_STOP_RANK = {"restart": 0, "shutdown": 1, "pause_all": 2, "pause": 2, "cancel": 3, "remove": 4, "remove_files": 5}
+# How strongly each reason stops a running download: a later, weaker one (Pause all or the app quitting
+# after Remove) doesn't replace it.
+_STOP_RANK = {"restart": 0, "shutdown": 1, "pause_all": 2, "pause": 2, "remove": 3, "remove_files": 4}
 
 
 @dataclass
@@ -94,7 +96,7 @@ class _Running:
 
 
 def base_options(settings: dict[str, Any], kind: str = "video") -> DownloadOptions:
-    """Preferences' Video or Audio defaults as download options: what Smart mode downloads with, and
+    """Preferences' Video or Audio defaults as download options: what Smart Mode downloads with, and
     what Download options start from. Audio has its own "Save in the file" choices."""
     formats = settings.get("formats", {})
     downloads = settings.get("downloads", {})
@@ -161,16 +163,19 @@ class QueueController(QObject):
     # Links to a video inside a playlist wait for "this video or the whole playlist?" (how many wait);
     # QML asks and answers with answerPlaylist.
     playlistQuestion = Signal(int)
-    # Smart mode is off and links came from outside the link box: QML shows them in Download options
+    # Smart Mode is off and links came from outside the link box: QML shows them in Download options
     # (the links, and "video" or "audio").
     optionsRequested = Signal(list, str)
     # A setting was saved here (the remembered "video or playlist" answer), for Preferences to show.
     settingsSaved = Signal()
+    # The question's video or playlist details arrived (heldVideo, heldPlaylist).
+    heldChanged = Signal()
 
     def __init__(self, context: AppContext, tools: ToolManager, notifier: Notifier,
                  parent: QObject | None = None, runner: Runner = run_to_completion,
                  lyrics_fetch: Fetch | None = None, stall_seconds: float = STALL_SECONDS,
-                 release_player: Callable[[list[str]], None] | None = None) -> None:
+                 release_player: Callable[[list[str]], None] | None = None,
+                 quick_fetch: QuickFetch | None = None) -> None:
         super().__init__(parent)
         self._context = context
         self._tools = tools
@@ -178,6 +183,13 @@ class QueueController(QObject):
         self._program_runner = runner
         # The built-in players' release (PlayerController.release_files); see release_files.
         self._release_player = release_player or (lambda _paths: None)
+        # The app reads YouTube's oEmbed page for the question's titles and thumbnails; tests leave
+        # it out, so they never reach YouTube.
+        self._quick_fetch = quick_fetch
+        self._quick_runner = TaskRunner(2, self)
+        # The title and thumbnail of the first waiting link's video and of its playlist.
+        self._held_video: dict[str, str] = {}
+        self._held_playlist: dict[str, str] = {}
         # The app passes lyrics.fetch_json; tests leave it out, so they never reach LRCLIB.
         self._lyrics_fetch = lyrics_fetch
         # How long a video may download without moving before it is set aside (see JobExecutor).
@@ -317,7 +329,7 @@ class QueueController(QObject):
     @Slot(str, str, result=int)
     def receiveLinks(self, text: str, kind: str) -> int:
         """Links from outside the link box (the browser extension, the tray, drag and drop, the copied-link
-        offer, a second launch): with Smart mode on they download at once; off, QML opens Download
+        offer, a second launch): with Smart Mode on they download at once; off, QML opens Download
         options for them (optionsRequested) and nothing is queued yet."""
         if load_settings().get("downloads", {}).get("smart_mode", True):
             return self.addLinks(text, kind)
@@ -331,6 +343,8 @@ class QueueController(QObject):
         """The answer to "video or playlist" for the links waiting on it: "video", "playlist", or "" to drop them.
         Remembering it saves the answer, so later such links don't ask (Preferences > Downloads changes it)."""
         held, self._held = self._held, []
+        self._held_video, self._held_playlist = {}, {}
+        self.heldChanged.emit()
         if scope not in ("video", "playlist"):
             return
         if remember:
@@ -342,6 +356,44 @@ class QueueController(QObject):
                 write_log("The answer for links to a video in a playlist couldn't be saved", "critical")
         for link, options in held:
             self._queue_links(link, options, scope)
+
+    @Property(dict, notify=heldChanged)
+    def heldVideo(self) -> dict[str, str]:
+        """The first waiting link's video ({title, uploader, thumbnail}; empty until YouTube answers)."""
+        return dict(self._held_video)
+
+    @Property(dict, notify=heldChanged)
+    def heldPlaylist(self) -> dict[str, str]:
+        """The playlist that video was opened in ({title, uploader, thumbnail}; empty until known)."""
+        return dict(self._held_playlist)
+
+    def _read_held(self, link: str) -> None:
+        """Fetch the titles and thumbnails the question shows for a waiting link (YouTube only)."""
+        self._held_video, self._held_playlist = {}, {}
+        self.heldChanged.emit()
+        if self._quick_fetch is None:
+            return
+        try:
+            source = source_from_url(link)
+            video = (single_video(source), video_link(source, link))
+            playlist = (Source("playlist", source.source_id), playlist_link(source))
+        except ValueError:
+            return
+        for target, (item, url) in (("video", video), ("playlist", playlist)):
+            self._quick_runner.start(quick_info, item, url, self._quick_fetch,
+                                     on_done=lambda info, t=target, l=link: self._held_read(t, l, info),
+                                     on_error=lambda _message: None)
+
+    def _held_read(self, target: str, link: str, info: QuickInfo | None) -> None:
+        # A detail for a link no longer waiting (answered, or another question since) is dropped.
+        if info is None or not self._held or self._held[0][0] != link:
+            return
+        details = {"title": info.title, "uploader": info.uploader, "thumbnail": info.thumbnail}
+        if target == "video":
+            self._held_video = details
+        else:
+            self._held_playlist = details
+        self.heldChanged.emit()
 
     def _playlist_answer(self) -> str:
         """The remembered answer for a video inside a playlist, "" when the app asks each time."""
@@ -373,6 +425,7 @@ class QueueController(QObject):
         for the "video or playlist" answer (see addLinks)."""
         links = [as_link(word) for word in text.replace(",", "\n").split() if word.strip()]
         scope = scope or self._playlist_answer()
+        asking = bool(self._held)  # a question is already open; new links join it
         added, listed, held, problems = 0, 0, 0, []
         for link in links:
             try:
@@ -404,6 +457,8 @@ class QueueController(QObject):
         if added:
             self._after_change()
         if held:
+            if not asking:
+                self._read_held(self._held[0][0])
             self.playlistQuestion.emit(len(self._held))
         return added + listed + held
 
@@ -419,7 +474,7 @@ class QueueController(QObject):
 
     @Slot(str, "QVariantMap", result=int)
     def addLinksWith(self, text: str, options: dict[str, Any]) -> int:
-        """Queue several links with the choices Download options made for all of them (Smart mode off);
+        """Queue several links with the choices Download options made for all of them (Smart Mode off);
         returns how many are now in the list or wait for the "video or playlist" answer."""
         try:
             chosen = DownloadOptions.from_dict({**base_options(load_settings(), str(options.get("kind"))).to_dict(),
@@ -596,17 +651,6 @@ class QueueController(QObject):
         self._context.store.update_job(job_id, options_json=json.dumps(options.to_dict()), skip_ids_json="[]")
         self._context.store.reset_items(job_id, ("done", "archived", "skipped"))
         self.resume(job_id)
-
-    @Slot(int)
-    def cancel(self, job_id: int) -> None:
-        """Stop a download and delete its unfinished files (finished files stay)."""
-        if job_id in self._running:
-            self._running[job_id].stop("cancel")
-            return
-        job = self._context.store.job(job_id)
-        if job is not None:
-            self._remove_partials(job, set())
-        self._set_state(job_id, "cancelled", "")
 
     @Slot(int, bool)
     def remove(self, job_id: int, delete_saved: bool) -> None:
@@ -1068,9 +1112,6 @@ class QueueController(QObject):
                 self._forget_jobs([running.job_id])
             else:
                 self._set_state(running.job_id, "cancelled", "", refresh=False)
-        elif reason == "cancel":
-            self._remove_partials(job, partials)
-            self._set_state(running.job_id, "cancelled", "", refresh=False)
         else:
             self._keep_partials(running.job_id, partials)
             if reason in ("pause", "pause_all"):
@@ -1203,7 +1244,7 @@ class QueueController(QObject):
                     if (job := self._context.store.job(running.job_id)) is not None and job["input_path"]
                     and os.path.normcase(os.path.abspath(job["input_path"])) in wanted]
         for job_id in stopping:
-            self.cancel(job_id)
+            self.remove(job_id, False)
         deadline = time.monotonic() + wait_seconds
         while any(job_id in self._running for job_id in stopping) and time.monotonic() < deadline:
             QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents, 50)
@@ -1500,10 +1541,11 @@ class QueueController(QObject):
         for running in list(self._running.values()):
             running.stop("shutdown")
         self._runner.shutdown(10_000)
+        self._quick_runner.shutdown(2000)
         for running in list(self._running.values()):
             self._drain_files(running)
             self._take_updates(running)
-            self._settle(running, None)  # paused stays paused, cancelled and removed go; the rest resumes
+            self._settle(running, None)  # paused stays paused, removed ones go; the rest resumes
         self._running.clear()
         self._clear_last_session()
         self._keep_awake(False)

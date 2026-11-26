@@ -301,10 +301,8 @@ Rectangle {
                     accessibleName: "Download this video or its whole playlist"
                     value: analyzeController.scope
                     options: [
-                        {"label": "This video", "code": "video", "icon": "video",
-                         "tip": "Only the video you opened"},
-                        {"label": "Whole playlist", "code": "playlist", "icon": "list",
-                         "tip": "Every video of the playlist it was opened in (you can untick some)"}
+                        {"label": "This video", "code": "video", "icon": "video"},
+                        {"label": "Whole playlist", "code": "playlist", "icon": "list"}
                     ]
                     onActivated: function (code) { analyzeController.analyze(analyzeController.link, code) }
                 }
@@ -331,7 +329,6 @@ Rectangle {
                         visible: !panel.audio
                         model: analyzeController.heightOptions
                         accessibleName: "Highest quality"
-                        toolTipText: "The best quality up to this one; measured on the shorter side, so it suits portrait videos too"
                         onActivated: analyzeController.refreshArchived(panel.options())
                     }
                     StyledComboBox {
@@ -340,7 +337,6 @@ Rectangle {
                         visible: panel.audio
                         model: prefsController.options.audio
                         accessibleName: "Audio format"
-                        toolTipText: "MP3 plays everywhere; FLAC and WAV keep full quality (bigger files); Original keeps the site's sound as it is"
                         onActivated: analyzeController.refreshArchived(panel.options())
                     }
                 }
@@ -354,7 +350,6 @@ Rectangle {
                         Layout.fillWidth: true
                         model: prefsController.options.audioQuality
                         accessibleName: "Audio quality"
-                        toolTipText: "Higher numbers sound better and make bigger files; above 256 the sound can't get better than the site's"
                         onActivated: analyzeController.refreshArchived(panel.options())
                     }
                 }
@@ -381,7 +376,6 @@ Rectangle {
                         Layout.fillWidth: true
                         model: prefsController.options.container
                         accessibleName: "File type"
-                        toolTipText: "MP4 plays everywhere; MKV keeps the best picture, subtitles, and chapters"
                     }
                 }
                 FormRow {
@@ -398,8 +392,6 @@ Rectangle {
                         emptyText: panel.subtitleModel.length === 0 && analyzeController.ready
                             ? "This video has no subtitles" : "No subtitles"
                         accessibleName: "Subtitles"
-                        toolTipText: panel.many ? "The languages to save; each video gets those it has"
-                            : "The subtitles to save. Automatic ones are made by the site from the video's speech."
                         onEdited: function (codes) {
                             panel._subtitlesEdited = true
                             panel.subtitleCodes = codes
@@ -421,7 +413,6 @@ Rectangle {
                             model: analyzeController.audioTracks.length > 1 ? prefsController.options.audioTracks
                                 : prefsController.options.audioTracks.slice(0, 2)
                             accessibleName: "Audio tracks"
-                            toolTipText: "Keep only the original language, or dubbed languages too (as extra tracks in one file)"
                         }
                         Flow {
                             Layout.fillWidth: true
@@ -512,7 +503,6 @@ Rectangle {
                             Layout.fillWidth: true
                             model: prefsController.options.subtitlePlacement
                             accessibleName: "Subtitle placement"
-                            toolTipText: "Inside the video players can switch them on and off; separate files sit beside the video"
                         }
                     }
                     FormRow {
@@ -549,7 +539,6 @@ Rectangle {
                             Layout.fillWidth: true
                             model: prefsController.options.cover
                             accessibleName: "Cover shape"
-                            toolTipText: "The video's thumbnail becomes the song's cover; square crops it like an album cover"
                         }
                     }
                     FormRow {
@@ -558,9 +547,9 @@ Rectangle {
                         labelWidth: 110
                         RowLayout {
                             spacing: Theme.spaceLg
-                            AppCheckBox { id: embedThumb; text: panel.audio ? "Cover" : "Thumbnail"; toolTipText: "Show the thumbnail as the file's cover" }
+                            AppCheckBox { id: embedThumb; text: panel.audio ? "Cover" : "Thumbnail" }
                             AppCheckBox { id: embedMeta; text: "Details"; toolTipText: "Title, uploader, date, and description inside the file" }
-                            AppCheckBox { id: embedChapters; text: "Chapters"; toolTipText: "Chapter marks players can jump to" }
+                            AppCheckBox { id: embedChapters; text: "Chapters" }
                         }
                     }
                     FormRow {
@@ -638,7 +627,6 @@ Rectangle {
             text: analyzeController.liveStatus === "is_upcoming" ? "Wait and record"
                 : analyzeController.liveStatus === "is_live" ? "Record" : "Download"
             iconName: analyzeController.liveStatus ? "live" : "download"
-            toolTipText: "Download with the choices above (Ctrl+Enter)"
             onClicked: if (analyzeController.addToQueue(panel.options())) {
                 panel.queued()
                 panel.closed()

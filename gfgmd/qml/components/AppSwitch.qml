@@ -34,6 +34,7 @@ Switch {
             : control.hovered ? Theme.surfaceHover : Theme.surface
         border.width: control.checked ? 0 : 1
         border.color: control.enabled ? Theme.inputBorder : Theme.border
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
 
         Rectangle {
             readonly property int inset: 4
@@ -46,8 +47,10 @@ Switch {
                 : control.checked ? Theme.textOnAccent : Theme.textMuted
             Behavior on x {
                 enabled: !control.pressed
-                NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
+                NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutQuad }
             }
+            Behavior on width { NumberAnimation { duration: Theme.motionFast } }
+            Behavior on color { ColorAnimation { duration: Theme.motionFast } }
         }
 
         Rectangle {

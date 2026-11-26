@@ -22,19 +22,16 @@ ColumnLayout {
             Layout.fillWidth: true
             placeholderText: "Filter by title"
             accessibleName: "Filter the videos by title"
-            toolTipText: "Show only videos whose titles contain this text; choices of hidden videos are kept"
             onTextChanged: list.model.setFilter(text)
         }
         AppButton {
             kind: "ghost"
             text: "All"
-            toolTipText: "Check every video the filter shows"
             onClicked: list.model.checkVisible(true)
         }
         AppButton {
             kind: "ghost"
             text: "None"
-            toolTipText: "Clear every video the filter shows"
             onClicked: list.model.checkVisible(false)
         }
         AppButton {
@@ -88,7 +85,6 @@ ColumnLayout {
         AppButton {
             kind: "ghost"
             text: "Check range"
-            toolTipText: "Check the videos numbered from the first to the last value and clear the rest"
             onClicked: list.model.checkRange(first.value, last.value)
         }
         Item { Layout.fillWidth: true }

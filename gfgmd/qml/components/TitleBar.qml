@@ -143,10 +143,12 @@ Rectangle {
             name: button.iconName
             size: Theme.iconXs
             color: button.closeStyle && button.hovered ? Theme.closeHoverText : Theme.text
+            Behavior on color { ColorAnimation { duration: Theme.motionFast } }
         }
         background: Rectangle {
             color: !button.hovered ? "transparent"
                 : button.closeStyle ? Theme.closeHover : Theme.surfaceHover
+            Behavior on color { ColorAnimation { duration: Theme.motionFast } }
         }
     }
 }

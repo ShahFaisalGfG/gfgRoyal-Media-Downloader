@@ -40,8 +40,9 @@ AppWindow {
     readonly property var sections: [
         { name: "General", icon: "settings" },
         { name: "Downloads", icon: "download" },
-        { name: "Video", icon: "video" },
-        { name: "Audio", icon: "audio" },
+        // Video and Audio hold the Smart Mode defaults, and say so in the list.
+        { name: "Video", icon: "video", smart: true },
+        { name: "Audio", icon: "audio", smart: true },
         { name: "Network and schedule", icon: "globe" },
         { name: "Subscriptions", icon: "bell" },
         { name: "Tools", icon: "repair" },
@@ -116,7 +117,7 @@ AppWindow {
                                 nav.currentIndex = navItem.index
                                 navBox.forceActiveFocus(Qt.MouseFocusReason)
                             }
-                            Accessible.name: navItem.modelData.name
+                            Accessible.name: navItem.modelData.name + (navItem.modelData.smart ? ", Smart Mode defaults" : "")
                             Accessible.role: Accessible.PageTab
                             Accessible.selectable: true
                             Accessible.selected: navItem.highlighted
@@ -127,6 +128,7 @@ AppWindow {
                                     name: navItem.modelData.icon
                                     size: Theme.iconMd
                                     color: navItem.highlighted ? Theme.accent : Theme.textMuted
+                                    Behavior on color { ColorAnimation { duration: Theme.motionFast } }
                                 }
                                 Text {
                                     textFormat: Text.PlainText
@@ -138,12 +140,29 @@ AppWindow {
                                     color: Theme.text
                                     elide: Text.ElideRight
                                 }
+                                // The Smart Mode defaults live on this page.
+                                Icon {
+                                    visible: navItem.modelData.smart === true
+                                    name: "smart"
+                                    size: Theme.iconSm
+                                    color: Theme.textMuted
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    visible: navItem.modelData.smart === true
+                                    text: "Smart Mode"
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontCaption
+                                    color: Theme.textMuted
+                                    Accessible.ignored: true
+                                }
                             }
                             background: Rectangle {
                                 radius: Theme.radius
                                 color: navItem.highlighted ? Theme.accentSoft : (navItem.hovered ? Theme.surfaceHover : "transparent")
                                 border.width: navBox.visualFocus && navItem.highlighted ? 2 : 0
                                 border.color: Theme.focusRing
+                                Behavior on color { ColorAnimation { duration: Theme.motionFast } }
                             }
                         }
                     }
@@ -234,7 +253,7 @@ AppWindow {
                             hint: prefsController.downloadFolder
                             RowLayout {
                                 spacing: Theme.spaceSm
-                                AppButton { text: "Change"; iconName: "folder"; toolTipText: "Choose where videos go"; onClicked: { folderDialog.key = "downloads.folder"; folderDialog.open() } }
+                                AppButton { text: "Change"; iconName: "folder"; onClicked: { folderDialog.key = "downloads.folder"; folderDialog.open() } }
                                 AppButton { kind: "ghost"; iconName: "folderOpen"; toolTipText: "Open the folder"; onClicked: appController.openPath(prefsController.downloadFolder) }
                             }
                         }
@@ -243,15 +262,15 @@ AppWindow {
                             hint: prefsController.audioFolder
                             RowLayout {
                                 spacing: Theme.spaceSm
-                                AppButton { text: "Change"; iconName: "folder"; toolTipText: "Choose where music and other audio go"; onClicked: { folderDialog.key = "downloads.audio_folder"; folderDialog.open() } }
+                                AppButton { text: "Change"; iconName: "folder"; onClicked: { folderDialog.key = "downloads.audio_folder"; folderDialog.open() } }
                                 AppButton { kind: "ghost"; iconName: "folderOpen"; toolTipText: "Open the folder"; onClicked: appController.openPath(prefsController.audioFolder) }
                             }
                         }
                         SettingRow {
-                            label: "Smart mode"
+                            label: "Smart Mode"
                             hint: "On: Download downloads at once with the choices on the Video and Audio pages. "
                                 + "Off: Download opens Download options first."
-                            AppSwitch { checked: prefsWin.v("downloads.smart_mode"); accessibleName: "Smart mode"; onToggled: prefsWin.save("downloads.smart_mode", checked) }
+                            AppSwitch { checked: prefsWin.v("downloads.smart_mode"); accessibleName: "Smart Mode"; onToggled: prefsWin.save("downloads.smart_mode", checked) }
                         }
                         SettingRow {
                             label: "Download as"
@@ -417,7 +436,7 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Video"
-                        description: "Smart mode downloads videos with these choices, and Download options starts from them."
+                        description: "Smart Mode downloads videos with these choices, and Download options starts from them."
                         iconName: "video"
 
                         SettingRow {
@@ -533,7 +552,7 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Audio"
-                        description: "Smart mode downloads songs with these choices, and Download options starts from them."
+                        description: "Smart Mode downloads songs with these choices, and Download options starts from them."
                         iconName: "audio"
 
                         SettingRow {
@@ -667,7 +686,6 @@ AppWindow {
                             AppButton {
                                 text: "Add"
                                 iconName: "add"
-                                toolTipText: "Add this time-of-day limit"
                                 onClicked: {
                                     var clock = /^([01]\d|2[0-3]):[0-5]\d$/
                                     if (!clock.test(windowStart.text) || !clock.test(windowEnd.text) || windowStart.text === windowEnd.text) {
@@ -762,6 +780,7 @@ AppWindow {
                         }
                         SettingRow {
                             label: "Update the tools automatically"
+                            hint: "Once a day. On a metered connection, only when Updates and logs allows it."
                             visible: prefsWin.v("tools.source") === "managed"
                             AppSwitch { checked: prefsWin.v("tools.auto_update"); accessibleName: "Update the tools automatically"; onToggled: prefsWin.save("tools.auto_update", checked) }
                         }
@@ -810,7 +829,6 @@ AppWindow {
                                     visible: toolRow.modelData.canRollBack
                                     kind: "ghost"
                                     text: "Previous version"
-                                    toolTipText: "Go back to the version before the last update"
                                     onClicked: toolsController.rollBack(toolRow.modelData.name)
                                 }
                             }
@@ -865,8 +883,13 @@ AppWindow {
                         SettingRow {
                             visible: updateController.canSelfUpdate
                             label: "Install updates automatically"
-                            hint: "Downloads in the background and installs when you quit. Waits while you're on mobile data or another limited connection."
+                            hint: "Downloads in the background and installs when you quit."
                             AppSwitch { checked: prefsController.autoInstallUpdates; accessibleName: "Install updates automatically"; onToggled: prefsController.saveSettings({ "updates.auto_install": checked }) }
+                        }
+                        SettingRow {
+                            label: "Update on metered connections"
+                            hint: "Off: on mobile data or another limited connection, app updates and download tool updates wait until you're off it. Download in the update notice and Update tools still work."
+                            AppSwitch { checked: prefsWin.v("updates.allow_metered"); accessibleName: "Update on metered connections"; onToggled: prefsWin.save("updates.allow_metered", checked) }
                         }
                         RowLayout {
                             Layout.fillWidth: true
@@ -875,7 +898,6 @@ AppWindow {
                                 text: "Check now"
                                 iconName: "sync"
                                 enabled: updateController.status !== "checking" && updateController.status !== "downloading"
-                                toolTipText: "Ask GitHub whether a newer version is out"
                                 onClicked: updateController.checkNow()
                             }
                             Text {
@@ -936,7 +958,6 @@ AppWindow {
                 AppButton {
                     kind: "ghost"
                     text: "Reset to defaults"
-                    toolTipText: "Every preference goes back to its default; downloads, the library, and sign-ins stay"
                     onClicked: resetDialog.open()
                 }
                 Item { Layout.fillWidth: true }

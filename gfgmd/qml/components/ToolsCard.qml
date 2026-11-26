@@ -72,7 +72,6 @@ Rectangle {
                 kind: "primary"
                 text: "Download tools"
                 iconName: "download"
-                toolTipText: "Download the tools the app needs into its own folder"
                 onClicked: toolsController.installMissing()
             }
             AppButton {
@@ -80,14 +79,12 @@ Rectangle {
                 kind: "danger"
                 text: "Cancel"
                 iconName: "cancel"
-                toolTipText: "Stop downloading the tools. Nothing changes until the download is complete and checked."
                 onClicked: toolsController.cancel()
             }
             AppButton {
                 visible: toolsController.foundOnPath && !toolsController.busy
                 text: "Use the installed tools"
                 iconName: "check"
-                toolTipText: "Use the copies of these tools already installed on this PC"
                 onClicked: prefsController.saveSettings({"tools.source": "path"})
             }
             AppButton {
@@ -95,7 +92,6 @@ Rectangle {
                 kind: "ghost"
                 text: "Choose locations"
                 iconName: "folder"
-                toolTipText: "Choose where these tools are on this PC (Preferences > Tools)"
                 onClicked: card.chooseLocations()
             }
         }

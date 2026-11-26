@@ -102,6 +102,8 @@ ComboBox {
         border.color: control.visualFocus ? Theme.focusRing
             : control._warn ? Theme.warning
             : control.enabled ? Theme.inputBorder : Theme.border
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+        Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
     }
 
     delegate: ItemDelegate {
@@ -142,6 +144,7 @@ ComboBox {
         }
         background: Rectangle {
             color: itemRow.highlighted ? Theme.accentSoft : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.motionFast } }
         }
     }
 

@@ -51,11 +51,65 @@ AppDialog {
             Layout.fillWidth: true
             text: question.count === 1
                   ? "Download only the video you opened, or every video in its playlist?"
-                  : "Download only the videos you opened, or every video in their playlists?"
+                  : "Download only the videos you opened, or every video in their playlists? The first one:"
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.text
             wrapMode: Text.WordWrap
+        }
+        // The video and its playlist, named and pictured as soon as YouTube says what they are.
+        Repeater {
+            model: [
+                {"what": "Video", "details": queueController.heldVideo, "kind": "video", "unknown": "The video you opened"},
+                {"what": "Playlist", "details": queueController.heldPlaylist, "kind": "playlist", "unknown": "The playlist it was opened in"}
+            ]
+            delegate: RowLayout {
+                id: item
+                required property var modelData
+                Layout.fillWidth: true
+                spacing: Theme.spaceMd
+
+                Thumb {
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 54
+                    source: item.modelData.details.thumbnail || ""
+                    kind: item.modelData.kind
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: item.modelData.what
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                        color: Theme.textMuted
+                    }
+                    Text {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: item.modelData.details.title || item.modelData.unknown
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontBody
+                        font.weight: item.modelData.details.title ? Font.DemiBold : Font.Normal
+                        color: item.modelData.details.title ? Theme.text : Theme.textMuted
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        visible: text.length > 0
+                        text: item.modelData.details.uploader || ""
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                        color: Theme.textMuted
+                        elide: Text.ElideRight
+                    }
+                }
+            }
         }
         AppCheckBox {
             id: remember

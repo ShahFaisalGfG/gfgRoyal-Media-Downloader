@@ -23,6 +23,11 @@ class FakeManager:
         self.failure = failure
         self.check_failure = check_failure
         self.tools_root = Path(".")
+        self.is_metered = False
+        self.checks = 0
+
+    def hold_updates(self) -> bool:
+        return self.is_metered
 
     def missing(self) -> list[str]:
         return list(self._missing)
@@ -38,6 +43,7 @@ class FakeManager:
         return ["deno"]
 
     def check_updates(self) -> list[str]:
+        self.checks += 1
         if self.check_failure is not None:
             raise self.check_failure
         return ["yt-dlp", "ffmpeg"]
@@ -164,6 +170,42 @@ class TestUpdateCheck:
 
         monkeypatch.setattr(tool_manager, "update_available", some)
         assert manager.check_updates() == ["yt-dlp"]
+
+
+def test_automatic_tool_updates_wait_on_a_metered_connection(qapp, make):
+    """Nothing is checked or downloaded on its own while metered; it looks again in half an hour, and
+    Update tools still installs at once."""
+    manager = FakeManager()
+    manager.is_metered = True
+    controller, _notices = make(manager)
+    controller._auto_update()
+    assert manager.checks == 0 and controller.stage == tools_ctrl.METERED_WAIT
+    assert controller._daily.interval() == tools_ctrl.METERED_RETRY_MS
+    controller.updateAll()
+    settle(qapp, controller)
+    assert controller.stage == "The download tools are ready."
+    manager.is_metered = False
+    controller._auto_update()
+    settle(qapp, controller)
+    assert manager.checks == 1 and controller._daily.interval() == tools_ctrl.DAILY_MS
+
+
+def test_yt_dlp_waits_for_an_unmetered_connection_after_a_failure(tmp_path, monkeypatch):
+    """A download's automatic yt-dlp update skips a metered connection; a forced one goes ahead."""
+    asked: list[str] = []
+    monkeypatch.setattr(tool_manager, "managed_tools", lambda root: {"yt-dlp": "a"})
+    monkeypatch.setattr(tool_manager, "update_available", lambda package, root: asked.append(package.tool) or False)
+    metered = ToolManager(SimpleNamespace(settings=lambda: {}, tools_root=tmp_path),  # type: ignore[arg-type]
+                          metered=lambda: True)
+    assert not metered.update_ytdlp() and asked == []
+    assert not metered.update_ytdlp(force=True) and asked == ["yt-dlp"]
+    free = ToolManager(SimpleNamespace(settings=lambda: {}, tools_root=tmp_path),  # type: ignore[arg-type]
+                       metered=lambda: False)
+    assert not free.update_ytdlp() and asked == ["yt-dlp", "yt-dlp"]
+    allowed = ToolManager(SimpleNamespace(settings=lambda: {"updates": {"allow_metered": True}},  # type: ignore[arg-type]
+                                          tools_root=tmp_path), metered=lambda: True)
+    assert metered.hold_updates() and not allowed.hold_updates()
+    assert not allowed.update_ytdlp() and asked == ["yt-dlp", "yt-dlp", "yt-dlp"]
 
 
 def test_tool_versions_read_plainly() -> None:

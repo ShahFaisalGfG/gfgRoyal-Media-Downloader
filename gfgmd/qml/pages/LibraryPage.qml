@@ -105,7 +105,6 @@ Item {
                 Layout.fillWidth: true
                 placeholderText: "Search titles, channels, and file names"
                 accessibleName: "Search the library"
-                toolTipText: "Show files whose title, uploader, or file name contains this text"
                 onTextChanged: filterTimer.restart()
             }
             StyledComboBox {
@@ -114,7 +113,6 @@ Item {
                         {"label": "Audio", "code": "audio"}]
                 value: page.kindFilter
                 accessibleName: "Type"
-                toolTipText: "Show videos, audio, or both"
                 onActivated: { page.kindFilter = currentValue; page.applyFilters() }
             }
             StyledComboBox {
@@ -122,7 +120,6 @@ Item {
                 model: libraryController.siteOptions
                 value: page.siteFilter
                 accessibleName: "Site"
-                toolTipText: "Show files from one site"
                 onActivated: { page.siteFilter = currentValue; page.applyFilters() }
             }
             AppButton {
@@ -164,7 +161,6 @@ Item {
                 compact: true
                 text: "Play"
                 iconName: "play"
-                toolTipText: "Play the selected files in the built-in players, newest first"
                 onClicked: page.playList(libraryController.pathsOf(selection.ids))
             }
             AppButton {
@@ -172,7 +168,6 @@ Item {
                 compact: true
                 text: "Extract audio"
                 iconName: "audio"
-                toolTipText: "Save the selected videos' audio as songs (songs among them are left out)"
                 onClicked: extractDialog.forVideos(selection.ids, selection.count === 1 ? "1 file" : selection.count + " files")
             }
             AppButton {
@@ -180,7 +175,7 @@ Item {
                 compact: true
                 text: "Remove"
                 iconName: "clear"
-                toolTipText: "Take the selected files off the library; the files stay (Delete)"
+                toolTipText: "Takes them off the library; the files stay on this PC"
                 onClicked: page.removePicked()
             }
             AppButton {
@@ -188,7 +183,6 @@ Item {
                 compact: true
                 text: "Recycle Bin"
                 iconName: "delete"
-                toolTipText: "Move the selected files to the Recycle Bin"
                 onClicked: deleteDialog.ask(selection.ids)
             }
         }

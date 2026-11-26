@@ -103,7 +103,7 @@ class _Startup:
             tools_ctrl = ToolsController(manager)
             player_ctrl = PlayerController(context)
             queue_ctrl = QueueController(context, manager, notifier, lyrics_fetch=fetch_json,
-                                         release_player=player_ctrl.release_files)
+                                         release_player=player_ctrl.release_files, quick_fetch=oembed_fetch)
             analyze_ctrl = AnalyzeController(context, queue_ctrl, quick_fetch=oembed_fetch)
             library_ctrl = LibraryController(context, release_files=queue_ctrl.release_files)
             subs_ctrl = SubscriptionsController(context, queue_ctrl, notifier)
@@ -364,6 +364,9 @@ def _update_config():
         return (bool(updates.get("auto_check", UpdateDefaults.AUTO_CHECK)),
                 bool(updates.get("auto_install", UpdateDefaults.AUTO_INSTALL)))
 
+    def allow_metered() -> bool:
+        return bool(load_settings().get("updates", {}).get("allow_metered", UpdateDefaults.ALLOW_METERED))
+
     source = UpdateSource(
         app=AppInfo.APP_NAME,
         version=AppInfo.APP_VERSION,
@@ -379,6 +382,7 @@ def _update_config():
         log=lambda message, error: write_log(message, "critical" if error else "general"),
         release_locks=release_app_mutexes,
         exit_word="quit",  # closing the window keeps the app running in the tray
+        allow_metered=allow_metered,
     )
 
 
@@ -394,7 +398,8 @@ def _load_icon() -> QIcon:
 
 def main() -> None:
     """Start the app: hand a later launch (and its links) to the open window, or boot a new one."""
-    QQuickStyle.setStyle("Material")
+    # Material, with the app's own tooltip (gfgmd/qml/GfgmdStyle); found through the engine's import path.
+    QQuickStyle.setStyle("GfgmdStyle")
     # The players use Qt's FFmpeg backend (hardware decoding where the GPU allows); the bundle ships
     # only that one, so it is named here rather than left to Qt's choice.
     os.environ.setdefault("QT_MEDIA_BACKEND", "ffmpeg")

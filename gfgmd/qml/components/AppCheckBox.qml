@@ -32,13 +32,18 @@ CheckBox {
             : control.hovered ? Theme.surfaceHover : Theme.surface
         border.width: control.checked ? 0 : 1
         border.color: control.enabled ? Theme.inputBorder : Theme.border
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
 
+        // The tick grows into place as the box fills.
         Icon {
             anchors.centerIn: parent
-            visible: control.checked
+            opacity: control.checked ? 1 : 0
+            scale: control.checked ? 1 : 0.4
             name: "checkMark"
             size: 12
             color: control.enabled ? Theme.textOnAccent : Theme.surface
+            Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+            Behavior on scale { NumberAnimation { duration: Theme.motionMedium; easing.type: Easing.OutBack } }
         }
 
         Rectangle {

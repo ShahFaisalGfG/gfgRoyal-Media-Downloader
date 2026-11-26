@@ -103,7 +103,7 @@ Rectangle {
                 model: playerController.lyrics
                 spacing: Theme.spaceXs
                 boundsBehavior: Flickable.StopAtBounds
-                highlightMoveDuration: 300
+                highlightMoveDuration: Theme.motion ? 300 : 0
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 // One Tab stop that lands on the line being sung: Up and Down move between lines,
                 // and Enter or Space plays from the current one.
@@ -123,9 +123,8 @@ Rectangle {
                     width: lyricList.width
                     focusPolicy: Qt.NoFocus
                     Accessible.name: lyric.modelData
-                    ToolTip.visible: lyric.hovered
-                    ToolTip.text: "Play from this line (Enter)"
-                    ToolTip.delay: 800
+                    // A click plays from this line (Enter from the keyboard).
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                     onClicked: view.player.position = playerController.lyricStart(lyric.index)
                     contentItem: Text {
                         textFormat: Text.PlainText
@@ -135,7 +134,7 @@ Rectangle {
                         font.pixelSize: lyric.index === view.line ? Theme.fontTitle : Theme.fontSubtitle
                         font.weight: lyric.index === view.line ? Font.Bold : Font.Normal
                         color: lyric.index === view.line ? Theme.accent : lyric.index < view.line ? Theme.textMuted : Theme.text
-                        Behavior on font.pixelSize { NumberAnimation { duration: 150 } }
+                        Behavior on font.pixelSize { NumberAnimation { duration: Theme.motionMedium } }
                     }
                     background: Item {}
                     FocusRing { anchors.fill: parent; visible: lyric.ListView.isCurrentItem && lyricList.activeFocus }

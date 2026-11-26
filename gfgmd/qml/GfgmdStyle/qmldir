@@ -1,0 +1,4 @@
+module GfgmdStyle
+# The app's Qt Quick Controls style: Material for every control, except the tooltip drawn here.
+import QtQuick.Controls.Material auto
+ToolTip 6.0 ToolTip.qml

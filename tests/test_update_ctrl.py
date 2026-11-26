@@ -47,8 +47,9 @@ class Harness:
     """A controller for one install kind, with the network, installer, and preferences faked."""
 
     def __init__(self, monkeypatch, tmp_path, kind="user", latest=None, error="", error_type=FeedError,
-                 metered=False, auto_check=True, auto_install=True, runtime_id=""):
+                 metered=False, auto_check=True, auto_install=True, runtime_id="", allow_metered=False):
         self.prefs = [auto_check, auto_install]
+        self.allow_metered = allow_metered
         self.latest = latest
         self.error = error
         self.download_error: Exception | None = None
@@ -116,6 +117,7 @@ class Harness:
             log=lambda message, error: self.logs.append((message, error)),
             release_locks=release_locks,
             runtime_id=runtime_id,
+            allow_metered=lambda: self.allow_metered,
         )
         self.run = Run()
         self.notices: list[str] = []
@@ -217,6 +219,29 @@ class TestCheck:
         h.ctrl.checkNow()
         assert h.ctrl.status == "available" and h.downloads == 0
         assert "limited connection" in h.ctrl.message
+
+    def test_updates_over_a_metered_connection_when_allowed(self, harness):
+        h = harness(latest=release(), metered=True, allow_metered=True)
+        h.ctrl.checkNow()
+        assert h.ctrl.status == "ready" and h.downloads == 1
+
+    def test_allowing_metered_updates_starts_the_waiting_download(self, harness):
+        h = harness(latest=release(), metered=True)
+        h.ctrl.checkNow()
+        assert h.ctrl.status == "available"
+        h.allow_metered = True
+        h.ctrl.preferencesChanged()
+        assert h.ctrl.status == "ready" and h.downloads == 1
+
+    def test_a_waiting_download_starts_once_the_connection_is_not_metered(self, harness, monkeypatch):
+        """The hourly look at the connection keeps the banner's promise; the daily check isn't needed."""
+        h = harness(latest=release(), metered=True)
+        h.ctrl.checkNow()
+        h.ctrl._maybe_check()
+        assert h.ctrl.status == "available" and h.downloads == 0
+        monkeypatch.setattr(update_ctrl.install, "is_metered", lambda: False)
+        h.ctrl._maybe_check()
+        assert h.ctrl.status == "ready" and h.downloads == 1
 
     def test_turning_installs_on_starts_the_download(self, harness):
         h = harness(latest=release(), auto_install=False)

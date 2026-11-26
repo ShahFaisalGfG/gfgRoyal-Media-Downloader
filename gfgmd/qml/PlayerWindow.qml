@@ -230,7 +230,6 @@ AppWindow {
                 Layout.alignment: Qt.AlignHCenter
                 text: "Open in another player"
                 iconName: "openExternal"
-                toolTipText: "Open the file in the program Windows uses for it"
                 onClicked: playerController.openInSystem(playerWin._path)
             }
         }
@@ -252,7 +251,7 @@ AppWindow {
             opacity: playerWin.controlsShown ? 1 : 0
             // Visible as soon as it is asked for, before the fade starts, so Tab can reach its controls.
             visible: playerWin.controlsShown || opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 180 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.motionMedium } }
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#00000000" }
                 GradientStop { position: 0.35; color: "#99000000" }

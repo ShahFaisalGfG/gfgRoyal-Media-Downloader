@@ -1,10 +1,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
 
 // One choice of two or three, drawn as joined buttons (Video | Audio; This video | Whole playlist).
 // The chosen one shows in the accent color. Screen readers hear radio buttons; Left and Right move
-// between them, as in a radio group. `options` holds {label, code, icon, tip}; `activated` fires
+// between them, as in a radio group. `options` holds {label, code, icon}; `activated` fires
 // for a new choice only.
 Row {
     id: choice
@@ -42,7 +41,6 @@ Row {
             compact: choice.compact
             text: segment.modelData.label
             iconName: segment.modelData.icon || ""
-            toolTipText: segment.modelData.tip || ""
             checked: choice.value === segment.modelData.code
             flatLeft: segment.index > 0
             flatRight: segment.index < choice.options.length - 1

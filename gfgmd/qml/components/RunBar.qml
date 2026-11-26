@@ -77,7 +77,6 @@ Rectangle {
             visible: queueController.holdText.length > 0
             text: "Start now"
             iconName: "play"
-            toolTipText: "Start downloading now instead of at " + queueController.holdText
             onClicked: queueController.startNow()
         }
 
@@ -102,9 +101,6 @@ Rectangle {
             kind: queueController.paused ? "primary" : "secondary"
             text: queueController.paused ? "Resume all" : "Pause all"
             iconName: queueController.paused ? "play" : "pause"
-            toolTipText: queueController.paused
-                ? "Resume every paused download (Ctrl+Shift+P)"
-                : "Pause every download; each continues from where it stopped (Ctrl+Shift+P)"
             onClicked: queueController.paused ? queueController.resumeAll() : queueController.pauseAll()
         }
     }

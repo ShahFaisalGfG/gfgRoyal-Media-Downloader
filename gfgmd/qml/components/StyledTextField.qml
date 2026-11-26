@@ -70,6 +70,7 @@ ColumnLayout {
             border.color: field.errorText.length > 0 ? Theme.danger
                 : input.activeFocus ? Theme.focusRing
                 : input.enabled ? Theme.inputBorder : Theme.border
+            Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
         }
 
         // A plain centred placeholder. The Material style's own placeholder floats up to the top
