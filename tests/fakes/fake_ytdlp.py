@@ -186,9 +186,13 @@ def main() -> int:
     scenario = urlparse(url).path.strip("/").split("/")[0]
     # Reading a link and checking a subscription are recognized by their options, whatever the link.
     if "--dump-single-json" in args and scenario not in ("private", "auth"):
-        scenario = "dump"
+        scenario = "video-details" if "--no-playlist" in args else "dump"
     elif "--lazy-playlist" in args:
-        scenario = "channel"
+        # A subscription check keeps an archive; reading a list's videos for Download options doesn't.
+        if "--download-archive" in args:
+            scenario = "channel"
+        elif scenario not in ("private", "auth"):
+            scenario = "list"
     fake = Fake(args, state)
     attempt = fake.attempt(scenario)
 
@@ -365,6 +369,26 @@ def main() -> int:
                 "entries": [{"id": "aaaaaaaaaaa", "title": "First", "duration": 61},
                             {"id": "bbbbbbbbbbb", "title": "Second", "duration": 62}]}
         out("[youtube:tab] PLfake: Downloading webpage")
+        out(json.dumps(info))
+        return 0
+    if scenario == "list":
+        # Reading a list for Download options: each video as it arrives, then the list's details.
+        out("[youtube:tab] PLfake: Downloading webpage")
+        for video_id, title, duration in (("aaaaaaaaaaa", "First", 61), ("bbbbbbbbbbb", "Second", 62)):
+            out(MARKER + "entry " + json.dumps({"id": video_id, "title": title, "duration": duration,
+                                                 "ie_key": "Youtube", "_type": "url",
+                                                 "url": f"https://www.youtube.com/watch?v={video_id}"}))
+        out(MARKER + 'pl {"id":"PLfake","title":"Fake List","extractor_key":"YoutubeTab","channel":"Fake Channel"}')
+        return 0
+    if scenario == "video-details":
+        # Reading one video for Download options: its qualities, the creator's subtitles, YouTube's
+        # automatic captions of its speech ("en-orig") and their translations.
+        info = {"id": "aaaaaaaaaaa", "title": "Clip", "extractor_key": "Youtube", "duration": 75, "language": "en",
+                "formats": [{"format_id": "137", "vcodec": "avc1", "acodec": "none", "height": 1080, "width": 1920},
+                            {"format_id": "140", "vcodec": "none", "acodec": "mp4a", "filesize": 1_000_000}],
+                "subtitles": {"en": [{"ext": "vtt"}], "de-DE": [{"ext": "vtt"}]},
+                "automatic_captions": {"en-orig": [{"ext": "vtt"}], "en": [{"ext": "vtt"}], "fr": [{"ext": "vtt"}],
+                                       "ur": [{"ext": "vtt"}]}}
         out(json.dumps(info))
         return 0
     err(f"ERROR: Unsupported URL: {url}")

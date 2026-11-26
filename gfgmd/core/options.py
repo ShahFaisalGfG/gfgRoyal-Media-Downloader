@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from gfgmd.config.defaults import DownloadDefaults, FormatDefaults
 
 Kind = Literal["video", "audio"]
-_LANGS = re.compile(r"^[A-Za-z0-9_.*,-]{1,200}$")
+_LANGS = re.compile(r"^[A-Za-z0-9_.*,-]{1,2000}$")
 _ITEMS = re.compile(r"^[0-9:,\- ]{1,500}$")
 # A language code as sites report audio tracks: "en", "es-419", "pt-BR".
 _LANG_CODE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,2}$")
@@ -194,11 +194,3 @@ def check_proxy(proxy: str) -> str:
     except ValueError as exc:
         raise ValueError("The proxy's port must be a number, such as 8080.") from exc
     return proxy
-
-
-def options_from_preset(preset: dict[str, Any], base: DownloadOptions) -> DownloadOptions:
-    """Apply a preset's values (kind, resolution, container, codec, audio format) on top of `base`."""
-    keys = {"kind", "max_height", "container", "codec_profile", "audio_tracks", "audio_langs", "audio_format",
-            "audio_quality", "cover", "subtitles", "subtitle_format", "sponsorblock", "lyrics"}
-    changes = {key: value for key, value in preset.items() if key in keys}
-    return DownloadOptions.from_dict({**base.to_dict(), **changes})

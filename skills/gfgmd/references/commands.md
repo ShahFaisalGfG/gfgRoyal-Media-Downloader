@@ -56,7 +56,8 @@ gfgmd skill {install,uninstall,path,show} [options]
 
 | Option | What it does |
 |---|---|
-| `--items SPEC` | Which playlist or channel videos, by number, such as `1:5,8` |
+| `--whole-playlist` | For a link to a video inside a playlist (`watch?v=...&list=...`), download the whole playlist; without it only that video downloads |
+| `--items SPEC` | Which playlist or channel videos, by number, such as `1:5,8`; with a link to a video inside a playlist it means the playlist |
 | `--live-from-start` | Record a live stream from its beginning |
 | `--wait-for-video` | Wait for a scheduled stream or premiere to begin |
 | `--strict` | Exit with status 1 when any video couldn't be downloaded (private, removed, ...) |
@@ -78,6 +79,7 @@ Each takes `--json`.
 
 ```powershell
 gfgmd "https://www.youtube.com/playlist?list=PLAYLIST_ID" --json
+gfgmd "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID" --whole-playlist --json
 gfgmd "https://youtu.be/VIDEO_ID" -r 720 -c 4 --json
 gfgmd "https://music.youtube.com/playlist?list=PLAYLIST_ID" --audio --json
 gfgmd "https://vimeo.com/123456" --subs "en.*" --embed-subs --limit-rate 2M --json

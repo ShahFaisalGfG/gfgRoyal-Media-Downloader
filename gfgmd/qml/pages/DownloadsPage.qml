@@ -9,9 +9,10 @@ import QtQml.Models
 import "../components"
 import "../components/ListMenu.js" as ListMenu
 
-// Paste a link and press Download, or the arrow on its right to choose formats and videos first. Below,
-// the queue: every download with its progress, its buttons, and a menu of everything else; a playlist
-// lists its videos under it, each with how it is doing.
+// Paste a link and press Download: Video or Audio as the switch beside the box says. With Smart mode
+// on it downloads at once with the defaults from Preferences; off, Download options open first.
+// Below, the queue: every download with its progress, its buttons, and a menu of everything else; a
+// playlist lists its videos under it, each with how it is doing.
 Item {
     id: page
 
@@ -19,9 +20,11 @@ Item {
     signal openSignIns()
 
     property bool optionsOpen: false
-    // The download options show (or are being read): the Download button's cap points up.
+    // Download options show (or the link is being read).
     readonly property bool optionsShown: page.optionsOpen && (analyzeController.busy || analyzeController.hasResult)
-    readonly property string presetId: { prefsController.revision; return prefsController.value("downloads.preset") }
+    // The Video | Audio switch, and Smart mode (Download downloads at once with the defaults).
+    readonly property string kind: { prefsController.revision; return prefsController.value("downloads.kind") === "audio" ? "audio" : "video" }
+    readonly property bool smart: { prefsController.revision; return prefsController.value("downloads.smart_mode") !== false }
 
     // Downloads that saved nothing and are finished (cancelled, failed, already downloaded) go at
     // once, with their unfinished parts; any in progress or with saved files asks first.
@@ -87,27 +90,33 @@ Item {
         linkField.pasteClipboard()
     }
 
+    function setKind(kind) {
+        prefsController.saveSettings({"downloads.kind": kind})
+    }
+
     // Every link in the box (a paste of several keeps them all); an empty box takes the clipboard's.
+    // Smart mode downloads at once; without it, Download options open first.
     function download() {
         if (linkField.links.length === 0) page.pasteLink()
-        if (linkField.links.length > 0 && queueController.addLinks(linkField.links.join("\n"), page.presetId) > 0)
+        if (linkField.links.length === 0) return
+        if (!page.smart) {
+            page.showOptions()
+            return
+        }
+        if (queueController.addLinks(linkField.links.join("\n"), page.kind) > 0)
             linkField.clear()
     }
 
-    // The download options read one link: the one in the box.
+    // Download options for the links in the box: one link's details, or one set of choices for several.
     function showOptions() {
         if (linkField.text.length === 0) page.pasteLink()
-        var text = linkField.links.length > 0 ? linkField.links[0] : ""
-        if (text.length === 0) {
+        if (linkField.links.length === 0) {
             appController.notice("Paste a link first, then open its download options.")
             return
         }
         page.optionsOpen = true
-        analyzeController.analyze(text)
-    }
-    function toggleOptions() {
-        if (page.optionsShown) page.optionsOpen = false
-        else page.showOptions()
+        if (linkField.links.length > 1) analyzeController.showLinks(linkField.links)
+        else analyzeController.analyze(linkField.links[0])
     }
 
     // Put a link in the link box and open its download options (the Sign-ins page's library shortcuts).
@@ -116,8 +125,15 @@ Item {
         page.showOptions()
     }
 
+    // Links from outside the box with Smart mode off (the extension, the tray, a second launch, a drop).
+    function showLinks(links, kind) {
+        if (kind !== page.kind) page.setKind(kind)
+        linkField.setLinks(links.join(" "))
+        page.showOptions()
+    }
+
     function addDropped(text) {
-        if (queueController.addLinks(text, page.presetId) === 0)
+        if (queueController.receiveLinks(text, page.kind) === 0)
             linkField.setLinks(text)
     }
 
@@ -134,31 +150,38 @@ Item {
                 id: linkField
                 Layout.fillWidth: true
                 placeholderText: "Paste a link to a video, playlist, or channel"
-                toolTipText: "Works with YouTube and many other sites. Press Enter to download with the choice on the right."
+                toolTipText: "Works with YouTube and many other sites. Press Enter to download."
+                downloadEnabled: toolsController.ready
+                downloadToolTip: !toolsController.ready ? "Get the download tools first"
+                    : page.smart ? "Download as " + page.kind + " with your defaults from Preferences (Enter)"
+                    : "Choose the quality, subtitles, and videos, then download (Enter)"
                 onAccepted: page.download()
+                onDownloadRequested: page.download()
+                // Reading starts as soon as a link is pasted, so Download options open quickly.
+                onLinkReady: function (url) { if (toolsController.ready) analyzeController.prefetch(url) }
                 onNotLink: appController.notice("The copied text isn't a link. Copy the link from your browser's address bar.")
                 input.Keys.onEscapePressed: linkField.clear()
             }
-            StyledComboBox {
-                Layout.preferredWidth: 230
-                model: prefsController.presets
-                value: page.presetId
-                accessibleName: "Preset"
-                toolTipText: "What the Download button saves: video or audio, its quality, and the file type"
-                onActivated: prefsController.saveSettings({"downloads.preset": currentValue})
+            SegmentedChoice {
+                accessibleName: "Download as"
+                value: page.kind
+                options: [
+                    {"label": "Video", "code": "video", "icon": "video", "tip": "Download videos (the defaults in Preferences > Video)"},
+                    {"label": "Audio", "code": "audio", "icon": "audio", "tip": "Download only the sound, as songs (the defaults in Preferences > Audio)"}
+                ]
+                onActivated: function (code) { page.setKind(code) }
             }
-            // Download with the preset, or open the cap for this link's download options.
-            SplitButton {
-                enabled: toolsController.ready
-                text: "Download"
-                iconName: "download"
-                toolTipText: toolsController.ready ? "Download with the chosen preset (Enter)"
-                    : "Get the download tools first"
-                capToolTipText: "Download options: pick the quality, format, subtitles, and which videos (Ctrl+Shift+O)"
-                capOpen: page.optionsShown
-                capAccessibleName: page.optionsShown ? "Close the download options" : "Open the download options"
-                onClicked: page.download()
-                onCapClicked: page.toggleOptions()
+            AppButton {
+                text: "Smart"
+                iconName: "smart"
+                checked: page.smart
+                toolTipText: page.smart
+                    ? "Smart mode is on: Download downloads at once with your defaults from Preferences > Video and Audio. Click to choose each time."
+                    : "Smart mode is off: Download opens Download options first. Click to download at once with your defaults."
+                Accessible.name: "Smart mode"
+                Accessible.checkable: true
+                Accessible.checked: page.smart
+                onClicked: prefsController.saveSettings({"downloads.smart_mode": !page.smart})
             }
         }
 
@@ -198,8 +221,9 @@ Item {
         OptionsPanel {
             Layout.fillWidth: true
             visible: page.optionsShown
-            maxHeight: Math.max(240, page.height * 0.62)
-            presetId: page.presetId
+            // With nothing in the list below, the options may take most of the page.
+            maxHeight: Math.max(240, page.height * (queueView.count === 0 ? 0.8 : 0.62))
+            kind: page.kind
             onClosed: page.optionsOpen = false
             onQueued: linkField.clear()
         }
@@ -395,11 +419,11 @@ Item {
 
             EmptyState {
                 anchors.centerIn: parent
-                visible: queueView.count === 0
+                visible: queueView.count === 0 && !page.optionsShown
                 iconName: "download"
                 title: "Nothing downloading yet"
                 text: "Copy a link from your browser and press Download, or drag links onto this window. "
-                    + "Playlists and channels download whole; the arrow beside Download picks the videos, quality, and subtitles."
+                    + "With Smart mode on, Download uses your defaults; turn it off to pick the quality, subtitles, and videos each time."
             }
         }
     }

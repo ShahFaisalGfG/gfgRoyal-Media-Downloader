@@ -4,7 +4,7 @@ gfgRoyal Media Downloader has no accounts, no telemetry, and no ads. It never se
 
 ## Connections you ask for
 
-- **The sites you download from, play from, subscribe to, or sign in to.** yt-dlp reads and downloads the links you give the app, and the app fetches their thumbnails. Subscriptions check the channels and playlists you added, as often as you set.
+- **The sites you download from, play from, subscribe to, or sign in to.** yt-dlp reads and downloads the links you give the app, and the app fetches their thumbnails. A link pasted into the link box is read as soon as it is pasted, and a YouTube link's title and thumbnail come first from YouTube's own oEmbed page (youtube.com/oembed), which is sent only that link. Subscriptions check the channels and playlists you added, as often as you set.
 - **A site's sign-in page**, opened in a browser window of its own when you click Sign in. A YouTube sign-in is checked once by opening your Watch later list.
 - **The download tools' releases on GitHub** when you choose to install yt-dlp, FFmpeg, and Deno, or update them from Preferences > Tools.
 

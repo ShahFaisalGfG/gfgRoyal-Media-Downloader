@@ -162,6 +162,7 @@ QtObject {
         rewind: "\uEB9E",
         forward: "\uEB9D",
         lyrics: "\uE8E4",
+        smart: "\uE82F",
         pin: "\uE718",
         unpin: "\uE77A"
     })

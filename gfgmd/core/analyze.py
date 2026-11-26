@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from gfgmd.core.command import Auth, analyze_command
+from gfgmd.core.command import Auth, analyze_command, list_command, run_marker
 from gfgmd.core.errors import Failure, classify
 from gfgmd.core.options import DownloadOptions
-from gfgmd.core.progress import is_container, pick_thumbnail, title_from_url
+from gfgmd.core.progress import is_container, parse_line, pick_thumbnail, title_from_url
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.tools import ToolSet
 
@@ -105,19 +105,8 @@ def parse_info(info: dict[str, Any], options: DownloadOptions | None = None) -> 
     if playlist:
         entries = [entry for entry in info.get("entries") or [] if isinstance(entry, dict)]
         result.selectable = not any(is_container(entry) for entry in entries)
-        result.entries = [
-            Entry(
-                id=str(entry.get("id") or ""),
-                title=str(entry.get("title") or title_from_url(str(entry.get("url") or "")) or "Untitled"),
-                index=int(entry.get("playlist_index") or position),
-                duration=_number(entry.get("duration")),
-                url=str(entry.get("url") or entry.get("webpage_url") or ""),
-                live_status=str(entry.get("live_status") or ""),
-                availability=str(entry.get("availability") or ""),
-                thumbnail=pick_thumbnail(entry),
-            )
-            for position, entry in enumerate(entries, start=1) if entry.get("id")
-        ]
+        result.entries = [entry for entry in (entry_from(data, position) for position, data in enumerate(entries, start=1))
+                          if entry is not None]
         return result
     formats = [fmt for fmt in info.get("formats") or [] if isinstance(fmt, dict)]
     heights = set()
@@ -136,6 +125,22 @@ def parse_info(info: dict[str, Any], options: DownloadOptions | None = None) -> 
     result.auto_subtitle_langs = sorted(str(key) for key in (info.get("automatic_captions") or {}))
     result.size_estimate = estimate_size(formats, options or DownloadOptions())
     return result
+
+
+def entry_from(entry: dict[str, Any], position: int) -> Entry | None:
+    """One listed video as an Entry (`position` is its place when yt-dlp doesn't number it); None without an ID."""
+    if not entry.get("id"):
+        return None
+    return Entry(
+        id=str(entry["id"]),
+        title=str(entry.get("title") or title_from_url(str(entry.get("url") or "")) or "Untitled"),
+        index=int(entry.get("playlist_index") or position),
+        duration=_number(entry.get("duration")),
+        url=str(entry.get("url") or entry.get("webpage_url") or ""),
+        live_status=str(entry.get("live_status") or ""),
+        availability=str(entry.get("availability") or ""),
+        thumbnail=pick_thumbnail(entry),
+    )
 
 
 # yt-dlp ranks the original audio track of a YouTube video at this language preference or higher.
@@ -228,3 +233,37 @@ def analyze(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None = None,
             return parse_info(info, options)
     reason = errors[-1] if errors else f"yt-dlp exited with status {code}"
     raise AnalyzeError(classify(reason, signed_in=auth is not None, single=single))
+
+
+def analyze_list(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None = None,
+                 options: DownloadOptions | None = None, stop: threading.Event | None = None,
+                 on_entry: Callable[[dict[str, Any]], None] | None = None,
+                 on_line: Callable[[str], None] | None = None) -> Analysis:
+    """Read a playlist or channel page by page: each video goes to `on_entry` as it arrives (from the
+    worker thread), so a long list shows its first videos in seconds; raises AnalyzeError when the
+    list can't be read."""
+    marker = run_marker()
+    entries: list[dict[str, Any]] = []
+    playlist: dict[str, Any] = {}
+    errors: list[str] = []
+
+    def collect(stream: str, line: str) -> None:
+        event = parse_line(stream, line, marker)
+        if event.kind == "entry":
+            entries.append(event.data)
+            if on_entry is not None:
+                on_entry(event.data)
+        elif event.kind == "pl":
+            playlist.update(event.data)
+        elif event.kind == "error":
+            errors.append(event.text)
+        elif on_line is not None and event.text:
+            on_line(event.text)
+
+    code, stopped = run_to_completion(list_command(url, tools, cache_dir, auth, options, marker), collect, stop)
+    if stopped:
+        raise AnalyzeError(classify("Cancelled"))
+    if code != 0 and not entries:
+        reason = errors[-1] if errors else f"yt-dlp exited with status {code}"
+        raise AnalyzeError(classify(reason, signed_in=auth is not None))
+    return parse_info({**playlist, "_type": "playlist", "entries": entries}, options)

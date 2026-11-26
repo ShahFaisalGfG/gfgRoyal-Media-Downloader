@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import os
 import shutil
@@ -20,30 +20,30 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QCoreApplication, QEventLoop, QObject, QTimer, Signal, Slot
 
-from gfgmd.config.defaults import DownloadDefaults, FormatDefaults, PresetDefaults
-from gfgmd.controllers.queue_rows import (ACTIVE, ROLES, collection_values, entry_key, entry_row, job_key, job_row,
-                                          kind_of, running_values)
+from gfgmd.config.defaults import DownloadDefaults, FormatDefaults
+from gfgmd.controllers.queue_rows import (ROLES, collection_values, entry_key, entry_row, job_key, job_row, kind_of,
+                                          running_values)
 from gfgmd.core.archive import archive_path, read_archive_ids
 from gfgmd.core.auth import Checkout
-from gfgmd.core.command import SESSION_ARCHIVE, Auth, RunPaths, folder_name
+from gfgmd.core.command import SESSION_ARCHIVE, Auth, RunPaths
 from gfgmd.core.extract import AudioExtractor, ExtractSpec
 from gfgmd.core.jobs import STALL_SECONDS, JobExecutor, JobResult, JobSpec, Runner
 from gfgmd.core.lyrics import Fetch
-from gfgmd.core.naming import AUDIO_EXTENSIONS, format_label, group_of, remove_empty_scratch, remove_partials
-from gfgmd.core.options import DownloadOptions, options_from_preset
+from gfgmd.core.naming import AUDIO_EXTENSIONS, group_of, remove_empty_scratch, remove_partials
+from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import Event, Snapshot
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.schedule import limit_at, next_queue_start, per_job_limit
 from gfgmd.core.secret_store import SecretError, wipe
-from gfgmd.core.sources import Source, as_link, canonical_url, source_from_url
+from gfgmd.core.sources import Source, as_link, canonical_url, single_video, source_from_url, video_link
 from gfgmd.core.store import ACTIVE_STATES
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services import power
 from gfgmd.services.context import VAULT_METHODS, AppContext
 from gfgmd.services.notifier import Notifier
-from gfgmd.services.recycle import recycle_saved
+from gfgmd.services.recycle import failure_notice, recycle_saved
 from gfgmd.services.taskbar import INDETERMINATE, NORMAL, PAUSED, TaskbarProgress
 from gfgmd.services.tasks import TaskRunner
 from gfgmd.services.thumbnails import cache_file
@@ -93,10 +93,12 @@ class _Running:
             self.executor.stop()
 
 
-def base_options(settings: dict[str, Any]) -> DownloadOptions:
-    """The format choices in Preferences, as download options."""
+def base_options(settings: dict[str, Any], kind: str = "video") -> DownloadOptions:
+    """Preferences' Video or Audio defaults as download options: what Smart mode downloads with, and
+    what Download options start from. Audio has its own "Save in the file" choices."""
     formats = settings.get("formats", {})
     downloads = settings.get("downloads", {})
+    audio = kind == "audio"
     container = formats.get("container", "mp4")
     langs = [code for code in formats.get("audio_langs", []) if isinstance(code, str)]
     # Extra audio tracks need languages and an MP4 or MKV file; otherwise the original track alone.
@@ -104,8 +106,10 @@ def base_options(settings: dict[str, Any]) -> DownloadOptions:
     if tracks != "original" and (not langs or container not in ("mp4", "mkv")):
         tracks, langs = "original", []
     return DownloadOptions.from_dict({
+        "kind": "audio" if audio else "video",
+        "max_height": formats.get("max_height", 0),
         "container": container,
-        "codec_profile": formats.get("codec_profile", "compatible"),
+        "codec_profile": formats.get("codec_profile", "balanced"),
         "audio_tracks": tracks,
         "audio_langs": langs,
         "audio_format": formats.get("audio_format", "mp3"),
@@ -117,13 +121,20 @@ def base_options(settings: dict[str, Any]) -> DownloadOptions:
         "lyrics_online": formats.get("lyrics_online", True),
         "subtitle_langs": formats.get("subtitle_langs", "en.*"),
         "auto_subtitles": formats.get("auto_subtitles", False),
-        "embed_thumbnail": formats.get("embed_thumbnail", True),
-        "embed_metadata": formats.get("embed_metadata", True),
-        "embed_chapters": formats.get("embed_chapters", True),
+        "embed_thumbnail": formats.get("audio_embed_cover" if audio else "embed_thumbnail", True),
+        "embed_metadata": formats.get("audio_embed_metadata" if audio else "embed_metadata", True),
+        "embed_chapters": formats.get("audio_embed_chapters" if audio else "embed_chapters", True),
         "sponsorblock": formats.get("sponsorblock", "off"),
         "sponsorblock_categories": formats.get("sponsorblock_categories", ["sponsor"]),
         "filename_style": downloads.get("filename_style", "title-quality"),
     })
+
+
+def with_network(options: DownloadOptions, settings: dict[str, Any]) -> DownloadOptions:
+    """These options with the proxy and IPv4 choices of Preferences > Network, which reading a link
+    and checking a subscription use as downloads do."""
+    network = settings.get("network", {})
+    return options.with_changes(proxy=str(network.get("proxy", "")), force_ipv4=bool(network.get("force_ipv4", False)))
 
 
 def source_of(job: dict[str, Any]) -> Source:
@@ -147,15 +158,26 @@ class QueueController(QObject):
     whenDoneCountdown = Signal(str)
     # A job needs the user to sign in to a site (site key).
     signInNeeded = Signal(str)
+    # Links to a video inside a playlist wait for "this video or the whole playlist?" (how many wait);
+    # QML asks and answers with answerPlaylist.
+    playlistQuestion = Signal(int)
+    # Smart mode is off and links came from outside the link box: QML shows them in Download options
+    # (the links, and "video" or "audio").
+    optionsRequested = Signal(list, str)
+    # A setting was saved here (the remembered "video or playlist" answer), for Preferences to show.
+    settingsSaved = Signal()
 
     def __init__(self, context: AppContext, tools: ToolManager, notifier: Notifier,
                  parent: QObject | None = None, runner: Runner = run_to_completion,
-                 lyrics_fetch: Fetch | None = None, stall_seconds: float = STALL_SECONDS) -> None:
+                 lyrics_fetch: Fetch | None = None, stall_seconds: float = STALL_SECONDS,
+                 release_player: Callable[[list[str]], None] | None = None) -> None:
         super().__init__(parent)
         self._context = context
         self._tools = tools
         self._notifier = notifier
         self._program_runner = runner
+        # The built-in players' release (PlayerController.release_files); see release_files.
+        self._release_player = release_player or (lambda _paths: None)
         # The app passes lyrics.fetch_json; tests leave it out, so they never reach LRCLIB.
         self._lyrics_fetch = lyrics_fetch
         # How long a video may download without moving before it is set aside (see JobExecutor).
@@ -174,6 +196,8 @@ class QueueController(QObject):
         self._numbers: dict[int, tuple[str, int]] = {}
         # How many links the latest add queued (not counting ones already in the list).
         self._added_last = 0
+        # Links to a video inside a playlist, with their choices, waiting for answerPlaylist.
+        self._held: list[tuple[str, DownloadOptions]] = []
         self._paused = False
         self._hold_until = 0.0
         self._applied_limit = 0
@@ -273,26 +297,65 @@ class QueueController(QObject):
 
     # ── Adding ────────────────────────────────────────────────────────────
 
-    def _preset_options(self, preset_id: str) -> DownloadOptions:
-        settings = load_settings()
-        presets = [*PresetDefaults.BUILT_IN, *settings.get("presets", [])]
-        preset = next((p for p in presets if p.get("id") == preset_id), presets[0])
-        return options_from_preset(preset, base_options(settings))
+    @Slot(str, str, result=int)
+    @Slot(str, str, str, result=int)
+    def addLinks(self, text: str, kind: str, scope: str = "") -> int:
+        """Queue every link in text (one per line) with the Video or Audio defaults from Preferences;
+        returns how many are now in the list or waiting for the "video or playlist" question.
+
+        `scope` answers that question for links to a video inside a playlist ("video" or "playlist");
+        without it the remembered answer applies, or the links wait while QML asks (playlistQuestion).
+        """
+        try:
+            options = base_options(load_settings(), kind)
+        except ValueError as error:
+            write_log(f"The {kind} defaults can't be used: {error}", "critical")
+            self.notice.emit("A choice in Preferences can't be used any more. Open Preferences and choose again.")
+            return 0
+        return self._queue_links(text, options, scope)
 
     @Slot(str, str, result=int)
-    def addLinks(self, text: str, preset_id: str) -> int:
-        """Queue every link in text (one per line) with a preset; returns how many are now in the list."""
-        return self._add_links(text, preset_id, again=False)
+    def receiveLinks(self, text: str, kind: str) -> int:
+        """Links from outside the link box (the browser extension, the tray, drag and drop, the copied-link
+        offer, a second launch): with Smart mode on they download at once; off, QML opens Download
+        options for them (optionsRequested) and nothing is queued yet."""
+        if load_settings().get("downloads", {}).get("smart_mode", True):
+            return self.addLinks(text, kind)
+        links = [as_link(word) for word in text.replace(",", "\n").split() if word.strip()]
+        if links:
+            self.optionsRequested.emit(links, "audio" if kind == "audio" else "video")
+        return len(links)
+
+    @Slot(str, bool)
+    def answerPlaylist(self, scope: str, remember: bool) -> None:
+        """The answer to "video or playlist" for the links waiting on it: "video", "playlist", or "" to drop them.
+        Remembering it saves the answer, so later such links don't ask (Preferences > Downloads changes it)."""
+        held, self._held = self._held, []
+        if scope not in ("video", "playlist"):
+            return
+        if remember:
+            settings = load_settings()
+            settings.setdefault("downloads", {})["playlist_links"] = scope
+            if save_settings(settings):
+                self.settingsSaved.emit()
+            else:
+                write_log("The answer for links to a video in a playlist couldn't be saved", "critical")
+        for link, options in held:
+            self._queue_links(link, options, scope)
+
+    def _playlist_answer(self) -> str:
+        """The remembered answer for a video inside a playlist, "" when the app asks each time."""
+        answer = load_settings().get("downloads", {}).get("playlist_links", "ask")
+        return answer if answer in ("video", "playlist") else ""
 
     def download_again(self, url: str, kind: str, extension: str) -> None:
         """Queue a link even if it was downloaded before (the Library's Download again), as the same type
         of file as the one in the Library: a song stays a song, an MKV stays an MKV. The rest of the
-        choices come from the Download button's preset, or Preferences when the preset is the other type."""
+        choices are the Video or Audio defaults from Preferences."""
         settings = load_settings()
         try:
-            options = self._preset_options(str(settings.get("downloads", {}).get("preset", "")))
-            if kind in ("audio", "video") and options.kind != kind:
-                options = base_options(settings).with_changes(kind=kind)
+            switch = settings.get("downloads", {}).get("kind", "video")
+            options = base_options(settings, kind if kind in ("audio", "video") else switch)
             audio_format = {"ogg": "vorbis"}.get(extension, extension)
             if options.kind == "audio" and audio_format in FormatDefaults.AUDIO_FORMATS:
                 options = options.with_changes(audio_format=audio_format)
@@ -302,28 +365,27 @@ class QueueController(QObject):
         except ValueError as error:
             write_log(f"Download again of {url} couldn't use its choices: {error}", "critical")
             options = base_options(settings).with_changes(ignore_archive=True)
-        if self._queue_links(url, options) and self._added_last:
+        if self._queue_links(url, options, "video") and self._added_last:
             self.notice.emit("Added to Downloads.")
 
-    def _add_links(self, text: str, preset_id: str, again: bool) -> int:
-        try:
-            options = self._preset_options(preset_id).with_changes(ignore_archive=again)
-        except ValueError as error:
-            write_log(f"Preset {preset_id} can't be used: {error}", "critical")
-            self.notice.emit("This preset has a choice the app no longer offers. Pick another preset.")
-            return 0
-        return self._queue_links(text, options)
-
-    def _queue_links(self, text: str, options: DownloadOptions) -> int:
-        """Queue every link in text with these choices; returns how many are now in the list."""
+    def _queue_links(self, text: str, options: DownloadOptions, scope: str = "") -> int:
+        """Queue every link in text with these choices; returns how many are now in the list or wait
+        for the "video or playlist" answer (see addLinks)."""
         links = [as_link(word) for word in text.replace(",", "\n").split() if word.strip()]
-        added, listed, problems = 0, 0, []
+        scope = scope or self._playlist_answer()
+        added, listed, held, problems = 0, 0, 0, []
         for link in links:
             try:
                 source = source_from_url(link)
             except ValueError as error:
                 problems.append(str(error))
                 continue
+            if source.video_id and scope != "playlist":
+                if scope != "video":
+                    self._held.append((link, options))
+                    held += 1
+                    continue
+                source, link = single_video(source), video_link(source, link)
             url = canonical_url(source, link)
             if self._listed(url, options):
                 listed += 1
@@ -341,7 +403,9 @@ class QueueController(QObject):
         self._added_last = added
         if added:
             self._after_change()
-        return added + listed
+        if held:
+            self.playlistQuestion.emit(len(self._held))
+        return added + listed + held
 
     def _listed(self, url: str, options: DownloadOptions) -> bool:
         """True when this link waits or downloads already with the same type and quality."""
@@ -353,13 +417,26 @@ class QueueController(QObject):
                     return True
         return False
 
+    @Slot(str, "QVariantMap", result=int)
+    def addLinksWith(self, text: str, options: dict[str, Any]) -> int:
+        """Queue several links with the choices Download options made for all of them (Smart mode off);
+        returns how many are now in the list or wait for the "video or playlist" answer."""
+        try:
+            chosen = DownloadOptions.from_dict({**base_options(load_settings(), str(options.get("kind"))).to_dict(),
+                                                **options})
+        except ValueError as error:
+            self.notice.emit(str(error))
+            return 0
+        return self._queue_links(text, chosen)
+
     @Slot(str, "QVariantMap", "QVariantList", str, str, float, result=bool)
     def addJob(self, url: str, options: dict[str, Any], items: list[dict[str, Any]], title: str, thumbnail: str,
                not_before: float) -> bool:
-        """Queue one analyzed link with its chosen options and items (from the Options panel)."""
+        """Queue one analyzed link with its chosen options and items (from Download options)."""
         try:
             source = source_from_url(url)
-            download_options = DownloadOptions.from_dict({**base_options(load_settings()).to_dict(), **options})
+            download_options = DownloadOptions.from_dict(
+                {**base_options(load_settings(), str(options.get("kind"))).to_dict(), **options})
         except ValueError as error:
             self.notice.emit(str(error))
             return False
@@ -783,16 +860,13 @@ class QueueController(QObject):
     def _start(self, job: dict[str, Any], archive: str) -> None:
         options = DownloadOptions.from_dict(json.loads(job["options_json"]))
         settings = load_settings()
-        network = settings.get("network", {})
         downloads = settings.get("downloads", {})
         total = self._total_limit()
         self._applied_limit = total
         live = options.live_from_start or options.wait_for_video or job["state"] == "waiting_live"
         fragments = int(downloads.get("fragments", 0)) or DownloadDefaults.AUTO_FRAGMENTS
         rate = 0 if live else per_job_limit(total, len(self._running) + 1)
-        options = options.with_changes(
-            proxy=str(network.get("proxy", "")), force_ipv4=bool(network.get("force_ipv4", False)),
-            limit_rate=rate, fragments=1 if rate else fragments)
+        options = with_network(options, settings).with_changes(limit_rate=rate, fragments=1 if rate else fragments)
         running = _Running(job["id"], archive, "" if job["input_path"] else job["site"], live, job["output_root"])
         self._running[job["id"]] = running
         self._worked = True
@@ -1117,26 +1191,47 @@ class QueueController(QObject):
         except OSError as error:
             write_log(f"Empty folders in {root} couldn't be removed: {error}", "general")
 
+    def release_files(self, paths: list[str], wait_seconds: float = 3.0) -> None:
+        """Make the app let go of files about to be deleted: stop audio extractions reading them, then
+        the built-in players (see PlayerController.release_files).
+
+        A stopped extraction's FFmpeg holds the video until its process ends, so this waits for those
+        jobs to settle, for at most `wait_seconds`; only queued events run meanwhile, never a click.
+        """
+        wanted = {os.path.normcase(os.path.abspath(path)) for path in paths}
+        stopping = [running.job_id for running in self._running.values()
+                    if (job := self._context.store.job(running.job_id)) is not None and job["input_path"]
+                    and os.path.normcase(os.path.abspath(job["input_path"])) in wanted]
+        for job_id in stopping:
+            self.cancel(job_id)
+        deadline = time.monotonic() + wait_seconds
+        while any(job_id in self._running for job_id in stopping) and time.monotonic() < deadline:
+            QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents, 50)
+        self._release_player(paths)
+
     def _recycle_saved(self, job: dict[str, Any]) -> bool:
         """Move a download's saved files to the Recycle Bin and take them out of the Library; its
         playlist's or channel's folder goes too once it is empty.
 
-        False when Windows didn't move them (a file open in a player), so the download stays listed.
+        False when Windows couldn't move some of them (a file open in another program): those stay in
+        the Library, the notice names them, and the download stays listed.
         """
         records = self._context.store.history_for_job(job["id"])
         paths = [str(record["filepath"]) for record in records]
         saved = [path for path in paths if os.path.isfile(path)]
-        if not recycle_saved(list(zip(paths, self._context.roots_of(records)))):
-            self.notice.emit("Windows couldn't move the files to the Recycle Bin; they may be open in a player.")
-            return False
-        self._context.store.delete_history(record["id"] for record in records)
-        if records:
+        self.release_files(saved)
+        failed = set(recycle_saved(list(zip(paths, self._context.roots_of(records)))))
+        self._context.store.delete_history(record["id"] for record in records if record["filepath"] not in failed)
+        if len(failed) < len(records):
             self.filesRemoved.emit()
-        if saved and self._batching:
-            self._batch_recycled += len(saved)
-        elif saved:
-            self.notice.emit(f"Moved {_files(len(saved))} to the Recycle Bin.")
-        return True
+        moved = len(saved) - len(failed)
+        if moved and self._batching:
+            self._batch_recycled += moved
+        elif moved and not failed:
+            self.notice.emit(f"Moved {_files(moved)} to the Recycle Bin.")
+        if failed:
+            self.notice.emit(failure_notice(sorted(failed)))
+        return not failed
 
     def _forget_jobs(self, job_ids: list[int]) -> None:
         """Delete jobs with their scratch folders and the unfinished files they kept."""

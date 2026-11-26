@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from gfgmd.config.defaults import AppInfo
 from gfgmd.core import web
 from gfgmd.core.lyrics import fetch_json
+from gfgmd.core.quick_info import fetch_json as oembed_fetch
 from gfgmd.core.sources import likely_media
 from gfgmd.services import autostart
 from gfgmd.services.companion import cookies_from_extension
@@ -42,6 +43,11 @@ WINDOW_ICONS = {size: f"gfgmd/assets/icons/Square44x44Logo.targetsize-{size}.png
 def _links_in(arguments: list[str]) -> list[str]:
     """Web links given on the command line (a browser or a shortcut can pass them)."""
     return [arg for arg in arguments if arg.startswith(("https://", "http://"))]
+
+
+def _switch_kind(settings: dict[str, Any]) -> str:
+    """The Video | Audio switch's choice, which links from outside the link box download as."""
+    return "audio" if settings.get("downloads", {}).get("kind") == "audio" else "video"
 
 
 class _Startup:
@@ -95,18 +101,20 @@ class _Startup:
             notifier = Notifier(self._show_window, app_ctrl.revealFile)
             prefs_ctrl = PrefsController(context)
             tools_ctrl = ToolsController(manager)
-            queue_ctrl = QueueController(context, manager, notifier, lyrics_fetch=fetch_json)
-            analyze_ctrl = AnalyzeController(context, queue_ctrl)
-            library_ctrl = LibraryController(context)
+            player_ctrl = PlayerController(context)
+            queue_ctrl = QueueController(context, manager, notifier, lyrics_fetch=fetch_json,
+                                         release_player=player_ctrl.release_files)
+            analyze_ctrl = AnalyzeController(context, queue_ctrl, quick_fetch=oembed_fetch)
+            library_ctrl = LibraryController(context, release_files=queue_ctrl.release_files)
             subs_ctrl = SubscriptionsController(context, queue_ctrl, notifier)
             signins_ctrl = SignInsController(context)
-            player_ctrl = PlayerController(context)
             update_ctrl = UpdateController(_update_config())
             update_ctrl.set_busy_sources([queue_ctrl])
             thumbnails = ThumbnailCache(context.thumbnails_dir)
 
             prefs_ctrl.settingsChanged.connect(update_ctrl.preferencesChanged)
             prefs_ctrl.settingsChanged.connect(self._apply_preferences)
+            queue_ctrl.settingsSaved.connect(prefs_ctrl.reload)
             queue_ctrl.fileSaved.connect(library_ctrl.file_saved)
             queue_ctrl.filesRemoved.connect(library_ctrl.reload)
             queue_ctrl.signInNeeded.connect(lambda site: app_ctrl.notice.emit(
@@ -163,7 +171,7 @@ class _Startup:
                 self._show_window()
             app_ctrl.show_notices()
             if self._links:
-                queue_ctrl.addLinks("\n".join(self._links), str(settings.get("downloads", {}).get("preset", "")))
+                queue_ctrl.receiveLinks("\n".join(self._links), _switch_kind(settings))
             self._instance.attach()
             update_ctrl.start()
             tools_ctrl.refresh()
@@ -255,16 +263,14 @@ class _Startup:
                 "There's no copied link. Copy a link to a video or song, then try again.")
             return
         # The queue says itself when a link in the text can't be added, so nothing more is said here.
-        self._controllers["queueController"].addLinks(
-            text, str(load_settings().get("downloads", {}).get("preset", "")))
+        self._controllers["queueController"].receiveLinks(text, _switch_kind(load_settings()))
 
     def _on_launch_request(self, mode: str, values: list[str]) -> None:
         """A later launch, the command-line tool, or the companion extension handed something over."""
         if mode == _LINKS_MODE:
             links = _links_in(values)
             if links:
-                preset = str(load_settings().get("downloads", {}).get("preset", ""))
-                self._controllers["queueController"].addLinks("\n".join(links), preset)
+                self._controllers["queueController"].receiveLinks("\n".join(links), _switch_kind(load_settings()))
         elif mode == _SIGNIN_MODE and len(values) == 2:
             cookies = cookies_from_extension(values[1])
             self._controllers["signInsController"].receive_cookies(values[0], cookies)

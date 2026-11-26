@@ -4,8 +4,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // Choices for extracting a downloaded video's audio, the same ones an audio download offers: format,
-// bitrate, cover and its shape, lyrics (from the video's captions, then LRCLIB), and what goes in
-// the file. They start from the audio preferences each time. Open it with forJob() for every
+// bitrate, and lyrics (from the video's captions, then LRCLIB), with the cover's shape and what goes
+// in the file under Advanced, as in Download options. They start from the audio preferences each time. Open it with forJob() for every
 // video a download saved, or forVideos() for library videos (songs among them are left out).
 AppDialog {
     id: dialog
@@ -21,9 +21,9 @@ AppDialog {
         coverBox.value = prefsController.value("formats.cover")
         lyricsSwitch.checked = prefsController.value("formats.lyrics")
         onlineSwitch.checked = prefsController.value("formats.lyrics_online")
-        embedCover.checked = prefsController.value("formats.embed_thumbnail")
-        embedDetails.checked = prefsController.value("formats.embed_metadata")
-        embedChapters.checked = prefsController.value("formats.embed_chapters")
+        embedCover.checked = prefsController.value("formats.audio_embed_cover")
+        embedDetails.checked = prefsController.value("formats.audio_embed_metadata")
+        embedChapters.checked = prefsController.value("formats.audio_embed_chapters")
         dialog.open()
     }
 
@@ -105,18 +105,6 @@ AppDialog {
             }
         }
         FormRow {
-            visible: embedCover.checked
-            label: "Cover"
-            labelWidth: 120
-            StyledComboBox {
-                id: coverBox
-                Layout.fillWidth: true
-                model: prefsController.options.cover
-                accessibleName: "Cover shape"
-                toolTipText: "The video's thumbnail becomes the song's cover; square crops it like an album cover"
-            }
-        }
-        FormRow {
             label: "Lyrics"
             labelWidth: 120
             AppSwitch {
@@ -135,14 +123,36 @@ AppDialog {
                 toolTipText: "When the video has no captions, ask LRCLIB, a free online lyrics service; it is sent only the song's title, artist, album, and length"
             }
         }
-        FormRow {
-            label: "In the file"
-            labelWidth: 120
-            RowLayout {
-                spacing: Theme.spaceLg
-                AppCheckBox { id: embedCover; text: "Cover"; toolTipText: "Show the thumbnail as the song's cover (WAV songs get it as a picture next to the file)" }
-                AppCheckBox { id: embedDetails; text: "Details"; toolTipText: "Title, artist, date, and description inside the file" }
-                AppCheckBox { id: embedChapters; text: "Chapters"; toolTipText: "The video's chapter marks, which players can jump to" }
+        Disclosure {
+            Layout.fillWidth: true
+            summary: [embedCover.checked ? (coverBox.currentValue === "square" ? "square cover" : "cover in its own shape") : "",
+                      [embedCover.checked ? "cover" : "", embedDetails.checked ? "details" : "",
+                       embedChapters.checked ? "chapters" : ""].filter(part => part.length > 0).join(", ")]
+                .filter(part => part.length > 0).join("  ·  ") || "nothing extra in the file"
+
+            FormRow {
+                Layout.fillWidth: true
+                label: "Save in the file"
+                labelWidth: 120
+                RowLayout {
+                    spacing: Theme.spaceLg
+                    AppCheckBox { id: embedCover; text: "Cover"; toolTipText: "Show the thumbnail as the song's cover (WAV songs get it as a picture next to the file)" }
+                    AppCheckBox { id: embedDetails; text: "Details"; toolTipText: "Title, artist, date, and description inside the file" }
+                    AppCheckBox { id: embedChapters; text: "Chapters"; toolTipText: "The video's chapter marks, which players can jump to" }
+                }
+            }
+            FormRow {
+                Layout.fillWidth: true
+                visible: embedCover.checked
+                label: "Cover shape"
+                labelWidth: 120
+                StyledComboBox {
+                    id: coverBox
+                    Layout.fillWidth: true
+                    model: prefsController.options.cover
+                    accessibleName: "Cover shape"
+                    toolTipText: "The video's thumbnail becomes the song's cover; square crops it like an album cover"
+                }
             }
         }
         Text {

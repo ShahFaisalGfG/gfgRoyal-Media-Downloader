@@ -71,6 +71,7 @@ With `--json`, stdout carries one JSON object per line and nothing else. Read th
 
 - A download can take minutes to hours. Run it in the background or with a long timeout, and don't stop and restart it to "fix" slowness: the same command resumes where it stopped.
 - Playlists and channels can hold thousands of videos. Ask the user before downloading a whole channel, and use `--items` to take a few.
+- A link to a video watched inside a playlist (`watch?v=...&list=...`) downloads only that video, with a `warning` event saying so. If the user may want the playlist, ask which one they mean; add `--whole-playlist` for every video.
 - Sign-in is only for links that need it (private playlists, members-only or age-restricted videos). Use `--cookies-from-browser firefox` or `--cookies FILE` only with the user's agreement, and never ask for a password.
 - Download only what the user has the right to download.
 - When the tools are missing (exit 2, "The download tools aren't installed"), the user opens the app once to install them.

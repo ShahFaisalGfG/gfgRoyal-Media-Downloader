@@ -54,7 +54,8 @@ Rectangle {
         function onAudioChanged() {
             if (playerController.audioPath !== bar._path) {
                 if (playerController.hasAudio) bar.load()
-                else { bar.savePosition(); audio.stop(); bar._path = ""; bar.expanded = false }
+                // A stopped player keeps its file open until the source is cleared.
+                else { bar.savePosition(); audio.stop(); audio.source = ""; bar._path = ""; bar.expanded = false }
             }
         }
         function onTogglePlayRequested() { if (playerController.hasAudio) bar.toggle() }

@@ -8,8 +8,8 @@ import "pages"
 
 // The main window: four pages (Downloads, Library, Subscriptions, Sign-ins) over the audio player and
 // the run bar.
-// Links dropped anywhere on the window are downloaded; closing keeps the app in the tray when that
-// is on, so subscriptions and downloads carry on.
+// Links dropped anywhere on the window are downloaded (or shown in Download options with Smart mode
+// off); closing keeps the app in the tray when that is on, so subscriptions and downloads carry on.
 AppWindow {
     id: mainWin
 
@@ -78,15 +78,31 @@ AppWindow {
         target: updateController
         function onNotice(message) { if (!preferences.visible && !aboutDialog.visible) toast.show(message) }
     }
+    // Bring the window up for something that needs an answer, even from the tray.
+    function bringUp() {
+        if (!mainWin.visible || mainWin.visibility === Window.Minimized)
+            mainWin.showNormal()
+        mainWin.raise()
+        mainWin.requestActivate()
+    }
+
     Connections {
         target: queueController
         // The countdown has to be seen to be cancelled, even with the window in the tray.
         function onWhenDoneCountdown(action) {
-            if (!mainWin.visible || mainWin.visibility === Window.Minimized)
-                mainWin.showNormal()
-            mainWin.raise()
-            mainWin.requestActivate()
+            mainWin.bringUp()
             countdown.start(action)
+        }
+        // Links to a video inside a playlist wait for "this video or the whole playlist?".
+        function onPlaylistQuestion(count) {
+            mainWin.bringUp()
+            playlistQuestion.ask(count)
+        }
+        // Smart mode is off: links from the extension, the tray, or a second launch open Download options.
+        function onOptionsRequested(links, kind) {
+            mainWin.bringUp()
+            mainWin.page = 0
+            downloads.showLinks(links, kind)
         }
     }
 
@@ -277,8 +293,9 @@ AppWindow {
                 text: "Download"
                 iconName: "download"
                 onClicked: {
-                    queueController.addLinks(clipboardOffer.url, prefsController.value("downloads.preset"))
                     clipboardOffer.close()
+                    mainWin.page = 0
+                    queueController.receiveLinks(clipboardOffer.url, prefsController.value("downloads.kind"))
                 }
             }
             AppButton {
@@ -332,6 +349,10 @@ AppWindow {
             color: Theme.text
             wrapMode: Text.WordWrap
         }
+    }
+
+    PlaylistQuestion {
+        id: playlistQuestion
     }
 
     AppDialog {

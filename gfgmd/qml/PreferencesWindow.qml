@@ -24,6 +24,18 @@ AppWindow {
     function v(key) { prefsController.revision; return prefsController.value(key) }
     function save(key, value) { var update = {}; update[key] = value; prefsController.saveSettings(update) }
     function showTools() { nav.currentIndex = prefsWin.sections.findIndex(section => section.name === "Tools") }
+    // The subtitle languages saved as yt-dlp patterns ("en.*" is every kind of English), as plain codes.
+    function subtitleCodes() {
+        if (prefsWin.v("formats.subtitles") === "none") return []
+        return String(prefsWin.v("formats.subtitle_langs")).split(",").filter(part => part.length > 0)
+            .map(part => part.replace(/\.\*$/, ""))
+    }
+    // No language picked means no subtitles; otherwise they go where Subtitle placement says.
+    function saveSubtitleCodes(codes) {
+        var update = {"formats.subtitles": codes.length > 0 ? prefsWin.v("formats.subtitle_placement") : "none"}
+        if (codes.length > 0) update["formats.subtitle_langs"] = codes.map(code => code + ".*").join(",")
+        prefsController.saveSettings(update)
+    }
 
     readonly property var sections: [
         { name: "General", icon: "settings" },
@@ -236,15 +248,27 @@ AppWindow {
                             }
                         }
                         SettingRow {
-                            label: "Default preset"
+                            label: "Smart mode"
+                            hint: "On: Download downloads at once with the choices on the Video and Audio pages. "
+                                + "Off: Download opens Download options first."
+                            AppSwitch { checked: prefsWin.v("downloads.smart_mode"); accessibleName: "Smart mode"; onToggled: prefsWin.save("downloads.smart_mode", checked) }
+                        }
+                        SettingRow {
+                            label: "Download as"
+                            hint: "The Video | Audio switch beside the link box; links from the browser extension and the tray use it too."
                             fillControl: true
-                            StyledComboBox {
-                                Layout.fillWidth: true
-                                model: prefsController.presets
-                                value: prefsWin.v("downloads.preset")
-                                accessibleName: "Default preset"
-                                onActivated: prefsWin.save("downloads.preset", currentValue)
-                            }
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.kind; value: prefsWin.v("downloads.kind"); accessibleName: "Download as"; onActivated: prefsWin.save("downloads.kind", currentValue) }
+                        }
+                        SettingRow {
+                            label: "A video in a playlist"
+                            hint: "A link to one video watched inside a playlist (watch?v=...&list=...)."
+                            fillControl: true
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.playlistLinks; value: prefsWin.v("downloads.playlist_links"); accessibleName: "A video in a playlist"; onActivated: prefsWin.save("downloads.playlist_links", currentValue) }
+                        }
+                        SettingRow {
+                            label: "Record live streams from the start"
+                            hint: "Download options starts with this for a stream that is live now, where the site allows it."
+                            AppSwitch { checked: prefsWin.v("downloads.live_from_start"); accessibleName: "Record live streams from the start"; onToggled: prefsWin.save("downloads.live_from_start", checked) }
                         }
                         SettingRow {
                             label: "File names"
@@ -347,96 +371,16 @@ AppWindow {
                             }
                         }
                     }
-                }
-
-                // Video
-                PrefsPage {
                     Card {
                         Layout.fillWidth: true
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
-                        title: "Video"
-                        description: "The starting choices in Download options. The Download button uses the preset next to it, which sets its own quality and file type."
-                        iconName: "video"
+                        title: "SponsorBlock (YouTube)"
+                        description: "Cut or mark sponsor messages and reminders that SponsorBlock's community has tagged, in videos and songs."
+                        iconName: "skip"
 
                         SettingRow {
-                            label: "File type"
-                            fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.container; value: prefsWin.v("formats.container"); accessibleName: "File type"; onActivated: prefsWin.save("formats.container", currentValue) }
-                        }
-                        SettingRow {
-                            label: "Compatibility"
-                            fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.codec; value: prefsWin.v("formats.codec_profile"); accessibleName: "Compatibility"; onActivated: prefsWin.save("formats.codec_profile", currentValue) }
-                        }
-                        SettingRow {
-                            label: "Audio tracks"
-                            hint: "Sites such as YouTube add dubbed languages to some videos. Extra languages need MP4 or MKV."
-                            fillControl: true
-                            StyledComboBox {
-                                Layout.fillWidth: true
-                                // "Every language" needs a video's own list, so it's offered in Download options only.
-                                model: prefsController.options.audioTracks.slice(0, 2)
-                                value: prefsWin.v("formats.audio_tracks") === "original" ? "original" : "languages"
-                                accessibleName: "Audio tracks"
-                                onActivated: prefsWin.save("formats.audio_tracks", currentValue)
-                            }
-                        }
-                        SettingRow {
-                            visible: prefsWin.v("formats.audio_tracks") !== "original"
-                            label: "Extra audio languages"
-                            hint: "Short language codes separated by commas, such as es (Spanish), pt-BR. A video without them keeps only its original language."
-                            fillControl: true
-                            StyledTextField {
-                                Layout.fillWidth: true
-                                placeholderText: "es, fr"
-                                accessibleName: "Extra audio languages"
-                                text: prefsWin.v("formats.audio_langs").join(", ")
-                                onEditingFinished: prefsWin.save("formats.audio_langs",
-                                    text.split(",").map(code => code.trim()).filter(code => code.length > 0))
-                            }
-                        }
-                        SettingRow {
-                            label: "Subtitles"
-                            fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.subtitles; value: prefsWin.v("formats.subtitles"); accessibleName: "Subtitles"; onActivated: prefsWin.save("formats.subtitles", currentValue) }
-                        }
-                        SettingRow {
-                            visible: prefsWin.v("formats.subtitles") === "sidecar" || prefsWin.v("formats.subtitles") === "both"
-                            label: "Subtitle files"
-                            fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.subtitleFormat; value: prefsWin.v("formats.subtitle_format"); accessibleName: "Subtitle file type"; onActivated: prefsWin.save("formats.subtitle_format", currentValue) }
-                        }
-                        SettingRow {
-                            label: "Subtitle languages"
-                            hint: "Short language codes separated by commas, without spaces: en.* is every kind of English."
-                            fillControl: true
-                            StyledTextField {
-                                Layout.fillWidth: true
-                                accessibleName: "Subtitle languages"
-                                text: prefsWin.v("formats.subtitle_langs")
-                                onEditingFinished: if (text.trim().length > 0) prefsWin.save("formats.subtitle_langs", text.trim())
-                            }
-                        }
-                        SettingRow {
-                            label: "Automatic captions"
-                            AppSwitch { checked: prefsWin.v("formats.auto_subtitles"); accessibleName: "Automatic captions"; onToggled: prefsWin.save("formats.auto_subtitles", checked) }
-                        }
-                        SettingRow {
-                            label: "Put the thumbnail in the file (the cover, for songs)"
-                            AppSwitch { checked: prefsWin.v("formats.embed_thumbnail"); accessibleName: "Put the thumbnail in the file"; onToggled: prefsWin.save("formats.embed_thumbnail", checked) }
-                        }
-                        SettingRow {
-                            label: "Put the title, uploader, and date in the file"
-                            AppSwitch { checked: prefsWin.v("formats.embed_metadata"); accessibleName: "Put the details in the file"; onToggled: prefsWin.save("formats.embed_metadata", checked) }
-                        }
-                        SettingRow {
-                            label: "Put chapter marks in the file"
-                            AppSwitch { checked: prefsWin.v("formats.embed_chapters"); accessibleName: "Put chapter marks in the file"; onToggled: prefsWin.save("formats.embed_chapters", checked) }
-                        }
-                        SettingRow {
-                            label: "SponsorBlock (YouTube)"
-                            hint: "Cut or mark sponsor messages and reminders that SponsorBlock's community has tagged."
+                            label: "Sponsor parts"
                             fillControl: true
                             StyledComboBox { Layout.fillWidth: true; model: prefsController.options.sponsorblock; value: prefsWin.v("formats.sponsorblock"); accessibleName: "SponsorBlock"; onActivated: prefsWin.save("formats.sponsorblock", currentValue) }
                         }
@@ -466,6 +410,122 @@ AppWindow {
                     }
                 }
 
+                // Video
+                PrefsPage {
+                    Card {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Theme.spaceLg
+                        Layout.rightMargin: Theme.spaceLg
+                        title: "Video"
+                        description: "Smart mode downloads videos with these choices, and Download options starts from them."
+                        iconName: "video"
+
+                        SettingRow {
+                            label: "Quality"
+                            hint: "The best quality up to this one; a video offered only lower downloads its best."
+                            fillControl: true
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.height; value: prefsWin.v("formats.max_height"); accessibleName: "Highest quality"; onActivated: prefsWin.save("formats.max_height", currentValue) }
+                        }
+                        SettingRow {
+                            label: "File type"
+                            fillControl: true
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.container; value: prefsWin.v("formats.container"); accessibleName: "File type"; onActivated: prefsWin.save("formats.container", currentValue) }
+                        }
+                        SettingRow {
+                            label: "Subtitles"
+                            hint: "The languages to save when a video has them. Download options lists each video's own subtitles."
+                            fillControl: true
+                            LanguagePicker {
+                                Layout.fillWidth: true
+                                model: prefsController.options.subtitleLanguages
+                                codes: prefsWin.subtitleCodes()
+                                accessibleName: "Subtitles"
+                                onEdited: function (codes) { prefsWin.saveSubtitleCodes(codes) }
+                            }
+                        }
+                        SettingRow {
+                            label: "Audio tracks"
+                            hint: "Sites such as YouTube add dubbed languages to some videos. Extra languages need MP4 or MKV."
+                            fillControl: true
+                            StyledComboBox {
+                                Layout.fillWidth: true
+                                // "Every language" needs a video's own list, so it's offered in Download options only.
+                                model: prefsController.options.audioTracks.slice(0, 2)
+                                value: prefsWin.v("formats.audio_tracks") === "original" ? "original" : "languages"
+                                accessibleName: "Audio tracks"
+                                onActivated: prefsWin.save("formats.audio_tracks", currentValue)
+                            }
+                        }
+                        SettingRow {
+                            visible: prefsWin.v("formats.audio_tracks") !== "original"
+                            label: "Extra audio languages"
+                            hint: "Short language codes separated by commas, such as es (Spanish), pt-BR. A video without them keeps only its original language."
+                            fillControl: true
+                            StyledTextField {
+                                Layout.fillWidth: true
+                                placeholderText: "es, fr"
+                                accessibleName: "Extra audio languages"
+                                text: prefsWin.v("formats.audio_langs").join(", ")
+                                onEditingFinished: prefsWin.save("formats.audio_langs",
+                                    text.split(",").map(code => code.trim()).filter(code => code.length > 0))
+                            }
+                        }
+                    }
+                    Card {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Theme.spaceLg
+                        Layout.rightMargin: Theme.spaceLg
+                        title: "Advanced"
+                        description: "The video choices Download options keeps under Advanced."
+                        iconName: "settings"
+
+                        SettingRow {
+                            label: "Compatibility"
+                            hint: "Balanced takes the highest resolution; Plays everywhere picks what every player handles."
+                            fillControl: true
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.codec; value: prefsWin.v("formats.codec_profile"); accessibleName: "Compatibility"; onActivated: prefsWin.save("formats.codec_profile", currentValue) }
+                        }
+                        SettingRow {
+                            label: "Subtitle placement"
+                            fillControl: true
+                            StyledComboBox {
+                                Layout.fillWidth: true
+                                model: prefsController.options.subtitlePlacement
+                                value: prefsWin.v("formats.subtitle_placement")
+                                accessibleName: "Subtitle placement"
+                                onActivated: {
+                                    var update = {"formats.subtitle_placement": currentValue}
+                                    if (prefsWin.v("formats.subtitles") !== "none") update["formats.subtitles"] = currentValue
+                                    prefsController.saveSettings(update)
+                                }
+                            }
+                        }
+                        SettingRow {
+                            visible: prefsWin.v("formats.subtitle_placement") !== "embed"
+                            label: "Subtitle file type"
+                            fillControl: true
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.subtitleFormat; value: prefsWin.v("formats.subtitle_format"); accessibleName: "Subtitle file type"; onActivated: prefsWin.save("formats.subtitle_format", currentValue) }
+                        }
+                        SettingRow {
+                            label: "Automatic captions"
+                            hint: "Take the site's machine-made captions for a video without written subtitles in these languages."
+                            AppSwitch { checked: prefsWin.v("formats.auto_subtitles"); accessibleName: "Automatic captions"; onToggled: prefsWin.save("formats.auto_subtitles", checked) }
+                        }
+                        SettingRow {
+                            label: "Save the thumbnail in the file"
+                            AppSwitch { checked: prefsWin.v("formats.embed_thumbnail"); accessibleName: "Save the thumbnail in the file"; onToggled: prefsWin.save("formats.embed_thumbnail", checked) }
+                        }
+                        SettingRow {
+                            label: "Save the title, uploader, and date in the file"
+                            AppSwitch { checked: prefsWin.v("formats.embed_metadata"); accessibleName: "Save the details in the file"; onToggled: prefsWin.save("formats.embed_metadata", checked) }
+                        }
+                        SettingRow {
+                            label: "Save chapter marks in the file"
+                            AppSwitch { checked: prefsWin.v("formats.embed_chapters"); accessibleName: "Save chapter marks in the file"; onToggled: prefsWin.save("formats.embed_chapters", checked) }
+                        }
+                    }
+                }
+
                 // Audio
                 PrefsPage {
                     Card {
@@ -473,7 +533,7 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Audio"
-                        description: "The starting choices in Download options. The Download button uses the preset next to it, which sets its own format and quality."
+                        description: "Smart mode downloads songs with these choices, and Download options starts from them."
                         iconName: "audio"
 
                         SettingRow {
@@ -490,12 +550,6 @@ AppWindow {
                             StyledComboBox { Layout.fillWidth: true; model: prefsController.options.audioQuality; value: prefsWin.v("formats.audio_quality"); accessibleName: "Audio quality"; onActivated: prefsWin.save("formats.audio_quality", currentValue) }
                         }
                         SettingRow {
-                            label: "Cover"
-                            hint: "The video's thumbnail becomes the song's cover (WAV songs get it as a picture next to the file)."
-                            fillControl: true
-                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.cover; value: prefsWin.v("formats.cover"); accessibleName: "Cover shape"; onActivated: prefsWin.save("formats.cover", currentValue) }
-                        }
-                        SettingRow {
                             label: "Lyrics"
                             hint: "Saves lyrics that the player shows line by line as the song plays, from the site's captions."
                             AppSwitch { checked: prefsWin.v("formats.lyrics"); accessibleName: "Save lyrics"; onToggled: prefsWin.save("formats.lyrics", checked) }
@@ -506,6 +560,34 @@ AppWindow {
                             hint: "When a song has no captions, asks LRCLIB, a free online lyrics service, using the title, "
                                 + "artist, album, and length. Only lyrics that match the song's length are used."
                             AppSwitch { checked: prefsWin.v("formats.lyrics_online"); accessibleName: "Look up lyrics online"; onToggled: prefsWin.save("formats.lyrics_online", checked) }
+                        }
+                    }
+                    Card {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Theme.spaceLg
+                        Layout.rightMargin: Theme.spaceLg
+                        title: "Advanced"
+                        description: "The audio choices Download options keeps under Advanced."
+                        iconName: "settings"
+
+                        SettingRow {
+                            label: "Save the cover in the file"
+                            hint: "The video's thumbnail becomes the song's cover (WAV songs get it as a picture next to the file)."
+                            AppSwitch { checked: prefsWin.v("formats.audio_embed_cover"); accessibleName: "Save the cover in the file"; onToggled: prefsWin.save("formats.audio_embed_cover", checked) }
+                        }
+                        SettingRow {
+                            visible: prefsWin.v("formats.audio_embed_cover")
+                            label: "Cover shape"
+                            fillControl: true
+                            StyledComboBox { Layout.fillWidth: true; model: prefsController.options.cover; value: prefsWin.v("formats.cover"); accessibleName: "Cover shape"; onActivated: prefsWin.save("formats.cover", currentValue) }
+                        }
+                        SettingRow {
+                            label: "Save the title, artist, and date in the file"
+                            AppSwitch { checked: prefsWin.v("formats.audio_embed_metadata"); accessibleName: "Save the details in the file"; onToggled: prefsWin.save("formats.audio_embed_metadata", checked) }
+                        }
+                        SettingRow {
+                            label: "Save chapter marks in the file"
+                            AppSwitch { checked: prefsWin.v("formats.audio_embed_chapters"); accessibleName: "Save chapter marks in the file"; onToggled: prefsWin.save("formats.audio_embed_chapters", checked) }
                         }
                     }
                 }
@@ -854,7 +936,7 @@ AppWindow {
                 AppButton {
                     kind: "ghost"
                     text: "Reset to defaults"
-                    toolTipText: "Every preference goes back to its default; saved presets, downloads, and sign-ins stay"
+                    toolTipText: "Every preference goes back to its default; downloads, the library, and sign-ins stay"
                     onClicked: resetDialog.open()
                 }
                 Item { Layout.fillWidth: true }
@@ -882,7 +964,7 @@ AppWindow {
         Text {
             textFormat: Text.PlainText
             width: parent.width
-            text: "Folders, quality, speed limits, the proxy, and the start time go back to their defaults. Your presets, downloads, library, subscriptions, and sign-ins stay."
+            text: "Folders, quality, speed limits, the proxy, and the start time go back to their defaults. Your downloads, library, subscriptions, and sign-ins stay."
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.text

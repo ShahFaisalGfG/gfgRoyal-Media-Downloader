@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import os
 import random
-import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ from gfgmd.core.tools import ToolsMissing
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services.context import AppContext
 from gfgmd.services.tasks import TaskRunner
+from gfgmd.utils.languages import language_name
 from gfgmd.utils.settings import load_settings, save_settings
 from gfgmd.utils.logging import write_log
 
@@ -37,8 +37,6 @@ RESUME_MARGIN = 10.0
 MISSING_FILE = "The file isn't there any more; it may have been moved or deleted."
 # Windows' ERROR_NO_ASSOCIATION: no program is set up to open this kind of file.
 _NO_ASSOCIATION = 1155
-# The language part of a subtitle file's name: "en", "en-US", "es-419", "zh-Hans", "en-orig".
-_LANGUAGE_TAG = re.compile(r"^(?P<language>[A-Za-z]{2,3})(?P<rest>(?:[-_][A-Za-z0-9]+)*)$")
 
 
 def is_audio(path: str) -> bool:
@@ -49,34 +47,6 @@ def is_audio(path: str) -> bool:
 def file_url(path: str) -> str:
     """A file:// URL QML can load."""
     return QUrl.fromLocalFile(path).toString() if path else ""
-
-
-def language_name(code: str) -> str:
-    """A language code as words: "en" -> "English", "es-419" -> "Spanish (Latin America)", "" when unknown.
-
-    YouTube's "-orig" (captions in the video's own language, not translated) reads "(original)";
-    other parts that are neither a script nor a region, such as a caption track's ID, are left out.
-    """
-    match = _LANGUAGE_TAG.fullmatch(code.strip())
-    if match is None:
-        return ""
-    language = QLocale.codeToLanguage(match.group("language"))
-    if language in (QLocale.Language.AnyLanguage, QLocale.Language.C):
-        return ""
-    details = []
-    for part in re.split(r"[-_]", match.group("rest"))[1:]:
-        if part.lower() == "orig":
-            details.append("original")
-        elif len(part) == 4 and part.isalpha():
-            script = QLocale.codeToScript(part)
-            if script != QLocale.Script.AnyScript:
-                details.append(QLocale.scriptToString(script))
-        elif (len(part) == 2 and part.isalpha()) or (len(part) == 3 and part.isdigit()):
-            territory = QLocale.codeToTerritory(part)
-            if territory != QLocale.Country.AnyTerritory:
-                details.append(QLocale.territoryToString(territory))
-    name = QLocale.languageToString(language)
-    return f"{name} ({', '.join(details)})" if details else name
 
 
 def caption_label(tag: str) -> str:
@@ -199,6 +169,34 @@ class PlayerController(QObject):
         """Log why a built-in player couldn't play a file; the player shows a plain message instead."""
         write_log(f"Playing {path} failed: {detail or 'no details from the player'}", "critical")
 
+    def release_files(self, paths: list[str]) -> None:
+        """Let go of files about to be deleted or moved, so Windows can move them.
+
+        Qt's player keeps a stopped file open until its source is cleared: the video window closes
+        when it shows one of them, and the audio bar drops them from its list (closing when the song
+        playing is one). Their resume positions are forgotten too.
+        """
+        wanted = {_same_file(path) for path in paths if path}
+        if not wanted:
+            return
+        # Positions are kept under the spelling the players used, which may differ in case.
+        held = [path for path in (self._video, *self._audio_paths) if path and _same_file(path) in wanted]
+        if self._video and _same_file(self._video) in wanted:
+            self.closeVideo()
+        if any(_same_file(path) in wanted for path in self._audio_paths):
+            current = self._current()
+            if _same_file(current) in wanted:
+                self.stopAudio()
+            else:
+                kept = [self._audio_paths[index] for index in self._order
+                        if _same_file(self._audio_paths[index]) not in wanted]
+                self._audio_paths, self._order = kept, list(range(len(kept)))
+                self._position = kept.index(current)
+                self._sync_queue()
+                self.audioChanged.emit()
+        for path in dict.fromkeys([*paths, *held]):
+            self._context.store.clear_position(path)
+
     # ── Preferences ───────────────────────────────────────────────────────
 
     def _pref(self, key: str, default: Any) -> Any:
@@ -293,6 +291,15 @@ class PlayerController(QObject):
         self._video_cues = []
         self.videoChanged.emit()
         self.videoRequested.emit()
+
+    @Slot()
+    def closeVideo(self) -> None:
+        """The video window closed: forget its video, so nothing points at the file any more."""
+        if not self._video and not self._video_list:
+            return
+        self._video, self._video_list = "", []
+        self._video_captions, self._caption_index, self._video_cues = [], -1, []
+        self.videoChanged.emit()
 
     @Property(str, notify=videoChanged)
     def videoPath(self) -> str:
@@ -564,6 +571,11 @@ class PlayerController(QObject):
 
     def shutdown(self) -> None:
         self._runner.shutdown(3000)
+
+
+def _same_file(path: str) -> str:
+    """A path in one spelling, so "C:/Music/a.mp3" and "c:\\music\\A.mp3" match (Windows ignores case)."""
+    return os.path.normcase(os.path.abspath(path)) if path else ""
 
 
 def _artist(record: dict[str, Any]) -> str:

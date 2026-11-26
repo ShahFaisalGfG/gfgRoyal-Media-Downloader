@@ -191,3 +191,31 @@ def test_version_1_library_gains_playback(tmp_path):
     assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
     assert "input_path" in [row[1] for row in db.execute("PRAGMA table_info(jobs)")]
     db.close()
+
+
+def test_release_files_lets_go_of_what_the_players_hold(player, tmp_path):
+    """Files about to be deleted leave the audio bar's list (the song playing stays) and lose their
+    resume places; the path matches however its letters are cased."""
+    clip, other = files(tmp_path, "clip.mp4", "other.mp4")
+    song_a, song_b, song_c = files(tmp_path, "a.mp3", "b.mp3", "c.mp3")
+    player.playVideo(clip, [clip, other])
+    player.playAudio([song_a, song_b, song_c], 0)
+    player.savePosition(song_b, 125_000, 600_000)
+    player.release_files([song_b.upper()])
+    assert player.videoPath == clip and player.audioPath == song_a and player.audioCount == 2
+    assert [player.queue.get(i)["path"] for i in range(player.queue.count)] == [song_a, song_c]
+    assert player.resumeAt(song_b) == 0
+
+
+def test_release_files_closes_the_video_and_the_song_playing(player, tmp_path):
+    clip = files(tmp_path, "clip.mp4")[0]
+    song = files(tmp_path, "a.mp3")[0]
+    player.playVideo(clip, [clip])
+    player.playAudio([song], 0)
+    changes = []
+    player.videoChanged.connect(lambda: changes.append(player.videoPath))
+    player.release_files([clip, song])
+    assert changes == [""] and not player.hasNextVideo and player.captionFiles == []
+    assert not player.hasAudio and player.queue.count == 0
+    player.closeVideo()  # the window's own close afterwards changes nothing
+    assert changes == [""]

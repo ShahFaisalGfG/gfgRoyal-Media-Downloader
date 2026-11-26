@@ -13,7 +13,7 @@ Button {
     property string iconName: ""
     property string toolTipText: ""
     property bool compact: false
-    // Square corners on one side, where the button joins another (SplitButton's halves).
+    // Square corners on one side, where the button joins another (SegmentedChoice's buttons).
     property bool flatLeft: false
     property bool flatRight: false
 

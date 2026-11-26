@@ -242,7 +242,7 @@ Item {
             link.text = ""
             link.selectInput()
             interval.value = prefsController.value("subscriptions.interval_hours")
-            presetBox.value = prefsController.value("downloads.preset")
+            saveAs.value = prefsController.value("downloads.kind") === "audio" ? "audio" : "video"
             existing.checked = false
             auto.checked = prefsController.value("subscriptions.auto_download")
         }
@@ -255,8 +255,9 @@ Item {
                 Qt.callLater(function () { addDialog.open() })
                 return
             }
-            var preset = prefsController.preset(presetBox.currentValue)
-            subscriptionsController.add(link.text, preset, interval.currentValue, existing.checked, auto.checked)
+            // The new uploads download with the Video or Audio defaults in Preferences as they are now.
+            subscriptionsController.add(link.text, {"kind": saveAs.value}, interval.currentValue, existing.checked,
+                                        auto.checked)
         }
 
         ColumnLayout {
@@ -273,7 +274,15 @@ Item {
                 Layout.fillWidth: true
                 label: "Save as"
                 labelWidth: 150
-                StyledComboBox { id: presetBox; Layout.fillWidth: true; model: prefsController.presets; accessibleName: "Preset" }
+                SegmentedChoice {
+                    id: saveAs
+                    accessibleName: "Save new uploads as"
+                    options: [
+                        {"label": "Video", "code": "video", "icon": "video", "tip": "With the defaults in Preferences > Video"},
+                        {"label": "Audio", "code": "audio", "icon": "audio", "tip": "With the defaults in Preferences > Audio"}
+                    ]
+                    onActivated: function (code) { saveAs.value = code }
+                }
             }
             FormRow {
                 Layout.fillWidth: true
