@@ -26,7 +26,7 @@ from gfgmd.core.schedule import live_launch_time, next_check
 from gfgmd.core.secret_store import SecretError
 from gfgmd.core.sources import Source, as_link, check_url, source_from_url
 from gfgmd.core.subscriptions import check_urls, parse_takeout, sort_entries
-from gfgmd.controllers.queue_ctrl import QueueController, base_options
+from gfgmd.controllers.queue_ctrl import QueueController, base_options, with_network
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services.context import VAULT_METHODS, AppContext
 from gfgmd.services.notifier import Notifier
@@ -160,7 +160,8 @@ class SubscriptionsController(QObject):
             return False
         if not source.is_collection:
             return False
-        picked = DownloadOptions.from_dict({**base_options(load_settings()).to_dict(), **options})
+        kind = "audio" if options.get("kind") == "audio" else "video"
+        picked = DownloadOptions.from_dict({**base_options(load_settings(), kind).to_dict(), **options})
         chosen = picked.to_dict()
         url = url.strip()
         account = self._context.account_for(source.site)
@@ -329,6 +330,7 @@ class SubscriptionsController(QObject):
             whole = source.kind not in ("channel", "profile")
             command, batch = check_command(check_urls(source, sub["url"]), tools, archive, context.cache_dir,
                                            job_dir, auth, newest=PLAYLIST_LIMIT if whole else 200 if seed else 60,
+                                           options=with_network(DownloadOptions(), load_settings()),
                                            marker=marker, whole=whole)
             if batch:
                 (job_dir / "urls.txt").write_text(batch, encoding="utf-8")

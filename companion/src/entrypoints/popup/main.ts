@@ -43,7 +43,7 @@ async function main(): Promise<void> {
         downloadButton.disabled = true;
         const reply = await ask(downloadMessage([tab.url]));
         downloadButton.disabled = false;
-        setStatus(reply.ok ? 'ok' : 'error', reply.ok ? 'Sent to the app. It downloads with your usual choices.' : reply.message ?? NOT_INSTALLED);
+        setStatus(reply.ok ? 'ok' : 'error', reply.ok ? 'Sent to the app. It downloads with your usual choices, or shows Download options when Smart mode is off.' : reply.message ?? NOT_INSTALLED);
       },
     },
   });

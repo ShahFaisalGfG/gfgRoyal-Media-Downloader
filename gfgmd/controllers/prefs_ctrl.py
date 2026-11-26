@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 from typing import Any
 
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
@@ -18,7 +17,6 @@ from gfgmd.config.defaults import (
     DownloadDefaults,
     FormatDefaults,
     LoggingDefaults,
-    PresetDefaults,
     ScheduleDefaults,
     ThemeDefaults,
     ToolDefaults,
@@ -28,6 +26,7 @@ from gfgmd.core.sources import source_from_url
 from gfgmd.services.context import AppContext
 from gfgmd.services.tasks import TaskRunner
 from gfgmd.utils.format import format_bytes
+from gfgmd.utils.languages import language_name
 from gfgmd.utils.logging import clear_logs, get_logs_dir, write_log
 from gfgmd.utils.settings import get_default_settings, load_settings, save_settings
 
@@ -36,11 +35,6 @@ _NOT_SAVED = "Couldn't save your preferences, so the previous ones are still in 
 
 def _options(pairs: list[tuple[str, Any]]) -> list[dict[str, Any]]:
     return [{"label": label, "code": code} for label, code in pairs]
-
-
-def all_presets(settings: dict[str, Any]) -> list[dict[str, Any]]:
-    """Built-in presets followed by the user's own."""
-    return [*PresetDefaults.BUILT_IN, *settings.get("presets", [])]
 
 
 class PrefsController(QObject):
@@ -141,18 +135,14 @@ class PrefsController(QObject):
             "interval": _options(ScheduleDefaults.INTERVAL_OPTIONS),
             "toolSource": _options(ToolDefaults.SOURCE_OPTIONS),
             "toolChannel": _options(ToolDefaults.CHANNEL_OPTIONS),
-            "kind": [{"label": "Video", "code": "video"}, {"label": "Audio only", "code": "audio"}],
+            "kind": _options(DownloadDefaults.KIND_OPTIONS),
+            "playlistLinks": _options(DownloadDefaults.PLAYLIST_LINK_OPTIONS),
+            "subtitlePlacement": _options(FormatDefaults.SUBTITLE_PLACEMENT_OPTIONS),
+            # The languages offered where no video's own subtitles are known, in the Subtitles list's form.
+            "subtitleLanguages": sorted(({"code": code, "name": language_name(code) or code, "kind": "language"}
+                                         for code in FormatDefaults.COMMON_SUBTITLE_LANGUAGES),
+                                        key=lambda language: language["name"].casefold()),
         }
-
-    @Property(list, notify=settingsChanged)
-    def presets(self) -> list[dict[str, Any]]:
-        """Download presets as {label, code} for the preset box, built-in first."""
-        return [{"label": preset["label"], "code": preset["id"]} for preset in all_presets(self._settings)]
-
-    @Slot(str, result="QVariantMap")
-    def preset(self, preset_id: str) -> dict[str, Any]:
-        """One preset's values ({} when it no longer exists)."""
-        return next((dict(p) for p in all_presets(self._settings) if p["id"] == preset_id), {})
 
     # ── Writing ───────────────────────────────────────────────────────────
 
@@ -173,39 +163,19 @@ class PrefsController(QObject):
         if self._get("theme") != theme_before:
             self.themeChanged.emit(self._get("theme", default=ThemeDefaults.DEFAULT_THEME))
 
-    @Slot("QVariantMap", result=str)
-    def savePreset(self, values: dict[str, Any]) -> str:
-        """Save the current choices as a named preset; returns its id ("" if it couldn't be saved)."""
-        label = str(values.get("label", "")).strip()[:80]
-        if not label:
-            return ""
-        preset = {"id": f"user-{int(time.time() * 1000)}", "label": label}
-        for key in ("kind", "max_height", "container", "codec_profile", "audio_tracks", "audio_langs", "audio_format",
-                    "audio_quality", "cover", "subtitles", "subtitle_format", "sponsorblock", "lyrics"):
-            if key in values:
-                preset[key] = values[key]
-        presets = [*self._get("presets", default=[]), preset]
-        self.saveSettings({"presets": presets})
-        saved = any(p.get("id") == preset["id"] for p in self._get("presets", default=[]))
-        return preset["id"] if saved else ""
-
-    @Slot(str)
-    def deletePreset(self, preset_id: str) -> None:
-        """Remove a saved preset (built-in presets stay)."""
-        presets = [p for p in self._get("presets", default=[]) if p.get("id") != preset_id]
-        updates: dict[str, Any] = {"presets": presets}
-        if self._get("downloads", "preset") == preset_id:
-            updates["downloads.preset"] = PresetDefaults.DEFAULT
-        self.saveSettings(updates)
+    @Slot()
+    def reload(self) -> None:
+        """Read settings.json again after another part of the app saved to it, so bindings show it."""
+        self._settings = load_settings()
+        self._revision += 1
+        self.settingsChanged.emit()
 
     @Slot()
     def resetDefaults(self) -> None:
-        """Reset all settings to factory defaults (saved presets are kept, and so is the note of the
-        installer's choices, so a reset isn't undone at the next start)."""
-        presets = self._get("presets", default=[])
+        """Reset all settings to factory defaults (the note of the installer's choices is kept, so a
+        reset isn't undone at the next start)."""
         install = self._get("install", default={"connections": ""})
         self._settings = get_default_settings()
-        self._settings["presets"] = presets
         self._settings["install"] = install
         self._persist()
         self.themeChanged.emit(self._get("theme", default=ThemeDefaults.DEFAULT_THEME))

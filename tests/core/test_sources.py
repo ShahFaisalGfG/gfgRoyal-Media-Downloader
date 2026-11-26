@@ -2,7 +2,7 @@
 
 import pytest
 
-from gfgmd.core.sources import Source, as_link, canonical_url, source_from_url
+from gfgmd.core.sources import Source, as_link, canonical_url, single_video, source_from_url, video_link
 
 VIDEO_ID = "jNQXAC9IVRw"
 
@@ -163,3 +163,38 @@ def test_well_known_sites_without_a_profile_have_their_names() -> None:
     assert resolve_site("youtube-dl.bandcamp.com").label == "Bandcamp"
     assert resolve_site("www.bilibili.com").label == "Bilibili" and resolve_site("archive.org").label == "Internet Archive"
     assert resolve_site("example.org").label == "example.org"
+
+
+@pytest.mark.parametrize(
+    "url, playlist",
+    [
+        (f"https://www.youtube.com/watch?v={VIDEO_ID}&list=PLtest123&index=4", "PLtest123"),
+        (f"https://youtu.be/{VIDEO_ID}?list=PLtest123", "PLtest123"),
+        (f"https://music.youtube.com/watch?v={VIDEO_ID}&list=OLAK5uy_album", "OLAK5uy_album"),
+        (f"https://www.youtube.com/watch?v={VIDEO_ID}&list=RD{VIDEO_ID}&start_radio=1", f"RD{VIDEO_ID}"),
+    ],
+)
+def test_a_video_opened_in_a_playlist_names_both(url, playlist):
+    """The app asks which one is meant; the playlist keeps its own archive either way."""
+    source = source_from_url(url)
+    assert (source.kind, source.source_id, source.video_id) == ("playlist", playlist, VIDEO_ID)
+    assert source == Source("playlist", playlist)
+    assert single_video(source) == Source("video", VIDEO_ID)
+
+
+def test_the_video_alone_keeps_its_site():
+    music = f"https://music.youtube.com/watch?v={VIDEO_ID}&list=OLAK5uy_album"
+    assert video_link(source_from_url(music), music) == f"https://music.youtube.com/watch?v={VIDEO_ID}"
+    short = f"https://youtu.be/{VIDEO_ID}?list=PLtest123"
+    assert video_link(source_from_url(short), short) == f"https://www.youtube.com/watch?v={VIDEO_ID}"
+
+
+def test_a_plain_playlist_names_no_video():
+    source = source_from_url("https://www.youtube.com/playlist?list=PLtest123")
+    assert source.video_id == ""
+    with pytest.raises(ValueError):
+        single_video(source)
+
+
+def test_a_video_link_with_a_broken_list_is_that_video():
+    assert source_from_url(f"https://www.youtube.com/watch?v={VIDEO_ID}&list=") == Source("video", VIDEO_ID)

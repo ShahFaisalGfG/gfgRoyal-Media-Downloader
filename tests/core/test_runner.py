@@ -100,3 +100,39 @@ def _exists(pid: int) -> bool:
     except ProcessLookupError:
         return False
     return True
+
+
+class _Chunks:
+    """A pipe that hands out fixed chunks, as a program's output arrives."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    def read1(self, _size: int) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+    def close(self) -> None:
+        pass
+
+
+def _lines_from(chunks: list[bytes], max_line_bytes: int = 1024) -> list[str]:
+    lines, on_line = collect()
+    ProcessRunner(["unused"], on_line, max_line_bytes=max_line_bytes)._read(_Chunks(chunks), "out")  # type: ignore[arg-type]
+    return [line for _, line in lines]
+
+
+def test_lines_split_across_chunks_arrive_whole() -> None:
+    chunks = [b"first li", b"ne\r", b"\nsecond\nthi", b"rd", b" line\rprogress 50%\rlast"]
+    assert _lines_from(chunks) == ["first line", "second", "third line", "progress 50%", "last"]
+
+
+def test_a_line_over_the_limit_is_skipped_to_its_end() -> None:
+    """Neither its start nor its tail arrives as a line of its own; the next line does."""
+    chunks = [b"ok\n", b"x" * 600, b"x" * 600, b"tail\nnext\n"]
+    assert _lines_from(chunks, max_line_bytes=1000) == ["ok", "next"]
+
+
+def test_a_long_line_in_small_pieces_arrives_whole() -> None:
+    line = b'{"entries": [' + b", ".join(b'"%06d"' % n for n in range(40_000)) + b"]}"
+    pieces = [line[start:start + 4096] for start in range(0, len(line), 4096)]
+    assert _lines_from([*pieces, b"\n"], max_line_bytes=len(line)) == [line.decode()]

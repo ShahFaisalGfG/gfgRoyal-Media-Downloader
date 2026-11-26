@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import parse_qsl, parse_qs, urlencode, urlparse, urlunparse
 
@@ -43,6 +43,9 @@ class Source:
     site: str = "youtube"
     # The channel tab ("videos", "shorts", "streams") for a channel link, else "".
     tab: str = ""
+    # The video a YouTube playlist link was opened on ("watch?v=VIDEO&list=..."), else "". The app
+    # asks whether that video or the whole playlist is meant; see single_video and video_link.
+    video_id: str = field(default="", compare=False)
 
     @property
     def archive_key(self) -> str:
@@ -136,13 +139,17 @@ def clean_url(url: str, site: Site | None = None) -> str:
 
 def _youtube_source(path: str, query_text: str, host: str) -> Source:
     query = parse_qs(query_text, keep_blank_values=True)
+    parts = [part for part in path.split("/") if part]
     if "list" in query:
         playlist_ids = query["list"]
+        video_id = _listed_video(parts, query, host)
         if len(playlist_ids) != 1 or not playlist_ids[0]:
+            # A video link that picked up a broken list= is still that video.
+            if video_id:
+                return Source("video", video_id)
             raise ValueError(_BROKEN_PLAYLIST)
-        return Source("playlist", playlist_ids[0])
+        return Source("playlist", playlist_ids[0], video_id=video_id)
 
-    parts = [part for part in path.split("/") if part]
     if host in SHORT_HOSTS:
         if len(parts) != 1:
             raise ValueError(_BROKEN_VIDEO)
@@ -161,6 +168,33 @@ def _youtube_source(path: str, query_text: str, host: str) -> Source:
     if channel is not None:
         return channel
     raise ValueError("This YouTube link isn't a video, Short, playlist, or channel. Copy the link of one of those.")
+
+
+def _listed_video(parts: list[str], query: dict[str, list[str]], host: str) -> str:
+    """The video a playlist link was opened on (watch?v=ID or youtu.be/ID), "" when it names none."""
+    if host in SHORT_HOSTS:
+        candidates = parts if len(parts) == 1 else []
+    elif parts == ["watch"]:
+        candidates = query.get("v", [])
+    else:
+        candidates = []
+    return candidates[0] if len(candidates) == 1 and VIDEO_ID.fullmatch(candidates[0]) else ""
+
+
+def single_video(source: Source) -> Source:
+    """The video a playlist link was opened on, as a link to that video alone."""
+    if not source.video_id:
+        raise ValueError("This link isn't a video in a playlist.")
+    return Source("video", source.video_id, source.site)
+
+
+def video_link(source: Source, url: str) -> str:
+    """The link to the video a playlist link was opened on, on the same YouTube site (YouTube Music
+    stays YouTube Music), without the playlist."""
+    host = (urlparse(url.strip()).hostname or "").lower()
+    if host not in YOUTUBE_HOSTS:
+        host = "www.youtube.com"
+    return f"https://{host}/watch?v={single_video(source).source_id}"
 
 
 def _video(video_id: str, kind: Literal["video", "short"]) -> Source:

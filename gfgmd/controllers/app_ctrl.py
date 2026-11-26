@@ -11,6 +11,7 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QSystemTrayIcon
 
 from gfgmd.config.defaults import AppInfo
+from gfgmd.core.sources import as_link, check_url
 from gfgmd.utils.logging import write_log
 from gfgmd.utils.settings import load_settings, take_read_error
 
@@ -160,6 +161,15 @@ class AppController(QObject):
     def clipboardText(self) -> str:
         """The clipboard's text (for Paste)."""
         return QGuiApplication.clipboard().text()
+
+    @Slot(str, result=bool)
+    def validLink(self, text: str) -> bool:
+        """True when the text is a web link by its form ("youtu.be/..." typed bare counts); nothing is fetched."""
+        try:
+            check_url(as_link(text))
+        except ValueError:
+            return False
+        return True
 
     @Slot(str, result=str)
     def localPath(self, url: str) -> str:

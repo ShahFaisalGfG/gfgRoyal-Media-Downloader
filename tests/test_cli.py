@@ -15,7 +15,7 @@ from gfgmd import cli
 from gfgmd.config.defaults import AppInfo
 from gfgmd.core import naming
 from gfgmd.core.errors import CATEGORIES
-from gfgmd.core.jobs import JobResult
+from gfgmd.core.jobs import JobResult, JobSpec
 from gfgmd.core.progress import Event, Snapshot
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.sources import source_from_url
@@ -356,3 +356,37 @@ def test_json_stays_exact_on_any_console(capsys: pytest.CaptureFixture[str]) -> 
     cli._Console(json_lines=True).saved({"id": "x", "title": "\u0646\u0639\u062a"}, Path(path))
     line = capsys.readouterr().out
     assert line.isascii() and json.loads(line)["path"] == path
+
+
+class _Stopped(Exception):
+    """Ends a run once its download would start."""
+
+
+def _planned(argv: list[str], tmp_path: Path) -> JobSpec:
+    """The download a command would run (nothing is downloaded)."""
+    planned: list[JobSpec] = []
+
+    class Executor:
+        def __init__(self, spec: JobSpec, *args: object, **kwargs: object) -> None:
+            planned.append(spec)
+
+        def run(self, sleep: object) -> None:
+            raise _Stopped
+
+    with patch.object(cli, "find_dependencies", return_value=TOOLS), patch.object(cli, "JobExecutor", Executor):
+        with pytest.raises(_Stopped):
+            cli.run([*argv, "--output-dir", str(tmp_path), "--json"])
+    return planned[0]
+
+
+def test_a_video_inside_a_playlist_downloads_alone_unless_the_playlist_is_asked_for(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    link = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabcdefghijklmnop&index=3"
+    spec = _planned([link], tmp_path)
+    assert (spec.source.kind, spec.url) == ("video", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    warning = [event for event in json_events(capsys.readouterr().out) if event["event"] == "warning"]
+    assert "--whole-playlist" in warning[0]["message"]
+    spec = _planned([link, "--whole-playlist"], tmp_path)
+    assert (spec.source.kind, spec.source.source_id, spec.url) == ("playlist", "PLabcdefghijklmnop", link)
+    assert not [event for event in json_events(capsys.readouterr().out) if event["event"] == "warning"]
+    assert _planned([link, "--items", "1:3"], tmp_path).source.kind == "playlist"

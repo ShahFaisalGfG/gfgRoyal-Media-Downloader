@@ -163,7 +163,10 @@ def normalize_downloads(output_root: Path, archive: Path, ffprobe: str) -> int:
             title = match.group("title")
             quality = video_quality(video, ffprobe)
             target = unique_target(media_dir, title, f"({quality}p)", "mp4", occupied - {video.name.casefold()})
-            video.rename(target)
+            try:
+                video.rename(target)
+            except OSError:
+                continue  # held open (a player, a virus scan): it keeps its staged name until the next sweep
             occupied.remove(video.name.casefold())
             occupied.add(target.name.casefold())
             renamed += 1

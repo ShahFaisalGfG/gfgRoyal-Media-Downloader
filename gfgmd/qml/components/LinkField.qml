@@ -1,17 +1,27 @@
 // qmllint disable unqualified
 import QtQuick
 
-// The link box. A paste button sits inside it while it is empty. Only characters a link can hold
-// get in: spaces, tabs, line breaks, invisible characters, and " < > \ ^ ` { | } are dropped as
-// they are typed or pasted, and the caret stays where it was. Pasted text keeps only its links:
-// the first in the box and the rest beside it as "+N more" (`links` hands over all of them); text
-// with no link in it is refused (`notLink`) instead of being squeezed into one word. A bare
-// "youtube.com/watch?v=..." gets its https:// in front.
+// The link box. A paste button sits inside it while it is empty, and the Download button once it
+// holds a link (by its form: nothing is fetched to decide). Only characters a link can hold get in:
+// spaces, tabs, line breaks, invisible characters, and " < > \ ^ ` { | } are dropped as they are
+// typed or pasted, and the caret stays where it was. Pasted text keeps only its links: the first in
+// the box and the rest beside it as "+N more" (`links` hands over all of them); text with no link in
+// it is refused (`notLink`) instead of being squeezed into one word. A bare "youtube.com/watch?v=..."
+// gets its https:// in front. `linkReady` says a link has settled in the box, so it can be read ahead.
 StyledTextField {
     id: field
 
     // The text pasted held no link (a sentence copied by mistake).
     signal notLink()
+    // The Download button inside the box was pressed.
+    signal downloadRequested()
+    // The box has held this link for a moment (a paste, or typing that stopped).
+    signal linkReady(string url)
+
+    property bool downloadEnabled: true
+    property string downloadToolTip: ""
+    // The box holds a link by its form.
+    readonly property bool valid: field.links.length > 0 && appController.validLink(field.links[0])
 
     // The other links of a paste, downloaded with the one in the box.
     property var extraLinks: []
@@ -32,6 +42,8 @@ StyledTextField {
         field.extraLinks = found.slice(1)
         field.text = found.length > 0 ? found[0] : words.join("")
         field.input.cursorPosition = field.text.length
+        settle.stop()
+        if (field.valid) field.linkReady(field.links[0])
         return true
     }
     // A word as a link: as it is with http(s)://, with https:// in front when it looks like a site's
@@ -54,9 +66,17 @@ StyledTextField {
         return text.replace(/[\s\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff"<>\\^`{|}]/g, "")
     }
 
+    // A pasted link settles at once; typing waits until the keys stop.
+    Timer {
+        id: settle
+        interval: 400
+        onTriggered: if (field.valid) field.linkReady(field.links[0])
+    }
+
     Connections {
         target: field.input
         function onTextChanged() {
+            settle.restart()
             var text = field.input.text
             if (text.length === 0) {
                 field.extraLinks = []
@@ -105,6 +125,16 @@ StyledTextField {
                 + (field.extraLinks.length === 1 ? "it" : "them") + " out.\n" + field.extraLinks.slice(0, 5).join("\n")
                 + (field.extraLinks.length > 5 ? "\n..." : "")
             onClicked: field.extraLinks = []
+        },
+        AppButton {
+            visible: field.valid
+            enabled: field.downloadEnabled
+            kind: "primary"
+            compact: true
+            text: "Download"
+            iconName: "download"
+            toolTipText: field.downloadToolTip
+            onClicked: field.downloadRequested()
         }
     ]
 }

@@ -77,9 +77,18 @@ AppWindow {
         return names
     }
 
+    // Let go of the file: a stopped player keeps it open (and Windows can't delete it) until its
+    // source is cleared.
+    function release() {
+        player.stop()
+        player.source = ""
+        playerWin._path = ""
+    }
+
     onClosing: {
         playerWin.savePosition()
-        player.stop()
+        playerWin.release()
+        playerController.closeVideo()
         if (!playerWin.full) playerController.saveVideoSize(playerWin.width, playerWin.height)
     }
 
@@ -91,6 +100,13 @@ AppWindow {
             playerWin.raise()
             playerWin.requestActivate()
             stage.forceActiveFocus()
+        }
+        // The video is about to be deleted (or the controller forgot it): close without saving its place.
+        function onVideoChanged() {
+            if (playerController.videoPath.length === 0 && playerWin._path.length > 0) {
+                playerWin.release()
+                playerWin.close()
+            }
         }
     }
 

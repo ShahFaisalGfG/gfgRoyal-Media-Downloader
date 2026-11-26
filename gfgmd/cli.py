@@ -33,7 +33,7 @@ from gfgmd.core.lyrics import fetch_json
 from gfgmd.core.naming import normalize_downloads
 from gfgmd.core.options import DownloadOptions, check_proxy
 from gfgmd.core.progress import Event, Snapshot
-from gfgmd.core.sources import Source, as_link, canonical_url, source_from_url
+from gfgmd.core.sources import Source, as_link, canonical_url, single_video, source_from_url, video_link
 from gfgmd.core.tools import ToolSet, ToolsMissing, resolve_tools
 from gfgmd.utils import agent_skills
 from gfgmd.utils.format import format_bytes, format_time_left, format_wait, media_noun
@@ -193,8 +193,12 @@ def build_parser() -> argparse.ArgumentParser:
     network.add_argument("--proxy", type=proxy_url, metavar="URL", help="proxy address, such as http://proxy:8080")
     network.add_argument("--force-ipv4", action="store_true", help="connect over IPv4 only")
     selection = parser.add_argument_group("selection")
+    selection.add_argument("--whole-playlist", action="store_true",
+                           help="for a link to a video inside a playlist (watch?v=...&list=...), download "
+                                "every video of the playlist instead of that video alone")
     selection.add_argument("--items", metavar="SPEC",
-                           help="which playlist videos to download, by number, such as 1:5,8")
+                           help="which playlist videos to download, by number, such as 1:5,8 (a link to a "
+                                "video inside a playlist then means the playlist)")
     selection.add_argument("--live-from-start", action="store_true", help="record live streams from the start")
     selection.add_argument("--wait-for-video", action="store_true", help="wait for scheduled streams to begin")
     selection.add_argument("--strict", action="store_true",
@@ -443,6 +447,10 @@ def run(argv: Sequence[str] | None = None) -> int:
         options = options_from_args(args)
     except ValueError as exc:
         return _invalid(str(exc), console=console)
+    # A video opened inside a playlist means that video, unless the playlist is asked for.
+    video_alone = bool(source.video_id) and not (args.whole_playlist or args.items)
+    if video_alone:
+        url, source = video_link(source, url), single_video(source)
     web.use_proxy(options.proxy)  # the lyrics lookup goes through --proxy too
     if args.cookies is not None and not args.cookies.is_file():
         return _invalid(f"The sign-in file wasn't found: {args.cookies}", console=console)
@@ -473,6 +481,9 @@ def run(argv: Sequence[str] | None = None) -> int:
     executor = JobExecutor(spec, lambda: tools, on_file=console.saved, on_event=reporter, lyrics_fetch=fetch_json)
     holder.append(executor)
     console.started(url, options.kind, output_root)
+    if video_alone:
+        console.notice("This link is a video in a playlist, so only that video downloads. "
+                       "Add --whole-playlist for every video.")
     result = executor.run(sleep=_sleep_reporting(executor, console))
     if options.kind == "video" and options.filename_style == "title-quality":
         try:

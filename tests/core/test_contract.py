@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from gfgmd.core.command import RunPaths, analyze_command, check_command, download_command
+from gfgmd.core.command import RunPaths, analyze_command, check_command, download_command, list_command
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.platform import hidden_window_flags
 from gfgmd.core.sources import source_from_url
@@ -69,5 +69,6 @@ def test_facebook_command_parses(tmp_path: Path) -> None:
 def test_analyze_and_check_commands_parse(tmp_path: Path) -> None:
     assert TOOLS is not None
     assert_accepted(analyze_command(VIDEO, TOOLS, tmp_path, options=OPTION_SETS["everything"]))
+    assert_accepted(list_command(VIDEO, TOOLS, tmp_path, options=OPTION_SETS["everything"]))
     command, _ = check_command([VIDEO], TOOLS, tmp_path / "a.txt", tmp_path, tmp_path)
     assert_accepted(command)

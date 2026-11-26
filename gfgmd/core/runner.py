@@ -94,21 +94,35 @@ class ProcessRunner:
             group.kill()
 
     def _read(self, stream: IO[bytes], name: str) -> None:
-        """Split a pipe into lines on "\\n" and "\\r" (ffmpeg redraws progress with "\\r")."""
-        pending = b""
+        """Split a pipe into lines on "\\n" and "\\r" (ffmpeg redraws progress with "\\r").
+
+        Only each new chunk is split, and an unfinished line is kept in pieces, so a line of many
+        megabytes (a long playlist's JSON) costs time in proportion to its size. A line longer than
+        the limit is skipped to its end.
+        """
+        pending: list[bytes] = []  # the pieces of the line not finished yet
+        size = 0
+        skipping = False
         try:
             while True:
                 chunk = stream.read1(_READ_SIZE) if hasattr(stream, "read1") else stream.read(_READ_SIZE)  # type: ignore[attr-defined]
                 if not chunk:
                     break
-                pending += chunk
-                *lines, pending = pending.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n")
-                for line in lines:
-                    self._deliver(name, line)
-                if len(pending) > self._max_line:
-                    pending = b""
-            if pending:
-                self._deliver(name, pending)
+                *lines, rest = chunk.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n")
+                if lines:
+                    first = b"".join([*pending, lines[0]])
+                    if not skipping:
+                        self._deliver(name, first)
+                    for line in lines[1:]:
+                        self._deliver(name, line)
+                    pending, size, skipping = [], 0, False
+                if rest:
+                    pending.append(rest)
+                    size += len(rest)
+                if size > self._max_line:
+                    pending, size, skipping = [], 0, True
+            if pending and not skipping:
+                self._deliver(name, b"".join(pending))
         except (OSError, ValueError):
             pass  # the pipe closed while the program was being stopped
         finally:

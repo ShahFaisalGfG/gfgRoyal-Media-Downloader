@@ -486,6 +486,29 @@ def analyze_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None
     return command + ["--", url]
 
 
+# What a list's read prints for each of its videos, and for the list itself once it is read.
+_LIST_ENTRY_FIELDS = f"{_ENTRY_FIELDS},thumbnails,_type"
+_LIST_FIELDS = "id,title,uploader,channel,playlist_uploader,webpage_url,extractor_key,thumbnails"
+
+
+def list_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None = None,
+                 options: DownloadOptions | None = None, marker: str = MARKER) -> list[str]:
+    """Read a playlist's or channel's videos flat as they arrive, without downloading: one marked
+    line per video ("entry"), then the list's own details ("pl") once its last page is read."""
+    command = base_args(tools, cache_dir) + [
+        "--flat-playlist",
+        "--lazy-playlist",
+        "--yes-playlist",
+        "--extractor-retries", "3",
+        *print_arg("video", f"{marker}entry %(.{{{_LIST_ENTRY_FIELDS}}})j"),
+        *print_arg("playlist", f"{marker}pl %(.{{{_LIST_FIELDS}}})j"),
+    ]
+    if options is not None:
+        command += network_args(options)
+    command += auth_args(auth)
+    return command + ["--", url]
+
+
 def check_command(urls: Sequence[str], tools: ToolSet, archive: Path, cache_dir: Path, job_dir: Path,
                   auth: Auth | None = None, newest: int = 60,
                   options: DownloadOptions | None = None, marker: str = MARKER,

@@ -88,9 +88,10 @@ class FormatDefaults:
         ("WebM (for web browsers)", "webm"),
     ]
     CONTAINERS = [code for _, code in CONTAINER_OPTIONS]
-    # Balanced is the original script's order: resolution first, then HLS and H.264/AAC at that resolution.
+    # Balanced is the original script's order: resolution first, then HLS and H.264/AAC at that
+    # resolution, so 1440p and 4K come as VP9 or AV1 (which MP4 holds). It is the default.
     CODEC_OPTIONS = [
-        ("Plays everywhere (recommended)", "compatible"),
+        ("Plays everywhere (older devices too)", "compatible"),
         ("Balanced (highest resolution first)", "balanced"),
         ("Best quality (not for older devices)", "best"),
     ]
@@ -142,6 +143,18 @@ class FormatDefaults:
         ("Inside the video and as files", "both"),
     ]
     SUBTITLE_MODES = [code for _, code in SUBTITLE_OPTIONS]
+    # Where chosen subtitles go (Download options' and Preferences' Advanced part).
+    SUBTITLE_PLACEMENT_OPTIONS = [
+        ("Inside the video", "embed"),
+        ("As separate files", "sidecar"),
+        ("Inside the video and as files", "both"),
+    ]
+    # The subtitle languages offered where no video's own list is known (playlists, several links,
+    # Preferences); a video read alone lists the subtitles it has instead.
+    COMMON_SUBTITLE_LANGUAGES = [
+        "en", "ar", "bn", "zh-Hans", "zh-Hant", "nl", "fr", "de", "el", "he", "hi", "id", "it", "ja", "ko",
+        "ms", "fa", "pl", "pt", "pa", "ro", "ru", "es", "sv", "ta", "te", "th", "tr", "uk", "ur", "vi",
+    ]
     SUBTITLE_FORMAT_OPTIONS = [
         ("SRT (most players)", "srt"),
         ("VTT (web players)", "vtt"),
@@ -163,26 +176,6 @@ class FormatDefaults:
         ("Filler", "filler"),
         ("Non-music section", "music_offtopic"),
     ]
-
-
-class PresetDefaults:
-    """The download presets offered next to the link box; users can save their own."""
-
-    DEFAULT = "video-best-mp4"
-    BUILT_IN: list[dict[str, Any]] = [
-        # The highest resolution offered: "balanced" puts resolution first, so 1440p and 4K come as
-        # VP9 or AV1 (which MP4 holds), and takes H.264 with AAC sound whenever it offers the same.
-        {"id": "video-best-mp4", "label": "Video, best quality MP4", "kind": "video", "max_height": 0,
-         "container": "mp4", "codec_profile": "balanced"},
-        {"id": "video-best", "label": "Video, best quality MKV", "kind": "video", "max_height": 0,
-         "container": "mkv", "codec_profile": "best"},
-        {"id": "audio-mp3", "label": "Audio, MP3 320 kbps", "kind": "audio", "audio_format": "mp3",
-         "audio_quality": 320},
-        {"id": "audio-m4a", "label": "Audio, M4A 256 kbps", "kind": "audio", "audio_format": "m4a",
-         "audio_quality": 256},
-        {"id": "audio-flac", "label": "Audio, FLAC full quality", "kind": "audio", "audio_format": "flac"},
-    ]
-    IDS = [preset["id"] for preset in BUILT_IN]
 
 
 class DownloadDefaults:
@@ -208,6 +201,19 @@ class DownloadDefaults:
         ("Playlist number - Title", "index-title"),
     ]
     FILENAME_STYLES = [code for _, code in FILENAME_OPTIONS]
+    # The Video | Audio switch beside the link box: which of the Smart mode defaults a download uses.
+    KIND_OPTIONS = [
+        ("Video", "video"),
+        ("Audio", "audio"),
+    ]
+    KINDS = [code for _, code in KIND_OPTIONS]
+    # A link to one video inside a playlist ("watch?v=...&list=..."): ask, or the remembered answer.
+    PLAYLIST_LINK_OPTIONS = [
+        ("Ask each time", "ask"),
+        ("Download just the video", "video"),
+        ("Download the whole playlist", "playlist"),
+    ]
+    PLAYLIST_LINKS = [code for _, code in PLAYLIST_LINK_OPTIONS]
     CONCURRENT_OPTIONS = [("Automatic (3)", 0)] + [(str(count), count) for count in range(1, MAX_CONCURRENT + 1)]
     FRAGMENT_OPTIONS = [("Automatic (8)", 0)] + [(str(count), count) for count in (1, 2, 4, 6, 8, 12, 16)]
 
@@ -259,7 +265,15 @@ def get_default_settings() -> Dict[str, Any]:
             "folder": "",
             # "" uses Music\gfgRoyal Media Downloader for audio downloads.
             "audio_folder": "",
-            "preset": PresetDefaults.DEFAULT,
+            # Smart mode: Download downloads at once with the Video or Audio defaults below ("formats");
+            # off, it opens Download options first. "kind" is the Video | Audio switch's choice.
+            "smart_mode": True,
+            "kind": "video",
+            # A video inside a playlist: "ask", or the remembered "video" or "playlist".
+            "playlist_links": "ask",
+            # Download options' "Record from the start" for a live stream it has read (a download that
+            # doesn't know the link is live records from the moment it starts).
+            "live_from_start": True,
             "concurrent": 0,
             "fragments": 0,
             # 0 keeps retrying temporary failures until the download finishes or is stopped.
@@ -272,14 +286,20 @@ def get_default_settings() -> Dict[str, Any]:
             "clear_finished_on_exit": True,
         },
         "formats": {
+            # The Smart mode defaults and Download options' starting choices. Video:
+            "max_height": 0,
             "container": "mp4",
-            "codec_profile": "compatible",
+            "codec_profile": "balanced",
             "audio_tracks": "original",
             "audio_langs": [],
             "audio_format": "mp3",
             "audio_quality": FormatDefaults.DEFAULT_AUDIO_QUALITY,
             "cover": "square",
+            # "none" downloads no subtitles by default; otherwise where they go. The languages are
+            # yt-dlp patterns ("en.*" is every kind of English), and the placement is kept for when
+            # languages are chosen again.
             "subtitles": "none",
+            "subtitle_placement": "embed",
             "subtitle_format": "srt",
             "subtitle_langs": "en.*",
             "auto_subtitles": False,
@@ -289,6 +309,11 @@ def get_default_settings() -> Dict[str, Any]:
             "embed_thumbnail": True,
             "embed_metadata": True,
             "embed_chapters": True,
+            # Audio's own "Save in the file" choices (the cover, the details, the chapters).
+            "audio_embed_cover": True,
+            "audio_embed_metadata": True,
+            "audio_embed_chapters": True,
+            # SponsorBlock applies to video and audio alike.
             "sponsorblock": "off",
             "sponsorblock_categories": ["sponsor", "selfpromo", "interaction"],
         },
@@ -317,7 +342,6 @@ def get_default_settings() -> Dict[str, Any]:
             "ffmpeg_path": "",
             "deno_path": "",
         },
-        "presets": [],
         "player": {
             "volume": 0.8,
             "muted": False,

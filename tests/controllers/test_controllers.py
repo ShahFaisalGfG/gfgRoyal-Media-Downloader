@@ -1,13 +1,14 @@
 """Analyze, library, subscriptions, sign-ins, preferences, and tools controllers."""
 
 import json
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from gfgmd.controllers import analyze_ctrl, subscriptions_ctrl
+from gfgmd.controllers import subscriptions_ctrl
 from gfgmd.controllers.analyze_ctrl import AnalyzeController
 from gfgmd.controllers.library_ctrl import LibraryController
 from gfgmd.controllers.prefs_ctrl import PrefsController
@@ -74,7 +75,8 @@ def test_analyze_then_queue_a_subset(qapp, context, paused_queue, fake_ytdlp, tm
     controller = AnalyzeController(context, paused_queue)
     with patch.object(analyze_module, "run_to_completion", fake_runner(fake_ytdlp + ["--paths", str(tmp_path)])):
         controller.analyze("https://www.youtube.com/playlist?list=PLfake")
-        assert wait_for(qapp, lambda: controller.hasResult)
+        assert controller.hasResult and controller.isPlaylist  # a list's choices show while its videos arrive
+        assert wait_for(qapp, lambda: controller.ready)
     assert controller.title == "Fake List" and controller.isPlaylist and controller.entries.totalCount == 2
     controller.entries.toggle(1)  # keep only the first video
     assert controller.addToQueue({"kind": "audio", "audio_format": "mp3"})
@@ -106,9 +108,138 @@ def test_private_playlist_offers_sign_in_then_reads_again(qapp, context, paused_
         controller.signedIn("instagram")  # another site's sign-in changes nothing
         assert len(calls) == 1
         controller.signedIn("youtube")
-        assert wait_for(qapp, lambda: controller.hasResult)
+        assert wait_for(qapp, lambda: controller.ready)
     assert len(calls) == 2 and controller.error == ""
     controller.shutdown()
+
+
+def counting_runner(prefix, calls, hold=None):
+    """fake_runner that notes each command, and waits on `hold` (an Event) before running when given."""
+    real = fake_runner(prefix)
+
+    def run(command, on_line, stop=None, env=None, cwd=None, max_line_bytes=1024 * 1024):
+        calls.append(command)
+        if hold is not None:
+            hold.wait(10)
+        return real(command, on_line, stop, env, cwd, max_line_bytes)
+    return run
+
+
+def test_a_videos_subtitles_list_the_creators_then_automatic_then_translations(qapp, context, paused_queue,
+                                                                             fake_ytdlp, tmp_path):
+    controller = AnalyzeController(context, paused_queue)
+    with patch.object(analyze_module, "run_to_completion", fake_runner(fake_ytdlp + ["--paths", str(tmp_path)])):
+        controller.analyze("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        assert wait_for(qapp, lambda: controller.ready)
+    tracks = [(track["code"], track["kind"]) for track in controller.subtitleTracks]
+    assert tracks == [("en", "creator"), ("de-DE", "creator"), ("en-orig", "automatic"), ("fr", "translated"),
+                      ("ur", "translated")]
+    assert controller.subtitleTracks[2]["name"] == "English (automatic)"
+    controller.shutdown()
+
+
+def test_a_link_read_once_opens_again_at_once(qapp, context, paused_queue, fake_ytdlp, tmp_path):
+    """Pasting reads ahead; opening Download options then, or again later, reads nothing more."""
+    calls: list[list[str]] = []
+    controller = AnalyzeController(context, paused_queue)
+    runner = counting_runner(fake_ytdlp + ["--paths", str(tmp_path)], calls)
+    with patch.object(analyze_module, "run_to_completion", runner):
+        controller.prefetch("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        assert controller.title == "" and not controller.busy  # nothing shows until Download options open
+        controller.analyze("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        assert wait_for(qapp, lambda: controller.ready) and controller.title == "Clip"
+        controller.clear()
+        controller.analyze("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        assert controller.ready and controller.title == "Clip"
+    assert len(calls) == 1
+    controller.shutdown()
+
+
+def test_a_read_that_ends_after_another_link_opened_only_fills_the_cache(qapp, context, paused_queue, fake_ytdlp,
+                                                                          tmp_path):
+    hold = threading.Event()
+    controller = AnalyzeController(context, paused_queue)
+    runner = counting_runner(fake_ytdlp + ["--paths", str(tmp_path)], [], hold)
+    with patch.object(analyze_module, "run_to_completion", runner):
+        controller.analyze("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        controller.analyze("https://www.youtube.com/playlist?list=PLfake")
+        hold.set()
+        assert wait_for(qapp, lambda: controller.ready)
+        time.sleep(0.5)
+        qapp.processEvents()
+        assert controller.title == "Fake List" and controller.error == "" and controller.isPlaylist
+    controller.shutdown()
+
+
+def test_the_quick_title_shows_while_the_details_are_read(qapp, context, paused_queue, fake_ytdlp, tmp_path):
+    hold = threading.Event()
+    asked: list[str] = []
+
+    def oembed(url):
+        asked.append(url)
+        return {"title": "Quick Clip", "author_name": "Channel", "thumbnail_url": "https://i.ytimg.com/vi/x/hq.jpg"}
+
+    controller = AnalyzeController(context, paused_queue, quick_fetch=oembed)
+    runner = counting_runner(fake_ytdlp + ["--paths", str(tmp_path)], [], hold)
+    with patch.object(analyze_module, "run_to_completion", runner):
+        controller.analyze("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        assert wait_for(qapp, lambda: controller.title == "Quick Clip")
+        assert controller.busy and controller.uploader == "Channel" and controller.thumbnail.startswith("https://")
+        assert asked[0].startswith("https://www.youtube.com/oembed?") and not controller.ready
+        hold.set()
+        assert wait_for(qapp, lambda: controller.ready) and controller.title == "Clip"
+    controller.shutdown()
+
+
+def test_a_video_inside_a_playlist_reads_the_video_or_the_list(qapp, context, paused_queue, fake_ytdlp, tmp_path):
+    calls: list[list[str]] = []
+    controller = AnalyzeController(context, paused_queue)
+    link = "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLfake"
+    runner = counting_runner(fake_ytdlp + ["--paths", str(tmp_path)], calls)
+    with patch.object(analyze_module, "run_to_completion", runner):
+        controller.analyze(link)
+        assert wait_for(qapp, lambda: controller.ready)
+        assert (controller.inPlaylist, controller.scope, controller.title) == (True, "video", "Clip")
+        assert controller.link == link  # kept as given, for switching to the playlist
+        assert "--no-playlist" in calls[-1] and calls[-1][-1] == "https://www.youtube.com/watch?v=aaaaaaaaaaa"
+        controller.analyze(link, "playlist")
+        assert wait_for(qapp, lambda: controller.ready)
+        assert (controller.scope, controller.title, controller.entries.totalCount) == ("playlist", "Fake List", 2)
+        assert "--lazy-playlist" in calls[-1]
+    controller.shutdown()
+
+
+def test_reading_a_link_goes_through_the_proxy(qapp, context, paused_queue, fake_ytdlp, tmp_path):
+    settings = load_settings()
+    settings["network"].update({"proxy": "http://127.0.0.1:8080", "force_ipv4": True})
+    save_settings(settings)
+    calls: list[list[str]] = []
+    controller = AnalyzeController(context, paused_queue)
+    runner = counting_runner(fake_ytdlp + ["--paths", str(tmp_path)], calls)
+    with patch.object(analyze_module, "run_to_completion", runner):
+        controller.analyze("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        assert wait_for(qapp, lambda: controller.ready)
+    assert "--force-ipv4" in calls[0] and calls[0][calls[0].index("--proxy") + 1] == "http://127.0.0.1:8080"
+    controller.shutdown()
+
+
+def test_several_links_share_one_set_of_choices(qapp, context, paused_queue):
+    controller = AnalyzeController(context, paused_queue)
+    controller.showLinks(["https://fake.test/ok", "https://fake.test/flaky"])
+    assert (controller.linkCount, controller.title, controller.ready) == (2, "2 links", True)
+    assert controller.addToQueue({"kind": "audio", "audio_format": "flac"})
+    jobs = context.store.jobs()
+    assert [json.loads(job["options_json"])["audio_format"] for job in jobs] == ["flac", "flac"]
+    assert controller.linkCount == 0
+    controller.shutdown()
+
+
+def test_the_link_box_knows_a_link_by_its_form(qapp):
+    """The Download button inside the link box shows for these; nothing is fetched to decide."""
+    from gfgmd.controllers.app_ctrl import AppController
+    app = AppController()
+    assert app.validLink("https://www.youtube.com/watch?v=aaaaaaaaaaa") and app.validLink("youtu.be/aaaaaaaaaaa")
+    assert not app.validLink("hello there") and not app.validLink("ftp://example.com/x") and not app.validLink("")
 
 
 def test_analyze_reports_errors(qapp, context, paused_queue):
@@ -141,6 +272,33 @@ def test_library_filters_and_recycle_bin(qapp, context, tmp_path):
         library.deleteFiles([lecture["historyId"]])
     recycle.assert_called_once_with([str(keep), str(tmp_path / "keep.en.srt")])
     assert library.total == 1
+
+
+def test_library_keeps_a_file_windows_could_not_move(qapp, context, tmp_path):
+    """The players let go first; a file still held elsewhere stays listed and the notice names it."""
+    first, second = tmp_path / "first.mp4", tmp_path / "second.mp4"
+    ids = []
+    for path in (first, second):
+        path.write_bytes(b"v")
+        ids.append(context.store.add_history(str(path), title=path.stem, kind="video", site="youtube"))
+    released: list[list[str]] = []
+    library = LibraryController(context, release_files=released.append)
+    notices: list[str] = []
+    library.notice.connect(notices.append)
+
+    def held_second(paths: list[str]) -> bool:
+        if str(second) in paths:
+            return False
+        for path in paths:
+            Path(path).unlink()
+        return True
+
+    with patch.object(recycle_module, "to_recycle_bin", side_effect=held_second):
+        library.deleteFiles(ids)
+    assert released == [[str(first), str(second)]]
+    assert not first.exists() and second.exists()
+    assert [record["filepath"] for record in context.store.history()] == [str(second)]
+    assert notices == ["Couldn't move \"second.mp4\" to the Recycle Bin. Close it in other programs and try again."]
 
 
 def test_library_recycle_bin_removes_the_folders_it_empties(qapp, context, tmp_path):
@@ -404,17 +562,19 @@ def test_closing_to_the_tray_says_so_once(qapp, monkeypatch):
 
 # ── Preferences ───────────────────────────────────────────────────────────
 
-def test_preferences_save_and_presets(qapp, context):
+def test_preferences_save(qapp, context):
     prefs = PrefsController(context)
     prefs.saveSettings({"downloads.concurrent": 2, "network.proxy": "socks5://127.0.0.1:9050"})
     assert prefs.value("downloads.concurrent") == 2 and load_settings()["network"]["proxy"].startswith("socks5")
-    preset_id = prefs.savePreset({"label": "Talks", "kind": "video", "max_height": 720, "container": "mkv"})
-    assert preset_id.startswith("user-")
-    assert prefs.preset(preset_id)["container"] == "mkv"
-    assert any(p["code"] == preset_id for p in prefs.presets)
-    prefs.saveSettings({"downloads.preset": preset_id})
-    prefs.deletePreset(preset_id)
-    assert prefs.value("downloads.preset") == "video-best-mp4"
+    prefs.saveSettings({"downloads.kind": "audio", "downloads.smart_mode": False, "downloads.playlist_links": "video"})
+    assert (prefs.value("downloads.kind"), prefs.value("downloads.smart_mode")) == ("audio", False)
+    assert [option["code"] for option in prefs.options["playlistLinks"]] == ["ask", "video", "playlist"]
+    settings = load_settings()
+    settings["downloads"]["playlist_links"] = "playlist"
+    save_settings(settings)  # saved elsewhere in the app, as the "video or playlist" answer is
+    revision = prefs.revision
+    prefs.reload()
+    assert prefs.value("downloads.playlist_links") == "playlist" and prefs.revision == revision + 1
     prefs.saveSettings({"downloads.concurrent": 99})  # invalid: dropped on reload
     assert prefs.value("downloads.concurrent") == 0
     prefs.shutdown()

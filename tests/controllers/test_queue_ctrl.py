@@ -1,14 +1,15 @@
 """The queue controller end to end with the fake yt-dlp: adding, running, finishing, and stopping."""
 
 import json
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from gfgmd.controllers.queue_ctrl import QueueController
-from gfgmd.controllers.queue_rows import entry_key, entry_row, job_key, running_values
+from gfgmd.controllers.queue_ctrl import QueueController, base_options
+from gfgmd.controllers.queue_rows import entry_row, job_key, running_values
 from gfgmd.core import extract, naming
 from gfgmd.core.naming import group_of
 from gfgmd.core.extract import VideoProbe
@@ -80,7 +81,7 @@ def states(context: AppContext) -> list[str]:
 def test_download_finishes_and_reaches_the_library(qapp, queue, context):
     saved = []
     queue.fileSaved.connect(lambda history_id, path: saved.append(path))
-    assert queue.addLinks("https://fake.test/ok", "video-best-mp4") == 1
+    assert queue.addLinks("https://fake.test/ok", "video") == 1
     assert wait_for(qapp, lambda: states(context) == ["done"])
     assert wait_for(qapp, lambda: len(saved) == 1)
     assert saved[0].endswith("Clip (720p).mp4") and Path(saved[0]).exists()
@@ -94,7 +95,7 @@ def test_download_finishes_and_reaches_the_library(qapp, queue, context):
 def test_bad_links_are_reported_not_queued(qapp, queue, context):
     notices = []
     queue.notice.connect(notices.append)
-    assert queue.addLinks("not a link\nftp://x/y", "video-best-mp4") == 0
+    assert queue.addLinks("not a link\nftp://x/y", "video") == 0
     assert context.store.jobs() == []
     assert notices and notices[0].startswith("4 links couldn't be added.")  # split at spaces and line breaks
 
@@ -104,16 +105,16 @@ def test_text_without_a_link_says_so_and_bare_links_get_https(qapp, queue, conte
     notices = []
     queue.notice.connect(notices.append)
     queue.pauseAll()
-    assert queue.addLinks("just some words", "video-best-mp4") == 0
+    assert queue.addLinks("just some words", "video") == 0
     assert notices[-1] == "The copied text isn't a link. Copy the link from your browser's address bar."
-    assert queue.addLinks("fake.test/ok", "video-best-mp4") == 1
+    assert queue.addLinks("fake.test/ok", "video") == 1
     assert context.store.jobs()[0]["url"] == "https://fake.test/ok"
 
 
 def test_sign_in_needed_then_retry_after_sign_in(qapp, queue, context):
     sites = []
     queue.signInNeeded.connect(sites.append)
-    queue.addLinks("https://fake.test/auth", "video-best-mp4")
+    queue.addLinks("https://fake.test/auth", "video")
     assert wait_for(qapp, lambda: states(context) == ["needs_auth"])
     job = context.store.jobs()[0]
     assert job["action"] == "signin" and sites == [job["site"]]
@@ -128,7 +129,7 @@ def test_yt_dlp_errors_reach_the_log(qapp, queue, context):
     def logged(message: str, level: str = "general") -> None:
         lines.append((message, level))
     with patch("gfgmd.controllers.queue_ctrl.write_log", logged):
-        queue.addLinks("https://fake.test/private", "video-best-mp4")
+        queue.addLinks("https://fake.test/private", "video")
         assert wait_for(qapp, lambda: states(context) == ["failed"])
     prefix = f"Download {context.store.jobs()[0]['id']}: "
     assert any(level == "critical" and message.startswith(prefix) and "Private video" in message
@@ -140,7 +141,7 @@ def test_a_finished_download_deletes_its_saved_videos_leftovers(qapp, queue, con
     finishes; a skipped video's part stays for Try again until the download leaves the list, and the
     emptied folder goes with it."""
     queue.pauseAll()
-    queue.addLinks("https://fake.test/playlist", "video-best-mp4")
+    queue.addLinks("https://fake.test/playlist", "video")
     job = context.store.jobs()[0]
     context.store.add_items(job["id"], [{"id": video_id, "title": title, "index": number} for number, (video_id, title)
                                         in enumerate((("aaaaaaaaaaa", "First"), ("bbbbbbbbbbb", "Second"),
@@ -160,10 +161,10 @@ def test_a_finished_download_deletes_its_saved_videos_leftovers(qapp, queue, con
 
 
 def test_full_disk_pauses_the_queue(qapp, queue, context):
-    queue.addLinks("https://fake.test/disk", "video-best-mp4")
+    queue.addLinks("https://fake.test/disk", "video")
     assert wait_for(qapp, lambda: states(context) == ["paused"])
     assert queue.paused is True
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     qapp.processEvents()
     assert states(context) == ["paused", "queued"]  # nothing starts while paused
     queue.resumeAll()
@@ -171,7 +172,7 @@ def test_full_disk_pauses_the_queue(qapp, queue, context):
 
 
 def test_pause_resume_and_cancel_a_running_download(qapp, queue, context):
-    queue.addLinks("https://fake.test/slow", "video-best-mp4")
+    queue.addLinks("https://fake.test/slow", "video")
     assert wait_for(qapp, lambda: queue.runningCount == 1)
     job_id = context.store.jobs()[0]["id"]
     queue.pause(job_id)
@@ -202,7 +203,7 @@ def test_quitting_keeps_a_paused_download_paused(qapp, context, fake_ytdlp):
     """A download paused just before the app quits is still paused at the next start, not queued."""
     controller = QueueController(context, ToolManager(context), Notifier(lambda: None, lambda path: None),
                                  runner=lambda c, o, s: run_to_completion(fake_ytdlp + c[1:], o, s))
-    controller.addLinks("https://fake.test/slow", "video-best-mp4")
+    controller.addLinks("https://fake.test/slow", "video")
     assert wait_for(qapp, lambda: controller.runningCount == 1)
     job_id = context.store.jobs()[0]["id"]
     controller.pause(job_id)
@@ -215,7 +216,7 @@ def test_concurrency_limit_and_shared_archive(qapp, queue, context):
     settings["downloads"]["folder"] = str(Path(context.store.path).parent / "Downloads")
     settings["downloads"]["concurrent"] = 1
     save_settings(settings)
-    queue.addLinks("https://fake.test/slow\nhttps://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/slow\nhttps://fake.test/ok", "video")
     assert wait_for(qapp, lambda: queue.runningCount == 1)
     assert sorted(states(context)) == ["queued", "running"]
     queue.pauseAll()
@@ -226,7 +227,7 @@ def test_when_done_countdown(qapp, queue, context):
     countdowns = []
     queue.whenDoneCountdown.connect(countdowns.append)
     queue.setWhenDone("sleep")
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: countdowns == ["sleep"])
     queue.cancelWhenDone()
     assert queue.whenDone == "nothing"
@@ -237,7 +238,7 @@ def test_when_done_waits_while_a_download_is_paused(qapp, queue, context):
     countdowns = []
     queue.whenDoneCountdown.connect(countdowns.append)
     queue.setWhenDone("sleep")
-    queue.addLinks("https://fake.test/slow", "video-best-mp4")
+    queue.addLinks("https://fake.test/slow", "video")
     assert wait_for(qapp, lambda: queue.runningCount == 1)
     job_id = context.store.jobs()[0]["id"]
     queue.pause(job_id)
@@ -270,7 +271,7 @@ def test_quit_when_done_is_handed_to_the_app(qapp, queue):
 
 
 def test_download_again_keeps_the_files_type(qapp, queue, context):
-    """A song downloaded again stays a song in its format, an MKV stays an MKV, whatever the preset."""
+    """A song downloaded again stays a song in its format, an MKV stays an MKV, whatever the switch says."""
     queue.pauseAll()
     queue.download_again("https://fake.test/ok", "audio", "flac")
     queue.download_again("https://fake.test/flaky", "video", "mkv")
@@ -306,7 +307,7 @@ def test_sign_in_copies_left_by_a_crash_are_removed_at_start(qapp, context):
 
 def test_move_and_remove(qapp, queue, context):
     queue.pauseAll()
-    queue.addLinks("https://fake.test/ok\nhttps://fake.test/flaky", "audio-mp3")
+    queue.addLinks("https://fake.test/ok\nhttps://fake.test/flaky", "audio")
     first, second = (job["id"] for job in context.store.jobs())
     assert json.loads(context.store.job(first)["options_json"])["kind"] == "audio"
     queue.move(second, -1)
@@ -322,7 +323,7 @@ def _partials(context: AppContext) -> list[Path]:
 
 
 def test_cancel_after_a_pause_deletes_the_unfinished_files(qapp, queue, context):
-    queue.addLinks("https://fake.test/slow", "video-best-mp4")
+    queue.addLinks("https://fake.test/slow", "video")
     assert wait_for(qapp, lambda: queue.runningCount == 1 and _partials(context))
     job_id = context.store.jobs()[0]["id"]
     queue.pause(job_id)
@@ -335,7 +336,7 @@ def test_cancel_after_a_pause_deletes_the_unfinished_files(qapp, queue, context)
 def test_remove_with_files_sends_them_to_the_recycle_bin(qapp, queue, context):
     removed = []
     queue.filesRemoved.connect(lambda: removed.append(True))
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
     job_id = context.store.jobs()[0]["id"]
     saved = context.store.history()[0]["filepath"]
@@ -360,7 +361,7 @@ def _moved_out(paths: list[str]) -> bool:
 def test_removing_a_playlist_with_its_files_removes_its_emptied_folder(qapp, queue, context):
     """The playlist's folder goes with its last file and the download folder stays; yt-dlp's emptied
     folder in .incomplete went when the download finished."""
-    queue.addLinks("https://fake.test/listed", "video-best-mp4")
+    queue.addLinks("https://fake.test/listed", "video")
     assert wait_for(qapp, lambda: states(context) == ["done"] and len(context.store.history()) == 3)
     root = Path(load_settings()["downloads"]["folder"])
     folder = root / "Fake List"
@@ -390,7 +391,7 @@ def test_the_pc_stays_awake_while_downloading_unless_turned_off(qapp, queue, con
     calls: list[bool] = []
     settings = load_settings()
     with patch("gfgmd.controllers.queue_ctrl.power.keep_awake", side_effect=calls.append):
-        queue.addLinks("https://fake.test/slow", "video-best-mp4")
+        queue.addLinks("https://fake.test/slow", "video")
         assert wait_for(qapp, lambda: calls == [True])
         settings["downloads"]["keep_awake"] = False
         save_settings(settings)
@@ -403,7 +404,7 @@ def test_the_pc_stays_awake_while_downloading_unless_turned_off(qapp, queue, con
 
 
 def test_removing_a_running_download_with_files_deletes_its_unfinished_files(qapp, queue, context):
-    queue.addLinks("https://fake.test/slow", "video-best-mp4")
+    queue.addLinks("https://fake.test/slow", "video")
     assert wait_for(qapp, lambda: queue.runningCount == 1 and _partials(context))
     queue.remove(context.store.jobs()[0]["id"], True)
     assert wait_for(qapp, lambda: context.store.jobs() == [] and queue.runningCount == 0)
@@ -413,7 +414,7 @@ def test_removing_a_running_download_with_files_deletes_its_unfinished_files(qap
 def test_extract_audio_of_a_finished_download(qapp, queue, context):
     notices = []
     queue.notice.connect(notices.append)
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
     video_job = context.store.jobs()[0]["id"]
     probe = VideoProbe(duration=2.0, audio_stream=1, audio_codec="aac")
@@ -440,14 +441,14 @@ def test_the_same_video_again_plays_the_file_already_downloaded(qapp, queue, con
     notices = []
     queue.notice.connect(notices.append)
     queue.pauseAll()
-    assert queue.addLinks("https://fake.test/ok", "video-best-mp4") == 1
+    assert queue.addLinks("https://fake.test/ok", "video") == 1
     # The same link with the same choices while it waits: nothing more is queued.
-    assert queue.addLinks("https://fake.test/ok", "video-best-mp4") == 1
+    assert queue.addLinks("https://fake.test/ok", "video") == 1
     assert len(context.store.jobs()) == 1 and notices[-1] == "Already in the list with the same choices."
     queue.resumeAll()
     assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
     first = context.store.history()[0]["filepath"]
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: states(context) == ["done", "done"])
     again = context.store.jobs()[1]
     assert again["message"] == "Already downloaded" and again["title"] == "Clip"
@@ -464,11 +465,11 @@ def test_the_same_video_again_plays_the_file_already_downloaded(qapp, queue, con
 
 def test_a_video_whose_file_is_gone_downloads_again(qapp, queue, context):
     """Deleted after downloading (in Explorer, or with its library record): asking again downloads it."""
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
     first = Path(context.store.history()[0]["filepath"])
     first.unlink()
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: states(context) == ["done", "done"] and first.exists())
     again = context.store.jobs()[1]
     assert again["message"] == "1 video saved" and queue.model.get(1)["lastFile"] == str(first)
@@ -494,12 +495,12 @@ def test_finished_downloads_leave_the_list_when_the_app_closes(qapp, context, fa
         return QueueController(context, ToolManager(context), Notifier(lambda: None, lambda path: None),
                                runner=lambda c, o, s: run_to_completion(fake_ytdlp + c[1:], o, s))
     first = make()
-    first.addLinks("https://fake.test/ok", "video-best-mp4")
+    first.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
-    first.addLinks("https://fake.test/auth", "audio-mp3")
+    first.addLinks("https://fake.test/auth", "audio")
     assert wait_for(qapp, lambda: states(context) == ["done", "needs_auth"])
     first.pauseAll()
-    first.addLinks("https://fake.test/slow", "video-best-mp4")
+    first.addLinks("https://fake.test/slow", "video")
     first.shutdown()
     assert states(context) == ["needs_auth", "queued"] and len(context.store.history()) == 1
     # Kept when Preferences says so, and cleared at the next start otherwise (after a crash, say).
@@ -522,7 +523,7 @@ def test_finished_downloads_leave_the_list_when_the_app_closes(qapp, context, fa
 
 def test_removing_always_deletes_unfinished_parts_and_asks_only_when_needed(qapp, queue, context):
     """A paused download's parts go with it; saved files stay unless asked; the page asks only to lose work."""
-    queue.addLinks("https://fake.test/slow", "video-best-mp4")
+    queue.addLinks("https://fake.test/slow", "video")
     assert wait_for(qapp, lambda: queue.runningCount == 1 and _partials(context))
     slow = context.store.jobs()[0]["id"]
     assert queue.removal([slow]) == {"count": 1, "inProgress": 1, "savedFiles": 0}
@@ -531,14 +532,14 @@ def test_removing_always_deletes_unfinished_parts_and_asks_only_when_needed(qapp
     assert queue.removal([slow]) == {"count": 1, "inProgress": 1, "savedFiles": 0}  # paused is still to finish
     queue.remove(slow, False)
     assert context.store.jobs() == [] and _partials(context) == []
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     assert wait_for(qapp, lambda: states(context) == ["done"] and context.store.history())
     done = context.store.jobs()[0]["id"]
     assert queue.removal([done]) == {"count": 1, "inProgress": 0, "savedFiles": 1}
     queue.remove(done, False)
     assert context.store.jobs() == [] and Path(context.store.history()[0]["filepath"]).exists()
     queue.pauseAll()
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     waiting = context.store.jobs()[0]["id"]
     queue.cancel(waiting)
     assert queue.removal([waiting]) == {"count": 1, "inProgress": 0, "savedFiles": 0}  # removed without asking
@@ -549,7 +550,7 @@ def test_actions_on_several_downloads_at_once(qapp, queue, context):
     notices = []
     queue.notice.connect(notices.append)
     queue.pauseAll()
-    queue.addLinks("https://fake.test/ok https://fake.test/playlist", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok https://fake.test/playlist", "video")
     ids = [job["id"] for job in context.store.jobs()]
     changes = []
     queue.changed.connect(lambda: changes.append(True))
@@ -565,6 +566,34 @@ def test_actions_on_several_downloads_at_once(qapp, queue, context):
     assert context.store.jobs() == [] and context.store.history() == []
     assert notices[-1] == "Moved 3 files to the Recycle Bin."
     queue.applyToJobs("unknown", ids)  # ignored
+
+
+def test_deleting_a_video_stops_extracting_its_audio_first(qapp, context, fake_ytdlp, tmp_path):
+    """FFmpeg reading the video would keep Windows from moving it, so the extraction is cancelled and
+    waited for before the players let go."""
+    reading = threading.Event()
+
+    def runner(command, on_line, stop):
+        if command[0] == TOOLS.ffmpeg:
+            reading.set()
+            stop.wait(10)
+            return 1, True
+        return run_to_completion(fake_ytdlp + command[1:], on_line, stop)
+
+    notifier = Notifier(lambda: None, lambda path: None)
+    notifier.attach(None)
+    released: list[list[str]] = []
+    queue = QueueController(context, ToolManager(context), notifier, runner=runner, release_player=released.append)
+    video = tmp_path / "Clip (720p).mp4"
+    video.write_bytes(b"v")
+    video_id = context.store.add_history(str(video), title="Clip", kind="video")
+    probe = VideoProbe(duration=2.0, audio_stream=1, audio_codec="aac")
+    with patch.object(extract, "probe_video", return_value=probe):
+        queue.extractAudio([video_id], {"audio_format": "flac", "embed_thumbnail": False, "lyrics": False})
+        assert wait_for(qapp, reading.is_set)
+        queue.release_files([str(video)])
+    assert states(context) == ["cancelled"] and released == [[str(video)]]
+    queue.shutdown()
 
 
 def test_extract_audio_of_several_library_files_leaves_songs_out(qapp, queue, context, tmp_path):
@@ -594,7 +623,7 @@ def rows_of(queue) -> list[dict]:
 def test_a_playlist_shows_its_videos_and_each_lands_in_the_library(qapp, queue, context):
     saved = []
     queue.fileSaved.connect(lambda history_id, path: saved.append(path))
-    queue.addLinks("https://fake.test/listed", "video-best-mp4")
+    queue.addLinks("https://fake.test/listed", "video")
     assert wait_for(qapp, lambda: states(context) == ["done"] and len(saved) == 3)
     job = context.store.jobs()[0]
     rows = rows_of(queue)
@@ -618,7 +647,7 @@ def test_a_stalled_video_waits_while_the_rest_download(qapp, context, fake_ytdlp
     notifier.attach(None)
     queue = QueueController(context, ToolManager(context), notifier, runner=runner, stall_seconds=1.0)
     try:
-        queue.addLinks("https://fake.test/stall", "video-best-mp4")
+        queue.addLinks("https://fake.test/stall", "video")
         job_id = context.store.jobs()[0]["id"]
         assert wait_for(qapp, lambda: states(context) == ["done"])
         assert context.store.item_counts(job_id) == {"done": 3}
@@ -635,7 +664,7 @@ def test_videos_its_archive_records_show_as_downloaded_before(qapp, queue, conte
     """A list's videos still waiting when it ends, but in its archive, read "Downloaded before"."""
     from gfgmd.core.jobs import JobResult
     queue.pauseAll()
-    queue.addLinks("https://fake.test/playlist", "video-best-mp4")
+    queue.addLinks("https://fake.test/playlist", "video")
     job = context.store.jobs()[0]
     context.store.add_items(job["id"], [{"id": "aaaaaaaaaaa", "title": "First", "index": 1},
                                         {"id": "bbbbbbbbbbb", "title": "Second", "index": 2}])
@@ -665,7 +694,7 @@ def test_a_subscriptions_new_uploads_are_one_download(qapp, queue, context):
     source = source_from_url("https://www.youtube.com/playlist?list=PLabcdefghijklmnop")
     uploads = [{"id": video_id, "title": f"Upload {video_id[:3]}", "url": f"https://fake.test/batch/{video_id}",
                 "thumbnail": ""} for video_id in ("aaaaaaaaaaa", "bbbbbbbbbbb")]
-    options = queue._preset_options("video-best-mp4")
+    options = base_options(load_settings(), "video")
     assert queue.add_subscription_items(uploads, source, options, 1, None, title="Mix", url="https://youtu.be/mix",
                                         folder="Mix: Best of") == 2
     job = context.store.jobs()[0]
@@ -678,7 +707,7 @@ def test_a_subscriptions_new_uploads_are_one_download(qapp, queue, context):
 
 def test_picked_flags_say_what_the_selection_allows(qapp, queue, context):
     queue.pauseAll()
-    queue.addLinks("https://fake.test/ok", "video-best-mp4")
+    queue.addLinks("https://fake.test/ok", "video")
     job_id = context.store.jobs()[0]["id"]
     assert queue.pickedFlags([job_id]) == {"canPause": True, "canResume": False, "canRetry": False}
     queue.pause(job_id)
@@ -691,3 +720,70 @@ def test_files_are_grouped_by_their_playlist_folder(tmp_path):
     key, title = group_of(root / "Channel" / "Videos" / "Clip.mp4", root)
     assert key == str(root / "Channel" / "Videos").casefold() and title == "Channel · Videos"
     assert group_of(tmp_path / "Elsewhere" / "Clip.mp4", root) == ("", "")
+
+
+# ── A video inside a playlist, and Smart mode ──
+
+IN_LIST = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabcdefghijklmnop"
+
+
+def test_a_video_inside_a_playlist_waits_for_the_answer(qapp, queue, context):
+    """Other links queue at once; the answer decides, and remembering it skips the question next time."""
+    queue.pauseAll()
+    asked = []
+    queue.playlistQuestion.connect(asked.append)
+    assert queue.addLinks(f"https://fake.test/ok\n{IN_LIST}", "video") == 2
+    assert asked == [1] and [job["url"] for job in context.store.jobs()] == ["https://fake.test/ok"]
+    queue.answerPlaylist("video", False)
+    job = context.store.jobs()[1]
+    assert (job["source_kind"], job["source_id"], job["url"]) == ("video", "dQw4w9WgXcQ",
+                                                                  "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert load_settings()["downloads"]["playlist_links"] == "ask"
+    saved = []
+    queue.settingsSaved.connect(lambda: saved.append(True))
+    queue.addLinks(IN_LIST, "audio")
+    queue.answerPlaylist("playlist", True)
+    assert saved == [True]  # Preferences reads the remembered answer again
+    job = context.store.jobs()[2]
+    assert (job["source_kind"], job["source_id"], job["url"]) == ("playlist", "PLabcdefghijklmnop", IN_LIST)
+    assert json.loads(job["options_json"])["kind"] == "audio"
+    assert load_settings()["downloads"]["playlist_links"] == "playlist"
+    queue.addLinks(IN_LIST, "video")  # remembered: no question
+    assert asked == [1, 1] and len(context.store.jobs()) == 4
+
+
+def test_cancelling_the_question_drops_the_waiting_links(qapp, queue, context):
+    queue.pauseAll()
+    queue.addLinks(IN_LIST, "video")
+    queue.answerPlaylist("", True)
+    assert context.store.jobs() == [] and load_settings()["downloads"]["playlist_links"] == "ask"
+    queue.answerPlaylist("video", False)  # nothing waits any more
+    assert context.store.jobs() == []
+
+
+def test_links_from_outside_open_download_options_when_smart_mode_is_off(qapp, queue, context):
+    queue.pauseAll()
+    requested = []
+    queue.optionsRequested.connect(lambda links, kind: requested.append((links, kind)))
+    settings = load_settings()
+    settings["downloads"]["smart_mode"] = False
+    save_settings(settings)
+    assert queue.receiveLinks("https://fake.test/ok fake.test/flaky", "audio") == 2
+    assert requested == [(["https://fake.test/ok", "https://fake.test/flaky"], "audio")] and context.store.jobs() == []
+    settings["downloads"]["smart_mode"] = True
+    save_settings(settings)
+    assert queue.receiveLinks("https://fake.test/ok", "audio") == 1
+    assert json.loads(context.store.jobs()[0]["options_json"])["kind"] == "audio"
+
+
+def test_smart_mode_uses_the_video_or_audio_defaults(qapp, queue, context):
+    """Audio has its own "Save in the file" choices; the video quality default applies."""
+    queue.pauseAll()
+    settings = load_settings()
+    settings["formats"].update({"max_height": 720, "embed_thumbnail": True, "audio_embed_cover": False})
+    save_settings(settings)
+    queue.addLinks("https://fake.test/ok", "video")
+    queue.addLinks("https://fake.test/ok", "audio")
+    video, audio = (json.loads(job["options_json"]) for job in context.store.jobs())
+    assert (video["kind"], video["max_height"], video["embed_thumbnail"]) == ("video", 720, True)
+    assert (audio["kind"], audio["embed_thumbnail"]) == ("audio", False)

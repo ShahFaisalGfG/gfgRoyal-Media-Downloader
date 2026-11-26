@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from gfgmd.core import analyze as analyze_module
-from gfgmd.core.analyze import AnalyzeError, analyze, audio_tracks, estimate_size, items_spec, parse_info
+from gfgmd.core.analyze import AnalyzeError, analyze, analyze_list, audio_tracks, estimate_size, items_spec, parse_info
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.tools import ToolSet
@@ -53,7 +53,7 @@ def test_items_spec(indices: list[int], spec: str) -> None:
 
 
 def fake(prefix: list[str]):
-    def run(command, on_line, stop=None, max_line_bytes=0):
+    def run(command, on_line, stop=None, max_line_bytes=1024 * 1024):
         return run_to_completion(prefix + command[1:], on_line, stop, max_line_bytes=max_line_bytes)
     return run
 
@@ -86,3 +86,21 @@ def test_audio_tracks_list_dubs_with_the_original_first() -> None:
     assert [(t.code, t.label, t.original) for t in tracks] == [("en-US", "English (US)", True),
                                                              ("es", "Spanish", False)]
     assert audio_tracks(formats[:1]) == [] and audio_tracks(formats[2:3]) == []
+
+
+def test_a_list_read_hands_over_each_video_as_it_arrives(fake_ytdlp: list[str], tmp_path: Path) -> None:
+    arrived: list[str] = []
+    with patch.object(analyze_module, "run_to_completion", fake(fake_ytdlp + ["--paths", str(tmp_path)])):
+        result = analyze_list("https://www.youtube.com/playlist?list=PLfake", TOOLS, tmp_path,
+                              on_entry=lambda data: arrived.append(data["id"]))
+    assert arrived == ["aaaaaaaaaaa", "bbbbbbbbbbb"]
+    assert (result.kind, result.title, result.uploader, result.selectable) == ("playlist", "Fake List", "Fake Channel", True)
+    assert [(entry.id, entry.index, entry.duration) for entry in result.entries] == [("aaaaaaaaaaa", 1, 61.0),
+                                                                                    ("bbbbbbbbbbb", 2, 62.0)]
+
+
+def test_a_list_read_that_fails_is_classified(fake_ytdlp: list[str], tmp_path: Path) -> None:
+    with patch.object(analyze_module, "run_to_completion", fake(fake_ytdlp + ["--paths", str(tmp_path)])):
+        with pytest.raises(AnalyzeError) as error:
+            analyze_list("https://fake.test/private", TOOLS, tmp_path)
+    assert error.value.failure.category.key == "private"

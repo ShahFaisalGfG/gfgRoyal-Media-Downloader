@@ -37,6 +37,26 @@ class EntryModel(DictListModel):
         self._filter = ""
         self._show()
 
+    def start(self, archived: set[str]) -> None:
+        """Empty the list for a playlist whose videos arrive as they are read (see extend)."""
+        self.load([], archived)
+
+    def extend(self, entries: Iterable[Entry]) -> None:
+        """Add videos as a long list's pages arrive; checked as load checks them, and the choices
+        already made stay."""
+        new = []
+        for entry in entries:
+            if entry.id in self._checked:
+                continue
+            self._checked[entry.id] = entry.id not in self._archived and entry.availability not in _UNAVAILABLE
+            self._entries.append(entry)
+            new.append(entry)
+        if not new:
+            return
+        text = self._filter.casefold()
+        self.append([self._row(entry) for entry in new if not text or text in entry.title.casefold()])
+        self.selectionChanged.emit()
+
     def set_archived(self, archived: set[str]) -> None:
         """Mark entries already downloaded with the chosen format."""
         self._archived = archived

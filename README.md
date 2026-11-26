@@ -15,7 +15,7 @@
 
 ---
 
-gfgRoyal Media Downloader saves a single video, a whole playlist, a channel, a Short or Reel, or a live stream as clean, quality-labeled files such as `Episode 001 (1080p).mp4`, and music as MP3 (320 kbps by default) or another format with its cover art and synced lyrics. Paste a link and press Download, or the arrow on the Download button to pick the quality, audio tracks, subtitles, and the exact videos you want. Play what you downloaded in the built-in video and music players. Downloads resume after a dropped connection, a crash, or a restart, and the app keeps its own copies of yt-dlp, FFmpeg, and Deno up to date so site changes don't break it.
+gfgRoyal Media Downloader saves a single video, a whole playlist, a channel, a Short or Reel, or a live stream as clean, quality-labeled files such as `Episode 001 (1080p).mp4`, and music as MP3 (320 kbps by default) or another format with its cover art and synced lyrics. Paste a link and press Download: Smart mode downloads at once with your video or audio defaults, or turn it off to pick the quality, audio tracks, subtitles, and the exact videos you want. Play what you downloaded in the built-in video and music players. Downloads resume after a dropped connection, a crash, or a restart, and the app keeps its own copies of yt-dlp, FFmpeg, and Deno up to date so site changes don't break it.
 
 > *Paste once. Come back to a finished playlist.*
 
@@ -111,8 +111,10 @@ The app checks GitHub once a day and installs updates when you quit, after check
 ## Quick Start
 
 1. Copy a link from your browser.
-2. Press **Ctrl+V** in the app (or the paste button inside the empty link box), choose a preset, and press **Download**.
-3. To choose formats and videos first, press the arrow on the right of **Download** (or Ctrl+Shift+O) instead; press it again to close the choices.
+2. Press **Ctrl+V** in the app (or the paste button inside the empty link box), choose **Video** or **Audio** beside the box, and press **Download**, which appears inside the box once it holds a link.
+3. With **Smart** on (the default), Download downloads at once with your Video or Audio defaults from Preferences. Turn **Smart** off and Download opens **Download options** first, to choose the quality, subtitles, and which videos; Ctrl+Shift+O opens them either way.
+
+The app starts reading a link as soon as it is pasted, so Download options are usually ready when they open; a YouTube link's title and thumbnail show within about a second. A link to one video watched inside a playlist (`watch?v=...&list=...`) asks whether to download that video or the whole playlist, and can remember the answer (Preferences > Downloads changes it).
 
 Drag links from the browser onto the window to queue them, or drop a `.txt` file with one link per line. Turn on **Offer copied links** in Preferences and the app offers to download each link you copy.
 
@@ -125,9 +127,9 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 | Shortcut | Action |
 |---|---|
 | Ctrl+V | Paste the copied link |
-| Enter | Download with the chosen preset |
-| Ctrl+Shift+O | Open the download options for the link |
-| Esc / Ctrl+Enter | In the download options: close them / add the download |
+| Enter | Download (at once with Smart on, or through Download options) |
+| Ctrl+Shift+O | Open Download options for the link |
+| Esc / Ctrl+Enter | In Download options: close them / download |
 | Ctrl+L | Go to the link box |
 | Space | Pause or resume the selected download |
 | Delete | Remove the selected download from the list (asks first when it is unfinished or has saved files) |
@@ -147,15 +149,15 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 
 ## Video and Audio Formats
 
-Presets next to the link box cover the usual choices (video in the best quality offered as MP4 or MKV, MP3 320 kbps, M4A, FLAC); the arrow on the **Download** button shows every choice for one link, and Preferences sets the starting values.
+Preferences > Video and Audio hold the defaults: Smart mode downloads with them, and Download options start from them. Download options show the everyday choices first (quality and file type, or the audio format and quality; subtitles; dubbed tracks; lyrics) and fold the rest under **Advanced**: compatibility, where subtitles go and their file type, what goes inside the file, the cover's shape, and SponsorBlock. For one video, **Subtitles** lists the subtitles it has: the creator's own, the captions the site made from its speech, and the site's machine translations, folded under a search box. Several links pasted at once share one set of choices.
 
 | Video | Choices |
 |---|---|
 | Quality | Best available, 2160p, 1440p, 1080p, 720p, 480p, 360p (measured on the shorter side, so portrait Shorts fit too) |
 | File type | MP4 (plays everywhere), MKV (keeps everything), WebM (for web browsers) |
-| Compatibility | Plays everywhere (recommended), Balanced (highest resolution first), Best quality (not for older devices) |
+| Compatibility | Balanced (highest resolution first, the default), Plays everywhere (older devices too), Best quality (not for older devices) |
 | Audio tracks | The original language only, or dubbed languages too as extra tracks in one MP4 or MKV file; the download options list the languages a video has |
-| Subtitles | None, embedded, separate SRT or WebVTT files, or both; pick the languages, and optionally the site's automatic captions |
+| Subtitles | Pick from the languages a video has (or common languages for a playlist); inside the video, as separate SRT or WebVTT files, or both; optionally the site's automatic captions |
 
 | Audio | Choices |
 |---|---|
@@ -243,7 +245,7 @@ Sign-ins are saved encrypted for your Windows account (DPAPI), so a copied file 
 
 ## Subscriptions
 
-On the **Subscriptions** page, subscribe to a channel or playlist with a preset and a check interval (every hour to once a day). By default only uploads from now on download; turn on **Earlier uploads too** to get the whole channel first. New uploads join the queue on their own, or wait for **Download new** when automatic downloads are off. Scheduled streams and premieres wait in the queue and record when they start.
+On the **Subscriptions** page, subscribe to a channel or playlist as video or audio (with the defaults in Preferences at that time) and a check interval (every hour to once a day). By default only uploads from now on download; turn on **Earlier uploads too** to get the whole channel first. New uploads join the queue on their own, or wait for **Download new** when automatic downloads are off. Scheduled streams and premieres wait in the queue and record when they start.
 
 A subscription shares its archive with downloads of the same channel, so nothing downloads twice. A channel is checked newest first and stops at the first upload you have; a playlist is read whole each time (up to 2,000 videos), since new videos are usually added at its end. Checks run while the app is open or in the tray; turn on **Start with Windows** to keep checking after a restart. Import your YouTube subscriptions from [Google Takeout](https://takeout.google.com/)'s `subscriptions.csv`, or export and import the app's own list.
 
@@ -268,7 +270,7 @@ The download options show **Live now** or **Starts** for streams. A live stream 
 
 The companion adds a toolbar button and a right-click entry to Chrome, Edge, Opera, Brave, and Vivaldi:
 
-- **Download this page**, or right-click a link or video: the app downloads it with your default preset.
+- **Download this page**, or right-click a link or video: the app downloads it with your Video or Audio defaults, or opens Download options for it when Smart mode is off.
 - **Sign this site in to the app**: sends that site's cookies to the app. The extension asks for permission to read that one site's cookies on that click and gives the permission back right after.
 
 The installers connect the extension to the app. Until the extension is in the Chrome Web Store, load it from the release's zip: unzip it, open `chrome://extensions`, turn on Developer mode, and choose **Load unpacked**.
@@ -308,7 +310,8 @@ gfgmd "https://vimeo.com/123456" --subs "en.*" --embed-subs --limit-rate 2M
 | `--embed` | | Embed the thumbnail, details, and chapters |
 | `--sponsorblock mark\|remove` | | SponsorBlock on YouTube |
 | `--limit-rate RATE`, `--proxy URL`, `--force-ipv4` | | Network |
-| `--items SPEC` | | Which playlist videos, by number, such as `1:5,8` |
+| `--whole-playlist` | | A link to a video inside a playlist downloads the whole playlist (without it, only that video) |
+| `--items SPEC` | | Which playlist videos, by number, such as `1:5,8` (a link to a video inside a playlist then means the playlist) |
 | `--live-from-start`, `--wait-for-video` | | Live streams |
 | `--strict` | | Exit with status 1 when any video couldn't be downloaded |
 | `-v`, `--verbose` | | Also print yt-dlp's warnings and its own error text |
@@ -469,7 +472,7 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 ## Changelog
 
 ### v1.0.0 - November 2026 *(current)*
-- 🖥️ The first release of the desktop app: queue, Options panel, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
+- 🖥️ The first release of the desktop app: queue, Download options, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
 - 🌐 Every site yt-dlp supports, with YouTube channels and their tabs, and TikToks, Reels, X posts, and other short-form links
 - 🎵 Music as MP3 320 kbps or other formats and bitrates, with square covers, tags, and synced lyrics
 - ▶️ Built-in video and music players
@@ -478,7 +481,7 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 - 🧰 yt-dlp, FFmpeg, and Deno downloaded, verified, and kept current by the app
 - ⌨️ `gfgmd` replaces the YouTube Video Downloader script (`download_playlist.py`) with the same options and new ones; yt-dlp configuration files and plugins are always ignored (the script still loaded `config.txt`), and private or removed videos no longer keep a run retrying forever; Python 3.12 or later
 
-Re-released on 23 November 2026 with these changes since its first build of 19 November. The in-app updater sees the same version number, so install this build over the first one to get them; your library, settings, and sign-ins stay.
+Re-released on 26 November 2026 with these changes since its first build of 19 November. The in-app updater sees the same version number, so install this build over the first one to get them; your library, settings, and sign-ins stay.
 
 - 🎵 **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download
 - 🗑️ **Remove** deletes a download's unfinished parts, asks only for unfinished downloads or ones with saved files, and can move saved files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
@@ -511,6 +514,14 @@ Re-released on 23 November 2026 with these changes since its first build of 19 N
 - ☕ **Keep the PC awake while downloading** (on by default) explains in Preferences what it does: no sleep or hibernation on its own while downloads run or wait to try again
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry; the portable `.7z` held the app in a `dist\gfgRoyal-Media-Downloader` folder away from its portable marker, so the unpacked copy kept its data in %APPDATA% instead of beside itself
 - 🤖 `gfgmd --json` reports in JSON lines for scripts and AI agents, `gfgmd --help` shows examples, and `gfgmd skill install` installs the [Agent Skill](skills/gfgmd/SKILL.md) that teaches Claude Code, Codex, Cursor, and other agents to use `gfgmd`
+- 💡 **Smart mode** (on by default): Download downloads at once with the Video or Audio defaults from Preferences; off, it opens Download options first. It replaces presets, and the preset you used carries over as your defaults
+- 🎚️ A **Video | Audio** switch beside the link box replaces the preset list; **Download** sits inside the link box and shows once it holds a link
+- ❓ A link to one video inside a playlist asks **Download this video** or **Download the whole playlist**, and can remember the answer; `gfgmd` downloads just the video unless given `--whole-playlist`
+- ⚡ Link details load faster: reading starts on paste, a YouTube link's title and thumbnail show within about a second, a playlist lists its videos as they are read, and a link read once opens again at once
+- 🗂️ **Download options** keep the everyday choices in view and fold compatibility, subtitle placement, what goes in the file, the cover's shape, and SponsorBlock under **Advanced**; **Subtitles** lists the subtitles each video has (the creator's, the automatic captions, and folded machine translations); several links share one set of choices
+- ⚙️ Every choice in Download options has a default in Preferences (video quality, recording live streams from the start, and audio's own cover, details, and chapter choices are new); SponsorBlock moved to Preferences > Downloads
+- 🐞 Fixed: a file played in the built-in players couldn't be moved to the Recycle Bin until another file played or the app quit; deleting it while its audio was being extracted failed too. A file Windows can't move now stays in the Library and is named in the message
+- 🐞 Fixed: reading a link ignored the proxy and IPv4 choices in Preferences, and a link read before another could show its details or error over the newer one
 
 [Full release notes →](release_notes/)
 

@@ -26,6 +26,7 @@ MODULES = [
     "gfgmd.core.options",
     "gfgmd.core.platform",
     "gfgmd.core.progress",
+    "gfgmd.core.quick_info",
     "gfgmd.core.retry",
     "gfgmd.core.runner",
     "gfgmd.core.schedule",
