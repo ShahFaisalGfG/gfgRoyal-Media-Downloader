@@ -6,9 +6,10 @@
 #
 # Flow: a check at most once a day fetches the signed manifest. With automatic installs on, a newer
 # version downloads in the background (on a metered connection only when the app allows it, else
-# once the connection isn't metered) and installs when the app closes; "Restart now" installs it at once and starts the new version. Before anything runs, the
-# saved manifest's signature and every file's SHA-256 are checked again, through a lock that keeps
-# the files from changing until the installer has started.
+# once the connection isn't metered) and installs when the app closes; "Restart now" installs it
+# at once and starts the new version. Before anything runs, the saved manifest's signature and
+# every file's SHA-256 are checked again, through a lock that keeps the files from changing until
+# the installer has started.
 
 from __future__ import annotations
 
