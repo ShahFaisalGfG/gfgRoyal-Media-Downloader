@@ -121,6 +121,8 @@ Button {
         color: !picker.enabled ? Theme.surfaceAlt : picker.hovered ? Theme.surfaceHover : Theme.surface
         border.width: picker.visualFocus ? 2 : 1
         border.color: picker.visualFocus ? Theme.focusRing : picker.enabled ? Theme.inputBorder : Theme.border
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+        Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
 
         Icon {
             x: parent.width - width - 10
@@ -227,12 +229,17 @@ Button {
                             color: row.ticked ? Theme.accentFill : Theme.surface
                             border.width: row.ticked ? 0 : 1
                             border.color: Theme.inputBorder
+                            Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+                            // As AppCheckBox: the tick grows into place.
                             Icon {
                                 anchors.centerIn: parent
-                                visible: row.ticked
+                                opacity: row.ticked ? 1 : 0
+                                scale: row.ticked ? 1 : 0.4
                                 name: "checkMark"
                                 size: 12
                                 color: Theme.textOnAccent
+                                Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+                                Behavior on scale { NumberAnimation { duration: Theme.motionMedium; easing.type: Easing.OutBack } }
                             }
                         }
                         Icon {
@@ -258,6 +265,7 @@ Button {
                     background: Rectangle {
                         color: row.highlighted || (row.hovered && row.enabled) ? Theme.accentSoft : "transparent"
                         radius: Theme.radius
+                        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
                     }
                 }
             }

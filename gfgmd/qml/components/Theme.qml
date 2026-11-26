@@ -10,6 +10,15 @@ QtObject {
 
     // Bound by every AppWindow to appController.currentTheme.
     property bool dark: false
+    // Bound by every AppWindow to appController.animations: false while Windows' Animation effects
+    // setting is off, which makes every duration below 0.
+    property bool motion: true
+
+    // ── Motion ───────────────────────────────────────────────────────────────
+    // Short, so a control answers at once and only eases into its new look.
+    readonly property int motionFast:   motion ? 120 : 0  // hover, press, and checked colors
+    readonly property int motionMedium: motion ? 180 : 0  // fades: dialogs, toasts, check marks
+    readonly property int motionSlow:   motion ? 260 : 0  // Smart Mode's bulb lighting up
 
     // ── Surfaces ─────────────────────────────────────────────────────────────
     readonly property color background:   dark ? "#15171c" : "#f3f4f6"
@@ -40,6 +49,10 @@ QtObject {
     readonly property color warning:     dark ? "#e0b341" : "#8a5a00"
     readonly property color warningSoft: dark ? "#332a16" : "#fbf2dd"
     readonly property color focusRing:   dark ? "#fda4af" : "#be123c"
+    // Smart Mode's lit bulb: a golden glass, with its edge, base, and rays in a deeper gold that
+    // stands out from the warm tint (warningSoft) behind it.
+    readonly property color bulbLit:     dark ? "#ffcc33" : "#f5b800"
+    readonly property color bulbEdge:    dark ? "#ffe08a" : "#8a5a00"
     // The overlay shown while links or files are dragged over the window.
     readonly property color dropFill:    dark ? "#33c81e4a" : "#1abe123c"
     // Dims the window behind a dialog. Dark in both themes: a pale wash over the dark theme looks
@@ -56,6 +69,10 @@ QtObject {
     readonly property color overlayChecked: "#33ffffff"
     readonly property color overlayPressed: "#40ffffff"
     // Toasts use the opposite theme's colors so they stand out from the window.
+    // Tooltips (GfgmdStyle/ToolTip.qml): a raised card in the window's own theme, as Windows 11 draws them.
+    readonly property color toolTip:       dark ? "#2b303b" : "#ffffff"
+    readonly property color toolTipBorder: dark ? "#4a5263" : "#c3c9d2"
+    readonly property color toolTipShadow: dark ? "#59000000" : "#1f000000"
     readonly property color inverseSurface: dark ? "#e8eaee" : "#22262e"
     readonly property color inverseText:    dark ? "#1a1d23" : "#ffffff"
     // The title bar's close button turns Windows red on hover in both themes.

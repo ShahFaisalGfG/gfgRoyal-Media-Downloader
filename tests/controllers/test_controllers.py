@@ -242,6 +242,20 @@ def test_the_link_box_knows_a_link_by_its_form(qapp):
     assert not app.validLink("hello there") and not app.validLink("ftp://example.com/x") and not app.validLink("")
 
 
+def test_controls_stop_moving_when_windows_animations_are_off(qapp):
+    """Theme.motion follows Windows' Animation effects, read again when a window regains focus."""
+    from gfgmd.controllers import app_ctrl
+    with patch.object(app_ctrl, "_system_animations", return_value=True):
+        app = app_ctrl.AppController()
+    assert app.animations
+    changes = []
+    app.animationsChanged.connect(lambda: changes.append(app.animations))
+    with patch.object(app_ctrl, "_system_animations", return_value=False):
+        app.detectTheme()
+        app.detectTheme()
+    assert changes == [False] and not app.animations
+
+
 def test_analyze_reports_errors(qapp, context, paused_queue):
     controller = AnalyzeController(context, paused_queue)
     controller.analyze("ftp://nope")

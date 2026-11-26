@@ -55,8 +55,13 @@ ApplicationWindow {
         property: "dark"
         value: appController.currentTheme === "dark"
     }
+    Binding {
+        target: Theme
+        property: "motion"
+        value: appController.animations
+    }
 
-    // Follow a Windows light/dark switch whenever the window regains focus.
+    // Follow a Windows light/dark or animation switch whenever the window regains focus.
     onActiveChanged: if (active) appController.detectTheme()
 
     Component.onCompleted: win.placeOnScreen()

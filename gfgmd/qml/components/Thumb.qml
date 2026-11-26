@@ -3,8 +3,8 @@ import QtQuick
 
 // A media thumbnail from the disk cache, with an icon for its kind until (or unless) it loads.
 // Songs show a square cover in the middle, as music players show artwork, and videos fill the
-// frame; a badge in the corner names the kind and, given `label`, the format ("MP3", "MP4"), so
-// the two tell apart at a glance in any list.
+// frame; a badge in the corner names the kind ("video", "audio", "live", or "playlist") and, given
+// `label`, the format ("MP3", "MP4"), so they tell apart at a glance in any list.
 Rectangle {
     id: thumb
 
@@ -12,7 +12,8 @@ Rectangle {
     property string kind: "video"
     property string label: ""
     readonly property bool _audio: thumb.kind === "audio"
-    readonly property string _kindIcon: thumb._audio ? "audio" : thumb.kind === "live" ? "live" : "video"
+    readonly property string _kindIcon: thumb._audio ? "audio" : thumb.kind === "live" ? "live"
+                                      : thumb.kind === "playlist" ? "list" : "video"
 
     implicitWidth: 96
     implicitHeight: 54

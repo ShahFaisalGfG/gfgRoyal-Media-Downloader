@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from gfgmd.config.defaults import UpdateDefaults
 from gfgmd.core.tool_install import (
     Package,
     ToolInstallError,
@@ -22,6 +23,7 @@ from gfgmd.core.tool_install import (
 )
 from gfgmd.core.tools import TOOL_NAMES, ToolsMissing, managed_tools, path_tools, read_manifest, tool_version
 from gfgmd.services.context import AppContext
+from gfgmd.services.update_install import is_metered
 from gfgmd.utils.logging import write_log
 
 # After a failure that suggests yt-dlp is out of date, look for an update at most this often.
@@ -33,10 +35,18 @@ Progress = Callable[[str, int, int], None]
 class ToolManager:
     """The managed tools' state and changes."""
 
-    def __init__(self, context: AppContext) -> None:
+    def __init__(self, context: AppContext, metered: Callable[[], bool] = is_metered) -> None:
         self._context = context
         self._lock = threading.Lock()
         self._last_check = 0.0
+        self._metered = metered
+
+    def hold_updates(self) -> bool:
+        """True when automatic tool updates should wait: a metered or roaming connection, unless
+        Preferences > Updates and logs allows updates over one."""
+        if self._context.settings().get("updates", {}).get("allow_metered", UpdateDefaults.ALLOW_METERED):
+            return False
+        return self._metered()
 
     @property
     def tools_root(self):
@@ -133,11 +143,16 @@ class ToolManager:
         """Install a newer yt-dlp when the managed copy is in use; True when it changed.
 
         Called from download threads after errors that a newer yt-dlp usually fixes, so it checks
-        at most once an hour unless forced.
+        at most once an hour unless forced. On a metered connection it updates only when forced or
+        allowed (see hold_updates): the download then fails with its Update tools button, which still
+        works there.
         """
         if str(self._prefs().get("source", "managed")) != "managed":
             return False
         if "yt-dlp" not in managed_tools(self._context.tools_root):
+            return False
+        if not force and self.hold_updates():
+            write_log("yt-dlp wasn't updated after a download failure: the connection is metered", "general")
             return False
         with self._lock:
             now = time.monotonic()

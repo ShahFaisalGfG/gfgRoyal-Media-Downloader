@@ -57,7 +57,6 @@ Item {
                 id: addButton
                 text: "Add site"
                 iconName: "add"
-                toolTipText: "Add a site that isn't listed"
                 onClicked: {
                     var key = signInsController.addSite(otherSite.text)
                     if (key.length > 0) otherSite.text = ""
@@ -163,14 +162,12 @@ Item {
                             kind: "ghost"
                             text: "Sign out"
                             iconName: "close"
-                            toolTipText: "Delete this sign-in from this PC"
                             onClicked: signInsController.signOut(site.siteKey)
                         }
                         AppButton {
                             visible: site.windowOpen
                             kind: "ghost"
                             text: "Cancel"
-                            toolTipText: "Close the sign-in window without saving"
                             onClicked: signInsController.cancelBrowserWindow(site.siteKey)
                         }
                         AppButton {
@@ -178,7 +175,6 @@ Item {
                             kind: "primary"
                             text: "Done"
                             iconName: "check"
-                            toolTipText: "Signed in? The app closes the window and saves the sign-in"
                             onClicked: signInsController.finishBrowserWindow(site.siteKey)
                         }
                         AppButton {

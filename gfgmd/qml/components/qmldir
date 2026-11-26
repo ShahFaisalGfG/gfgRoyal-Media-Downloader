@@ -35,6 +35,7 @@ SegmentedChoice 1.0 SegmentedChoice.qml
 SelectionBar 1.0 SelectionBar.qml
 SelectMark 1.0 SelectMark.qml
 SettingRow 1.0 SettingRow.qml
+SmartBulb 1.0 SmartBulb.qml
 StatusBadge 1.0 StatusBadge.qml
 StyledComboBox 1.0 StyledComboBox.qml
 StyledSpinBox 1.0 StyledSpinBox.qml

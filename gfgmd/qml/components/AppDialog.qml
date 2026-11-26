@@ -76,6 +76,6 @@ Dialog {
 
     Overlay.modal: Rectangle {
         color: Theme.scrim
-        Behavior on opacity { NumberAnimation { duration: 150 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.motionMedium } }
     }
 }

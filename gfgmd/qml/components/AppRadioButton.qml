@@ -29,14 +29,19 @@ RadioButton {
         color: !control.enabled ? Theme.surfaceAlt : control.hovered ? Theme.surfaceHover : Theme.surface
         border.width: control.checked ? 2 : 1
         border.color: !control.enabled ? Theme.border : control.checked ? Theme.accentFill : Theme.inputBorder
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+        Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
 
+        // The dot grows into place as the ring takes the accent.
         Rectangle {
             anchors.centerIn: parent
             width: 8
             height: 8
             radius: width / 2
-            visible: control.checked
+            scale: control.checked ? 1 : 0
+            visible: scale > 0
             color: control.enabled ? Theme.accentFill : Theme.border
+            Behavior on scale { NumberAnimation { duration: Theme.motionMedium; easing.type: Easing.OutBack } }
         }
 
         Rectangle {

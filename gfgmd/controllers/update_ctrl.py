@@ -5,8 +5,8 @@
 # logging, the mutexes the installer waits for) comes in through UpdaterConfig.
 #
 # Flow: a check at most once a day fetches the signed manifest. With automatic installs on, a newer
-# version downloads in the background (not on a metered connection) and installs when the app
-# closes; "Restart now" installs it at once and starts the new version. Before anything runs, the
+# version downloads in the background (on a metered connection only when the app allows it, else
+# once the connection isn't metered) and installs when the app closes; "Restart now" installs it at once and starts the new version. Before anything runs, the
 # saved manifest's signature and every file's SHA-256 are checked again, through a lock that keeps
 # the files from changing until the installer has started.
 
@@ -80,6 +80,8 @@ class UpdaterConfig:
     # How the user ends the app, as the messages say it: "quit" where closing the window keeps it
     # running in the tray (gfgShield).
     exit_word: str = "close"
+    # True when automatic installs may download over a metered connection (a preference, off by default).
+    allow_metered: Callable[[], bool] = lambda: False
 
 
 class _Signals(QObject):
@@ -328,7 +330,7 @@ class UpdateController(QObject):
         auto_check, auto_install = self._config.read_prefs()
         if auto_check and self._status in (IDLE, UP_TO_DATE, ERROR):
             self._first_check.start()
-        if auto_install and self._status == AVAILABLE and self.canDownload and not self._metered:
+        if auto_install and self._status == AVAILABLE and self.canDownload and not self._held_by_metered():
             self._start_download()
 
     # ── Lifecycle (called from app.py) ────────────────────────────────────
@@ -397,7 +399,13 @@ class UpdateController(QObject):
     # ── Checking ──────────────────────────────────────────────────────────
 
     def _maybe_check(self) -> None:
-        auto_check, _ = self._config.read_prefs()
+        auto_check, auto_install = self._config.read_prefs()
+        if (self._status == AVAILABLE and auto_install and self.canDownload and self._metered
+                and not install.is_metered()):
+            # The metered connection that held the download back is gone; download now, not tomorrow.
+            self._metered = False
+            self._start_download()
+            return
         if not auto_check or self._status in (CHECKING, DOWNLOADING, READY, FAILED):
             return
         if self._saved.check_due(CHECK_INTERVAL_S):
@@ -452,8 +460,12 @@ class UpdateController(QObject):
         if manual:
             self.notice.emit(self._message)
         _, auto_install = self._config.read_prefs()
-        if auto_install and self.canDownload and not metered:
+        if auto_install and self.canDownload and not self._held_by_metered():
             self._start_download()
+
+    def _held_by_metered(self) -> bool:
+        """True when a metered connection holds automatic downloads back (the app can allow them)."""
+        return self._metered and not self._config.allow_metered()
 
     def _restore_after_check(self) -> bool:
         """Go back to the state a check interrupted; True when a downloaded update is waiting."""
@@ -594,7 +606,7 @@ class UpdateController(QObject):
         if not self.canDownload:
             return f"{self._app} {version} is available. Get it from the download page."
         _, auto_install = self._config.read_prefs()
-        if auto_install and self._metered:
+        if auto_install and self._held_by_metered():
             return (f"{self._app} {version} is available. It downloads on its own once you're off mobile data "
                     "or another limited connection.")
         return f"{self._app} {version} is available."

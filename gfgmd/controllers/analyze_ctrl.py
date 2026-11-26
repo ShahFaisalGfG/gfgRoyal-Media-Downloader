@@ -101,7 +101,7 @@ class AnalyzeController(QObject):
         # The link as given, and for a video inside a playlist which one is read ("video", "playlist").
         self._link = ""
         self._scope = ""
-        # Several links shown at once (Smart mode off): one set of choices for all of them.
+        # Several links shown at once (Smart Mode off): one set of choices for all of them.
         self._links: list[str] = []
         self._error = ""
         self._action = ""
@@ -339,7 +339,7 @@ class AnalyzeController(QObject):
 
     @Slot("QVariantList")
     def showLinks(self, links: list[str]) -> None:
-        """Show several links with one set of choices (Smart mode off); one link is read as usual."""
+        """Show several links with one set of choices (Smart Mode off); one link is read as usual."""
         links = [str(link) for link in links if str(link).strip()]
         if len(links) == 1:
             self.analyze(links[0])

@@ -15,7 +15,7 @@
 
 ---
 
-gfgRoyal Media Downloader saves a single video, a whole playlist, a channel, a Short or Reel, or a live stream as clean, quality-labeled files such as `Episode 001 (1080p).mp4`, and music as MP3 (320 kbps by default) or another format with its cover art and synced lyrics. Paste a link and press Download: Smart mode downloads at once with your video or audio defaults, or turn it off to pick the quality, audio tracks, subtitles, and the exact videos you want. Play what you downloaded in the built-in video and music players. Downloads resume after a dropped connection, a crash, or a restart, and the app keeps its own copies of yt-dlp, FFmpeg, and Deno up to date so site changes don't break it.
+gfgRoyal Media Downloader saves a single video, a whole playlist, a channel, a Short or Reel, or a live stream as clean, quality-labeled files such as `Episode 001 (1080p).mp4`, and music as MP3 (320 kbps by default) or another format with its cover art and synced lyrics. Paste a link and press Download: Smart Mode downloads at once with your video or audio defaults, or turn it off to pick the quality, audio tracks, subtitles, and the exact videos you want. Play what you downloaded in the built-in video and music players. Downloads resume after a dropped connection, a crash, or a restart, and the app keeps its own copies of yt-dlp, FFmpeg, and Deno up to date so site changes don't break it.
 
 > *Paste once. Come back to a finished playlist.*
 
@@ -82,7 +82,7 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - 🧩 **Companion extension**: send the page you are watching to the app, or sign a site in, from Chrome, Edge, Opera, Brave, or Vivaldi
 - 🗄️ **Library**: every finished download, searchable, with each playlist and channel grouped in its own order, and Play, Play all, show in folder, extract audio, download again, and Recycle Bin
 - ⌨️ **Command line**: `gfgmd` keeps the original script's options and exit codes for scripts and scheduled tasks
-- 🎨 **Built for everyday use**: light and dark themes, keyboard shortcuts, tooltips everywhere, tray icon, notifications, and in-app updates
+- 🎨 **Built for everyday use**: light and dark themes, buttons and switches that ease between states (still when Windows' Animation effects is off), keyboard shortcuts, tooltips on icon buttons and the choices that need explaining, tray icon, notifications, and in-app updates
 
 ---
 
@@ -106,13 +106,15 @@ Windows 10 version 1809 or later, 64-bit. On first start the app offers to downl
 
 The app checks GitHub once a day and installs updates when you quit, after checking the release's signature and checksums. Preferences > Updates and logs turns either step off. Your downloads, library, sign-ins, and settings stay.
 
+On mobile data or another metered connection, nothing updates on its own: app updates wait to download, and yt-dlp, FFmpeg, and Deno wait to update, until you're off it. **Download** in the update notice and **Update tools** in Preferences > Tools still work there, and **Update on metered connections** in Preferences > Updates and logs (off by default) lets updates run there too.
+
 ---
 
 ## Quick Start
 
 1. Copy a link from your browser.
 2. Press **Ctrl+V** in the app (or the paste button inside the empty link box), choose **Video** or **Audio** beside the box, and press **Download**, which appears inside the box once it holds a link.
-3. With **Smart** on (the default), Download downloads at once with your Video or Audio defaults from Preferences. Turn **Smart** off and Download opens **Download options** first, to choose the quality, subtitles, and which videos; Ctrl+Shift+O opens them either way.
+3. With **Smart Mode** on (the default; its button sits at the right of the page tabs and its bulb glows while it is on), Download downloads at once with your Video or Audio defaults from Preferences. Turn **Smart Mode** off and Download opens **Download options** first, to choose the quality, subtitles, and which videos; Ctrl+Shift+O opens them either way.
 
 The app starts reading a link as soon as it is pasted, so Download options are usually ready when they open; a YouTube link's title and thumbnail show within about a second. A link to one video watched inside a playlist (`watch?v=...&list=...`) asks whether to download that video or the whole playlist, and can remember the answer (Preferences > Downloads changes it).
 
@@ -149,7 +151,7 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 
 ## Video and Audio Formats
 
-Preferences > Video and Audio hold the defaults: Smart mode downloads with them, and Download options start from them. Download options show the everyday choices first (quality and file type, or the audio format and quality; subtitles; dubbed tracks; lyrics) and fold the rest under **Advanced**: compatibility, where subtitles go and their file type, what goes inside the file, the cover's shape, and SponsorBlock. For one video, **Subtitles** lists the subtitles it has: the creator's own, the captions the site made from its speech, and the site's machine translations, folded under a search box. Several links pasted at once share one set of choices.
+Preferences > Video and Audio hold the defaults: Smart Mode downloads with them, and Download options start from them. Download options show the everyday choices first (quality and file type, or the audio format and quality; subtitles; dubbed tracks; lyrics) and fold the rest under **Advanced**: compatibility, where subtitles go and their file type, what goes inside the file, the cover's shape, and SponsorBlock. For one video, **Subtitles** lists the subtitles it has: the creator's own, the captions the site made from its speech, and the site's machine translations, folded under a search box. Several links pasted at once share one set of choices.
 
 | Video | Choices |
 |---|---|
@@ -178,7 +180,7 @@ Audio downloads save the song's lyrics as `<song>.lrc` beside the file, timed li
 
 **Extract audio** in a finished download's menu (or a library video's) turns a video you already downloaded into a song, without downloading it again. It offers the audio download's choices, starting from Preferences: format and bitrate, the cover and its shape, the tags and chapters, and lyrics. The cover is the thumbnail the video holds, the artist and title are cleaned up as in audio downloads, and the lyrics come from the video's caption files, then LRCLIB. The extraction runs in the download list with its progress, and the song takes the video's place in the audio folder: a single video's song goes straight into it, and a playlist video's into a folder of the playlist's name.
 
-**Remove** in the same menu takes a download off the list and always deletes its unfinished parts. A cancelled or failed download that saved nothing goes at once; an unfinished one asks first; one that saved files asks too, and **Also move the saved files to the Recycle Bin** sends them there with their captions and lyrics (left unticked, they stay in the folder and the Library).
+**Cancel and delete unfinished files** in the same menu stops a download, deletes its unfinished parts, and takes it off the list at once; the files it saved stay in the Library. **Remove** takes a download off the list and always deletes its unfinished parts too. A cancelled or failed download that saved nothing goes at once; an unfinished one asks first; one that saved files asks too, and **Also move the saved files to the Recycle Bin** sends them there with their captions and lyrics (left unticked, they stay in the folder and the Library).
 
 ---
 
@@ -270,7 +272,7 @@ The download options show **Live now** or **Starts** for streams. A live stream 
 
 The companion adds a toolbar button and a right-click entry to Chrome, Edge, Opera, Brave, and Vivaldi:
 
-- **Download this page**, or right-click a link or video: the app downloads it with your Video or Audio defaults, or opens Download options for it when Smart mode is off.
+- **Download this page**, or right-click a link or video: the app downloads it with your Video or Audio defaults, or opens Download options for it when Smart Mode is off.
 - **Sign this site in to the app**: sends that site's cookies to the app. The extension asks for permission to read that one site's cookies on that click and gives the permission back right after.
 
 The installers connect the extension to the app. Until the extension is in the Chrome Web Store, load it from the release's zip: unzip it, open `chrome://extensions`, turn on Developer mode, and choose **Load unpacked**.
@@ -484,7 +486,7 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 Re-released on 26 November 2026 with these changes since its first build of 19 November. The in-app updater sees the same version number, so install this build over the first one to get them; your library, settings, and sign-ins stay.
 
 - 🎵 **Extract audio** from a downloaded video, with the same format, cover, tag, and lyrics choices as an audio download
-- 🗑️ **Remove** deletes a download's unfinished parts, asks only for unfinished downloads or ones with saved files, and can move saved files to the Recycle Bin; Cancel now also deletes a paused download's unfinished files
+- 🗑️ **Remove** deletes a download's unfinished parts, asks only for unfinished downloads or ones with saved files, and can move saved files to the Recycle Bin; **Cancel and delete unfinished files** stops a download, deletes its unfinished parts (a paused one's too), and takes it off the list
 - 🎬 The default preset is **Video, best quality MP4**, which replaces the 1080p and 720p MP4 presets
 - ☑️ Select several downloads or library files (boxes on the thumbnails, Ctrl+click, Shift+click, Ctrl+A) and act on them together; songs and videos are told apart by their cover shape and a type badge
 - 🔽 **Options** became the arrow on the **Download** button, which opens the download options for the link and closes them again
@@ -514,14 +516,17 @@ Re-released on 26 November 2026 with these changes since its first build of 19 N
 - ☕ **Keep the PC awake while downloading** (on by default) explains in Preferences what it does: no sleep or hibernation on its own while downloads run or wait to try again
 - 🐞 Fixed: choosing Audio only in the download options froze the app, then made two of its rows blink; a single click in the video player paused before a double click went fullscreen; download menus cut their text off; ticking a download in progress let go of it a moment later; a step yt-dlp names without "FFmpeg" read "Processing"; a YouTube playlist subscription's uploads went to a folder named "NA"; "Download again" could fetch a song twice after a retry; the portable `.7z` held the app in a `dist\gfgRoyal-Media-Downloader` folder away from its portable marker, so the unpacked copy kept its data in %APPDATA% instead of beside itself
 - 🤖 `gfgmd --json` reports in JSON lines for scripts and AI agents, `gfgmd --help` shows examples, and `gfgmd skill install` installs the [Agent Skill](skills/gfgmd/SKILL.md) that teaches Claude Code, Codex, Cursor, and other agents to use `gfgmd`
-- 💡 **Smart mode** (on by default): Download downloads at once with the Video or Audio defaults from Preferences; off, it opens Download options first. It replaces presets, and the preset you used carries over as your defaults
+- 💡 **Smart Mode** (on by default): Download downloads at once with the Video or Audio defaults from Preferences; off, it opens Download options first. Its button sits at the right of the page tabs, and its bulb glows golden while it is on. It replaces presets, and the preset you used carries over as your defaults
 - 🎚️ A **Video | Audio** switch beside the link box replaces the preset list; **Download** sits inside the link box and shows once it holds a link
-- ❓ A link to one video inside a playlist asks **Download this video** or **Download the whole playlist**, and can remember the answer; `gfgmd` downloads just the video unless given `--whole-playlist`
+- ❓ A link to one video inside a playlist asks **Download this video** or **Download the whole playlist**, showing the video's and the playlist's titles and pictures, and can remember the answer; `gfgmd` downloads just the video unless given `--whole-playlist`
 - ⚡ Link details load faster: reading starts on paste, a YouTube link's title and thumbnail show within about a second, a playlist lists its videos as they are read, and a link read once opens again at once
 - 🗂️ **Download options** keep the everyday choices in view and fold compatibility, subtitle placement, what goes in the file, the cover's shape, and SponsorBlock under **Advanced**; **Subtitles** lists the subtitles each video has (the creator's, the automatic captions, and folded machine translations); several links share one set of choices
 - ⚙️ Every choice in Download options has a default in Preferences (video quality, recording live streams from the start, and audio's own cover, details, and chapter choices are new); SponsorBlock moved to Preferences > Downloads
 - 🐞 Fixed: a file played in the built-in players couldn't be moved to the Recycle Bin until another file played or the app quit; deleting it while its audio was being extracted failed too. A file Windows can't move now stays in the Library and is named in the message
 - 🐞 Fixed: reading a link ignored the proxy and IPv4 choices in Preferences, and a link read before another could show its details or error over the newer one
+- ✨ Buttons, switches, check boxes, and menus ease between states, and the Advanced arrow turns as it opens; nothing moves while Windows' Animation effects is off
+- 💬 Tooltips match the light or dark theme, show just below what they describe (above it at the window's bottom edge), and appear only on icon buttons and choices that need explaining
+- 📶 On mobile data or another metered connection nothing updates on its own: app updates wait to download and yt-dlp, FFmpeg, and Deno wait to update, while **Download** in the update notice and **Update tools** still work; **Update on metered connections** in Preferences (off by default) lets them run there
 
 [Full release notes →](release_notes/)
 

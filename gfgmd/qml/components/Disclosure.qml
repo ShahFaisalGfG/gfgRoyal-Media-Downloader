@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 
@@ -24,10 +26,18 @@ ColumnLayout {
             kind: "ghost"
             compact: true
             text: disclosure.title
-            iconName: disclosure.expanded ? "chevronDown" : "chevronRight"
-            // Also its accessible description, so the summary is read while the part is closed.
-            toolTipText: disclosure.expanded ? "Hide these choices"
-                : "Show more choices" + (disclosure.summary.length > 0 ? ": " + disclosure.summary : "")
+            // One chevron that turns down as the part opens.
+            iconComponent: Component {
+                Icon {
+                    name: "chevronRight"
+                    size: Theme.iconSm
+                    color: header.enabled ? Theme.text : Theme.textMuted
+                    rotation: disclosure.expanded ? 90 : 0
+                    Behavior on rotation { NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutQuad } }
+                }
+            }
+            // Screen readers hear the summary with the header while the part is closed.
+            Accessible.description: disclosure.expanded ? "" : disclosure.summary
             // As the Library's playlist rows: the name says whether the part is open.
             Accessible.name: disclosure.title + (disclosure.expanded ? ", open" : ", closed")
             onClicked: disclosure.expanded = !disclosure.expanded
@@ -50,6 +60,8 @@ ColumnLayout {
         id: body
         Layout.fillWidth: true
         visible: disclosure.expanded
+        opacity: disclosure.expanded ? 1 : 0
         spacing: Theme.spaceSm
+        Behavior on opacity { NumberAnimation { duration: Theme.motionMedium } }
     }
 }

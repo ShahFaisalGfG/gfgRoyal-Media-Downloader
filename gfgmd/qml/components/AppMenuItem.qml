@@ -43,5 +43,6 @@ MenuItem {
         radius: Theme.radius
         color: !item.enabled || !item.highlighted ? "transparent"
             : item.danger ? Theme.dangerSoft : Theme.surfaceHover
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
     }
 }

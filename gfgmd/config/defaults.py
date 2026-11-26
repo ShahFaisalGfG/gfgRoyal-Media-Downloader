@@ -37,10 +37,12 @@ oyB9smRSo81o5hzMlv96+moKAFBzDO4yhcr52s7vgIeMtTUO7L6E361Ihw==
 
 
 class UpdateDefaults:
-    """Default update preferences: check once a day, and install in the background."""
+    """Default update preferences: check once a day, and install in the background, but not over a
+    metered connection (mobile data, a hotspot, or one Windows was told to treat as limited)."""
 
     AUTO_CHECK = True
     AUTO_INSTALL = True
+    ALLOW_METERED = False
 
 
 class ThemeDefaults:
@@ -201,7 +203,7 @@ class DownloadDefaults:
         ("Playlist number - Title", "index-title"),
     ]
     FILENAME_STYLES = [code for _, code in FILENAME_OPTIONS]
-    # The Video | Audio switch beside the link box: which of the Smart mode defaults a download uses.
+    # The Video | Audio switch beside the link box: which of the Smart Mode defaults a download uses.
     KIND_OPTIONS = [
         ("Video", "video"),
         ("Audio", "audio"),
@@ -265,7 +267,7 @@ def get_default_settings() -> Dict[str, Any]:
             "folder": "",
             # "" uses Music\gfgRoyal Media Downloader for audio downloads.
             "audio_folder": "",
-            # Smart mode: Download downloads at once with the Video or Audio defaults below ("formats");
+            # Smart Mode: Download downloads at once with the Video or Audio defaults below ("formats");
             # off, it opens Download options first. "kind" is the Video | Audio switch's choice.
             "smart_mode": True,
             "kind": "video",
@@ -286,7 +288,7 @@ def get_default_settings() -> Dict[str, Any]:
             "clear_finished_on_exit": True,
         },
         "formats": {
-            # The Smart mode defaults and Download options' starting choices. Video:
+            # The Smart Mode defaults and Download options' starting choices. Video:
             "max_height": 0,
             "container": "mp4",
             "codec_profile": "balanced",
@@ -367,6 +369,7 @@ def get_default_settings() -> Dict[str, Any]:
         "updates": {
             "auto_check": UpdateDefaults.AUTO_CHECK,
             "auto_install": UpdateDefaults.AUTO_INSTALL,
+            "allow_metered": UpdateDefaults.ALLOW_METERED,
         },
         # The installer's connection choices as this user's settings last applied them
         # ("OnlineLyrics=0;ToolUpdates=1;UpdateChecks=1"); see utils/install_choices.py.

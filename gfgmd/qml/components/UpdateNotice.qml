@@ -102,7 +102,6 @@ Rectangle {
             visible: notice._downloading
             compact: true
             text: "Cancel"
-            toolTipText: "Stop the download; it resumes from here next time"
             onClicked: notice.controller.cancel()
         }
         AppButton {

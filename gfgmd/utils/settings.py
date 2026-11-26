@@ -134,7 +134,7 @@ def _limit_window(window: Any) -> bool:
             and window["limit_kib"] > 0)
 
 
-# 1.0.0's built-in download presets, which Smart mode replaced; migrate() carries the one that was the
+# 1.0.0's built-in download presets, which Smart Mode replaced; migrate() carries the one that was the
 # Download button's into the Video or Audio defaults.
 _OLD_PRESETS: Dict[str, Dict[str, Any]] = {
     "video-best-mp4": {"kind": "video", "max_height": 0, "container": "mp4", "codec_profile": "balanced"},
@@ -152,7 +152,7 @@ _AUDIO_EMBEDS = (("embed_thumbnail", "audio_embed_cover"), ("embed_metadata", "a
 def migrate(raw: Any) -> Any:
     """Carry an older settings file over to today's keys (in place), before its values are checked.
 
-    1.0.0's download presets became Smart mode: the preset the Download button used becomes the
+    1.0.0's download presets became Smart Mode: the preset the Download button used becomes the
     Video or Audio defaults and the switch's choice, so Download keeps doing what it did. Audio got
     its own "Save in the file" choices, which start as the shared ones were, and subtitles a
     placement kept apart from whether they download.

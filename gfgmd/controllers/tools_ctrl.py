@@ -26,9 +26,11 @@ from gfgmd.utils.format import format_bytes
 from gfgmd.utils.logging import write_log
 from gfgmd.utils.settings import load_settings
 
-# Look for tool updates this long after startup, then once a day while the app runs.
+# Look for tool updates this long after startup, then once a day while the app runs; on a metered
+# connection, look again this often until it isn't metered.
 FIRST_CHECK_MS = 90_000
 DAILY_MS = 24 * 3600 * 1000
+METERED_RETRY_MS = 30 * 60 * 1000
 # ffprobe comes with FFmpeg, so the window names it FFmpeg too.
 _LABELS = {"yt-dlp": "yt-dlp", "ffmpeg": "FFmpeg", "ffprobe": "FFmpeg", "deno": "Deno"}
 
@@ -39,6 +41,7 @@ INSTALL_SAVE = "The tools couldn't be saved on this PC. Check that the drive has
 INSTALL_FAILED = "The download tools couldn't be installed. Try again."
 INSTALL_STOPPED = "Stopped. Nothing was changed."
 CHECK_OFFLINE = "Couldn't check for tool updates. Check your internet connection and try again."
+METERED_WAIT = "Automatic tool updates wait while this PC is on a metered connection. Update tools still works."
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,7 @@ class ToolsController(QObject):
         self._done = 0
         self._total = 0
         self._cancel = threading.Event()
+        self._waiting_metered = False
         self._timer = QTimer(self)
         self._timer.setInterval(400)
         self._timer.timeout.connect(self.changed)
@@ -255,11 +259,24 @@ class ToolsController(QObject):
             self.toolsReady.emit()
 
     def _auto_update(self) -> None:
-        """Keep the managed tools current in the background (yt-dlp changes often)."""
+        """Keep the managed tools current in the background (yt-dlp changes often). On a metered
+        connection (unless Preferences allows updates over one) nothing is checked or downloaded; it
+        tries again every half hour, and Update tools (Preferences > Tools) still works."""
         self._daily.start(DAILY_MS)
         prefs = load_settings().get("tools", {})
         if not prefs.get("auto_update", True) or prefs.get("source", "managed") != "managed" or self._busy:
             return
+        if self._manager.hold_updates():
+            if not self._waiting_metered:
+                write_log("Tool updates wait: the connection is metered", "general")
+                self._set_stage(METERED_WAIT)
+            self._waiting_metered = True
+            self._daily.start(METERED_RETRY_MS)
+            return
+        if self._waiting_metered:
+            self._waiting_metered = False
+            if self._stage == METERED_WAIT:
+                self._set_stage("")
         self._runner.start(self._manager.check_updates, on_done=self._auto_install)
 
     def _auto_install(self, names: list[str]) -> None:

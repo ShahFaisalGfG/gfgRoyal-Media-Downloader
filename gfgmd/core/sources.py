@@ -197,6 +197,13 @@ def video_link(source: Source, url: str) -> str:
     return f"https://{host}/watch?v={single_video(source).source_id}"
 
 
+def playlist_link(source: Source) -> str:
+    """The playlist page a YouTube playlist link (or a video opened inside one) belongs to."""
+    if source.kind != "playlist" or source.site != "youtube":
+        raise ValueError("This link isn't a YouTube playlist.")
+    return f"https://www.youtube.com/playlist?{urlencode({'list': source.source_id})}"
+
+
 def _video(video_id: str, kind: Literal["video", "short"]) -> Source:
     if VIDEO_ID.fullmatch(video_id) is None:
         raise ValueError(_BROKEN_VIDEO)

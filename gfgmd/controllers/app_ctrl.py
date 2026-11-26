@@ -19,6 +19,9 @@ if sys.platform == "win32":
     import winreg
 
 _SETTINGS_RESET = "Your preferences file couldn't be read, so the defaults are in use."
+# SystemParametersInfoW: whether Windows animates (Settings > Accessibility > Visual effects >
+# Animation effects).
+_SPI_GETCLIENTAREAANIMATION = 0x1042
 
 
 def _detect_system_theme() -> str:
@@ -32,6 +35,16 @@ def _detect_system_theme() -> str:
         return "light" if value == 1 else "dark"
     except OSError:
         return "light"
+
+
+def _system_animations() -> bool:
+    """False while Windows' Animation effects setting is off; the app's controls then don't move."""
+    if sys.platform != "win32":
+        return True
+    enabled = ctypes.c_int(1)
+    if not ctypes.windll.user32.SystemParametersInfoW(_SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(enabled), 0):
+        return True
+    return bool(enabled.value)
 
 
 def select_in_explorer(path: str) -> bool:
@@ -63,6 +76,7 @@ class AppController(QObject):
     """Exposes app-wide state and actions to QML."""
 
     themeChanged = Signal(str)
+    animationsChanged = Signal()
     # A start-up or background message for the user; the window shows it as a toast.
     notice = Signal(str)
     # A downloadable link was copied (Preferences > Watch the clipboard); the window offers it.
@@ -75,6 +89,7 @@ class AppController(QObject):
         raw = load_settings().get("theme", "system")
         self._theme = _detect_system_theme() if raw == "system" else raw
         self._preview = ""
+        self._animations = _system_animations()
 
     # ── Properties ──────────────────────────────────────────────────────────
 
@@ -82,6 +97,11 @@ class AppController(QObject):
     def currentTheme(self) -> str:
         """The resolved theme name ("light" or "dark")."""
         return self._theme
+
+    @Property(bool, notify=animationsChanged)
+    def animations(self) -> bool:
+        """False while Windows' Animation effects setting is off (Theme.motion follows it)."""
+        return self._animations
 
     @Property(str, constant=True)
     def appVersion(self) -> str:
@@ -108,9 +128,14 @@ class AppController(QObject):
 
     @Slot()
     def detectTheme(self) -> None:
-        """Re-detect the theme (when a window regains focus) and emit themeChanged if it changed."""
+        """Re-detect the theme and Windows' Animation effects setting (when a window regains focus),
+        and say which changed."""
         raw = self._preview or load_settings().get("theme", "system")
         self._set_theme(_detect_system_theme() if raw == "system" else raw)
+        animations = _system_animations()
+        if animations != self._animations:
+            self._animations = animations
+            self.animationsChanged.emit()
 
     @Slot(str)
     def previewTheme(self, theme: str) -> None:

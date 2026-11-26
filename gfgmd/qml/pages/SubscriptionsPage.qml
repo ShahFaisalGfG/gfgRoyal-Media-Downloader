@@ -26,14 +26,12 @@ Item {
                 kind: "primary"
                 text: "Subscribe"
                 iconName: "add"
-                toolTipText: "Watch a channel or playlist for new uploads"
                 onClicked: addDialog.open()
             }
             AppButton {
                 text: "Check all now"
                 iconName: "refresh"
                 enabled: subscriptionsController.count > 0
-                toolTipText: "Look for new uploads on every subscription now (F5)"
                 onClicked: subscriptionsController.checkAll()
             }
             Item { Layout.fillWidth: true }
@@ -49,7 +47,6 @@ Item {
                 text: "Export"
                 iconName: "copy"
                 enabled: subscriptionsController.count > 0
-                toolTipText: "Save every subscription to a file, for a backup or another PC"
                 onClicked: exportDialog.open()
             }
         }
@@ -156,7 +153,6 @@ Item {
                         visible: sub.newCount > 0 && !sub.autoDownload
                         text: "Download " + sub.newCount + " new"
                         iconName: "download"
-                        toolTipText: "Add the new uploads this subscription found to Downloads"
                         onClicked: subscriptionsController.downloadNew(sub.subId)
                     }
                     BusyIndicator { visible: sub.checking; running: visible; implicitWidth: 24; implicitHeight: 24 }
@@ -278,8 +274,8 @@ Item {
                     id: saveAs
                     accessibleName: "Save new uploads as"
                     options: [
-                        {"label": "Video", "code": "video", "icon": "video", "tip": "With the defaults in Preferences > Video"},
-                        {"label": "Audio", "code": "audio", "icon": "audio", "tip": "With the defaults in Preferences > Audio"}
+                        {"label": "Video", "code": "video", "icon": "video"},
+                        {"label": "Audio", "code": "audio", "icon": "audio"}
                     ]
                     onActivated: function (code) { saveAs.value = code }
                 }
@@ -294,13 +290,13 @@ Item {
                 Layout.fillWidth: true
                 label: "Download automatically"
                 labelWidth: 150
-                AppSwitch { id: auto; accessibleName: "Download new uploads automatically"; toolTipText: "Off: the app only tells you about new uploads" }
+                AppSwitch { id: auto; accessibleName: "Download new uploads automatically" }
             }
             FormRow {
                 Layout.fillWidth: true
                 label: "Earlier uploads too"
                 labelWidth: 150
-                AppSwitch { id: existing; accessibleName: "Download earlier uploads too"; toolTipText: "Off: only uploads from now on download" }
+                AppSwitch { id: existing; accessibleName: "Download earlier uploads too" }
             }
         }
     }

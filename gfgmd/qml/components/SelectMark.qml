@@ -34,13 +34,17 @@ Item {
         color: mark.checked ? Theme.accentFill : Theme.mediaBadge
         border.width: 1.5
         border.color: Theme.mediaBadgeText
+        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
     }
     Icon {
         anchors.centerIn: parent
-        visible: mark.checked
+        opacity: mark.checked ? 1 : 0
+        scale: mark.checked ? 1 : 0.4
         name: "check"
         size: Theme.iconXs
         color: Theme.mediaBadgeText
+        Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+        Behavior on scale { NumberAnimation { duration: Theme.motionMedium; easing.type: Easing.OutBack } }
     }
     // A passive handler for the tooltip, which leaves the row's own hover undisturbed.
     HoverHandler { id: markHover }

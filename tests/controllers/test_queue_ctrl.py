@@ -172,6 +172,7 @@ def test_full_disk_pauses_the_queue(qapp, queue, context):
 
 
 def test_pause_resume_and_cancel_a_running_download(qapp, queue, context):
+    """Cancel and delete unfinished files takes the download off the list once it stops."""
     queue.addLinks("https://fake.test/slow", "video")
     assert wait_for(qapp, lambda: queue.runningCount == 1)
     job_id = context.store.jobs()[0]["id"]
@@ -179,18 +180,18 @@ def test_pause_resume_and_cancel_a_running_download(qapp, queue, context):
     assert wait_for(qapp, lambda: states(context) == ["paused"] and queue.runningCount == 0)
     queue.resume(job_id)
     assert wait_for(qapp, lambda: queue.runningCount == 1)
-    queue.cancel(job_id)
-    assert wait_for(qapp, lambda: states(context) == ["cancelled"])
+    queue.remove(job_id, False)
+    assert wait_for(qapp, lambda: context.store.jobs() == [] and queue.runningCount == 0)
 
 
 def test_a_stronger_stop_reason_is_kept(qapp):
-    """Pause all after Cancel, or a restart after Pause, doesn't change what the download becomes."""
+    """Pause all after Remove, or a restart after Pause, doesn't change what the download becomes."""
     from gfgmd.controllers.queue_ctrl import _Running
     running = _Running(1, "archive", "youtube", False)
-    running.stop("cancel")
+    running.stop("remove")
     running.stop("pause_all")
     running.stop("shutdown")
-    assert running.stop_reason == "cancel"
+    assert running.stop_reason == "remove"
     paused = _Running(2, "archive", "youtube", False)
     paused.stop("pause")
     paused.stop("restart")
@@ -322,17 +323,6 @@ def _partials(context: AppContext) -> list[Path]:
     return [entry for entry in incomplete.rglob("*.part")] if incomplete.is_dir() else []
 
 
-def test_cancel_after_a_pause_deletes_the_unfinished_files(qapp, queue, context):
-    queue.addLinks("https://fake.test/slow", "video")
-    assert wait_for(qapp, lambda: queue.runningCount == 1 and _partials(context))
-    job_id = context.store.jobs()[0]["id"]
-    queue.pause(job_id)
-    assert wait_for(qapp, lambda: states(context) == ["paused"] and queue.runningCount == 0)
-    assert _partials(context)  # a paused download keeps them to continue later
-    queue.cancel(job_id)
-    assert states(context) == ["cancelled"] and _partials(context) == []
-
-
 def test_remove_with_files_sends_them_to_the_recycle_bin(qapp, queue, context):
     removed = []
     queue.filesRemoved.connect(lambda: removed.append(True))
@@ -399,7 +389,7 @@ def test_the_pc_stays_awake_while_downloading_unless_turned_off(qapp, queue, con
         settings["downloads"]["keep_awake"] = True
         save_settings(settings)
         assert wait_for(qapp, lambda: calls == [True, False, True])
-        queue.cancel(context.store.jobs()[0]["id"])
+        queue.remove(context.store.jobs()[0]["id"], False)
         assert wait_for(qapp, lambda: queue.runningCount == 0 and calls == [True, False, True, False])
 
 
@@ -530,6 +520,7 @@ def test_removing_always_deletes_unfinished_parts_and_asks_only_when_needed(qapp
     queue.pause(slow)
     assert wait_for(qapp, lambda: states(context) == ["paused"] and queue.runningCount == 0)
     assert queue.removal([slow]) == {"count": 1, "inProgress": 1, "savedFiles": 0}  # paused is still to finish
+    assert _partials(context)  # a paused download keeps them to continue later
     queue.remove(slow, False)
     assert context.store.jobs() == [] and _partials(context) == []
     queue.addLinks("https://fake.test/ok", "video")
@@ -538,11 +529,6 @@ def test_removing_always_deletes_unfinished_parts_and_asks_only_when_needed(qapp
     assert queue.removal([done]) == {"count": 1, "inProgress": 0, "savedFiles": 1}
     queue.remove(done, False)
     assert context.store.jobs() == [] and Path(context.store.history()[0]["filepath"]).exists()
-    queue.pauseAll()
-    queue.addLinks("https://fake.test/ok", "video")
-    waiting = context.store.jobs()[0]["id"]
-    queue.cancel(waiting)
-    assert queue.removal([waiting]) == {"count": 1, "inProgress": 0, "savedFiles": 0}  # removed without asking
 
 
 def test_actions_on_several_downloads_at_once(qapp, queue, context):
@@ -569,8 +555,8 @@ def test_actions_on_several_downloads_at_once(qapp, queue, context):
 
 
 def test_deleting_a_video_stops_extracting_its_audio_first(qapp, context, fake_ytdlp, tmp_path):
-    """FFmpeg reading the video would keep Windows from moving it, so the extraction is cancelled and
-    waited for before the players let go."""
+    """FFmpeg reading the video would keep Windows from moving it, so the extraction is stopped, taken
+    off the list, and waited for before the players let go."""
     reading = threading.Event()
 
     def runner(command, on_line, stop):
@@ -592,7 +578,7 @@ def test_deleting_a_video_stops_extracting_its_audio_first(qapp, context, fake_y
         queue.extractAudio([video_id], {"audio_format": "flac", "embed_thumbnail": False, "lyrics": False})
         assert wait_for(qapp, reading.is_set)
         queue.release_files([str(video)])
-    assert states(context) == ["cancelled"] and released == [[str(video)]]
+    assert context.store.jobs() == [] and released == [[str(video)]]
     queue.shutdown()
 
 
@@ -722,7 +708,7 @@ def test_files_are_grouped_by_their_playlist_folder(tmp_path):
     assert group_of(tmp_path / "Elsewhere" / "Clip.mp4", root) == ("", "")
 
 
-# ── A video inside a playlist, and Smart mode ──
+# ── A video inside a playlist, and Smart Mode ──
 
 IN_LIST = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabcdefghijklmnop"
 
@@ -759,6 +745,35 @@ def test_cancelling_the_question_drops_the_waiting_links(qapp, queue, context):
     assert context.store.jobs() == [] and load_settings()["downloads"]["playlist_links"] == "ask"
     queue.answerPlaylist("video", False)  # nothing waits any more
     assert context.store.jobs() == []
+
+
+def test_the_question_names_and_pictures_the_video_and_its_playlist(qapp, context):
+    """The waiting link's video and playlist titles and thumbnails come from oEmbed, and go with the answer."""
+    asked = []
+
+    def fetch(url):
+        asked.append(url)
+        if "playlist%3Flist%3DPLabcdefghijklmnop" in url:
+            return {"title": "Road trip", "author_name": "Someone", "thumbnail_url": "https://i.ytimg.com/vi/x/hq.jpg"}
+        return {"title": "Never Gonna Give You Up", "author_name": "Rick Astley",
+                "thumbnail_url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"}
+
+    queue = QueueController(context, ToolManager(context), Notifier(lambda: None, lambda path: None),
+                            quick_fetch=fetch)
+    try:
+        queue.pauseAll()
+        queue.addLinks(IN_LIST, "video")
+        assert wait_for(qapp, lambda: queue.heldVideo and queue.heldPlaylist, timeout=5.0)
+        assert queue.heldVideo == {"title": "Never Gonna Give You Up", "uploader": "Rick Astley",
+                                   "thumbnail": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"}
+        assert queue.heldPlaylist["title"] == "Road trip"
+        assert any("watch%3Fv%3DdQw4w9WgXcQ%26" not in url and "dQw4w9WgXcQ" in url for url in asked)
+        queue.addLinks("https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLother", "video")
+        assert len(asked) == 2  # a second link joins the open question; the first one's details stay
+        queue.answerPlaylist("video", False)
+        assert queue.heldVideo == {} and queue.heldPlaylist == {}
+    finally:
+        queue.shutdown()
 
 
 def test_links_from_outside_open_download_options_when_smart_mode_is_off(qapp, queue, context):

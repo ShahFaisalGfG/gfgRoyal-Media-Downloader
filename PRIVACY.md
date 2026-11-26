@@ -13,7 +13,7 @@ gfgRoyal Media Downloader has no accounts, no telemetry, and no ads. It never se
 Each of these is on unless you turned it off during installation, and each can be turned off at any time in Preferences.
 
 - **App updates (GitHub), once a day.** The app asks GitHub whether a newer version exists; the request carries only the app's name and version. Turn it off in Preferences > Updates and logs.
-- **Download tool updates (GitHub), once a day.** The app checks the yt-dlp, FFmpeg, and Deno releases and installs newer versions, checking every file against its published checksum. Turn it off in Preferences > Tools.
+- **Download tool updates (GitHub), once a day.** The app checks the yt-dlp, FFmpeg, and Deno releases and installs newer versions, checking every file against its published checksum. On a metered connection it waits until you're off it, unless Preferences > Updates and logs allows updates there. Turn it off in Preferences > Tools.
 - **Lyrics (LRCLIB, lrclib.net).** When an audio download has no lyrics from its own site, the app sends the song's title, artist, album, and length to LRCLIB, a free lyrics service, to find them. Turn it off in Preferences > Audio.
 
 These services have their own privacy policies: [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement) and [LRCLIB](https://lrclib.net).

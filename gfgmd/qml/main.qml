@@ -8,7 +8,7 @@ import "pages"
 
 // The main window: four pages (Downloads, Library, Subscriptions, Sign-ins) over the audio player and
 // the run bar.
-// Links dropped anywhere on the window are downloaded (or shown in Download options with Smart mode
+// Links dropped anywhere on the window are downloaded (or shown in Download options with Smart Mode
 // off); closing keeps the app in the tray when that is on, so subscriptions and downloads carry on.
 AppWindow {
     id: mainWin
@@ -98,7 +98,7 @@ AppWindow {
             mainWin.bringUp()
             playlistQuestion.ask(count)
         }
-        // Smart mode is off: links from the extension, the tray, or a second launch open Download options.
+        // Smart Mode is off: links from the extension, the tray, or a second launch open Download options.
         function onOptionsRequested(links, kind) {
             mainWin.bringUp()
             mainWin.page = 0
@@ -143,10 +143,10 @@ AppWindow {
 
                 Repeater {
                     model: [
-                        { "text": "Downloads", "icon": "download", "tip": "Downloads (Ctrl+1)" },
-                        { "text": "Library", "icon": "library", "tip": "Finished downloads (Ctrl+2)" },
-                        { "text": "Subscriptions", "icon": "bell", "tip": "Channels and playlists watched for new uploads (Ctrl+3)" },
-                        { "text": "Sign-ins", "icon": "key", "tip": "Sites you signed in to (Ctrl+4)" }
+                        { "text": "Downloads", "icon": "download" },
+                        { "text": "Library", "icon": "library" },
+                        { "text": "Subscriptions", "icon": "bell" },
+                        { "text": "Sign-ins", "icon": "key" }
                     ]
                     delegate: AppButton {
                         required property var modelData
@@ -154,7 +154,6 @@ AppWindow {
                         kind: mainWin.page === index ? "primary" : "ghost"
                         text: modelData.text
                         iconName: modelData.icon
-                        toolTipText: modelData.tip
                         onClicked: mainWin.page = index
                         Accessible.role: Accessible.PageTab
                         Accessible.checkable: true
@@ -162,6 +161,21 @@ AppWindow {
                     }
                 }
                 Item { Layout.fillWidth: true }
+                // Smart Mode covers every way a link arrives (the box, the extension, the tray), so it
+                // sits with the pages; its bulb lights up golden while it is on.
+                AppButton {
+                    text: "Smart Mode"
+                    iconComponent: Component { SmartBulb { lit: downloads.smart } }
+                    checked: downloads.smart
+                    checkedTint: Theme.warningSoft
+                    toolTipText: downloads.smart
+                        ? "On: Download starts at once with your defaults from Preferences > Video and Audio"
+                        : "Off: Download opens Download options, to choose each time"
+                    Accessible.name: "Smart Mode"
+                    Accessible.checkable: true
+                    Accessible.checked: downloads.smart
+                    onClicked: prefsController.saveSettings({"downloads.smart_mode": !downloads.smart})
+                }
             }
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
         }
@@ -248,9 +262,6 @@ AppWindow {
 
     Toast {
         id: toast
-        // Tooltips can show a site's title; like every Text here, they show it as plain text. The
-        // tooltip is one shared instance, so setting it once covers every window.
-        Component.onCompleted: ToolTip.toolTip.contentItem.textFormat = Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: runBar.height + audioBar.height + Theme.spaceLg

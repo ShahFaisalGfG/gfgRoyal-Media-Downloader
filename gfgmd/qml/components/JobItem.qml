@@ -152,6 +152,10 @@ Rectangle {
                     font.pixelSize: Theme.fontCaption
                     color: job.jobState === "failed" ? Theme.danger : Theme.textMuted
                     elide: Text.ElideRight
+                    ToolTip.visible: detailHover.hovered && truncated
+                    ToolTip.text: text
+                    ToolTip.delay: 700
+                    HoverHandler { id: detailHover }
                 }
             }
             ProgressBar {
@@ -170,7 +174,6 @@ Rectangle {
             visible: job._fixText.length > 0 && (job.jobState === "failed" || job.jobState === "needs_auth" || job.jobState === "paused")
             text: job._fixText
             iconName: job.action === "signin" ? "key" : job.action === "choose_folder" ? "folder" : "repair"
-            toolTipText: job.message
             onClicked: job.fixRequested(job.jobId, job.action)
         }
         AppButton {
@@ -179,7 +182,6 @@ Rectangle {
             compact: true
             text: job.entryCount + (job.kind === "audio" ? " songs" : " videos")
             iconName: job.expanded ? "chevronDown" : "chevronRight"
-            toolTipText: (job.expanded ? "Hide the " : "Show the ") + text + " (Right and Left arrows)"
             Accessible.name: (job.expanded ? "Hide the " : "Show the ") + text
             onClicked: job.expandToggled(job.jobId, !job.expanded)
         }
@@ -188,7 +190,7 @@ Rectangle {
             kind: "ghost"
             compact: true
             iconName: "pause"
-            toolTipText: "Pause (Space). It continues from where it stopped."
+            toolTipText: "Pause (Space)"
             onClicked: queueController.pause(job.jobId)
         }
         AppButton {

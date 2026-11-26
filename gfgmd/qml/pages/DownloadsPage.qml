@@ -9,7 +9,7 @@ import QtQml.Models
 import "../components"
 import "../components/ListMenu.js" as ListMenu
 
-// Paste a link and press Download: Video or Audio as the switch beside the box says. With Smart mode
+// Paste a link and press Download: Video or Audio as the switch beside the box says. With Smart Mode
 // on it downloads at once with the defaults from Preferences; off, Download options open first.
 // Below, the queue: every download with its progress, its buttons, and a menu of everything else; a
 // playlist lists its videos under it, each with how it is doing.
@@ -22,7 +22,7 @@ Item {
     property bool optionsOpen: false
     // Download options show (or the link is being read).
     readonly property bool optionsShown: page.optionsOpen && (analyzeController.busy || analyzeController.hasResult)
-    // The Video | Audio switch, and Smart mode (Download downloads at once with the defaults).
+    // The Video | Audio switch, and Smart Mode (Download downloads at once with the defaults).
     readonly property string kind: { prefsController.revision; return prefsController.value("downloads.kind") === "audio" ? "audio" : "video" }
     readonly property bool smart: { prefsController.revision; return prefsController.value("downloads.smart_mode") !== false }
 
@@ -95,7 +95,7 @@ Item {
     }
 
     // Every link in the box (a paste of several keeps them all); an empty box takes the clipboard's.
-    // Smart mode downloads at once; without it, Download options open first.
+    // Smart Mode downloads at once; without it, Download options open first.
     function download() {
         if (linkField.links.length === 0) page.pasteLink()
         if (linkField.links.length === 0) return
@@ -125,7 +125,7 @@ Item {
         page.showOptions()
     }
 
-    // Links from outside the box with Smart mode off (the extension, the tray, a second launch, a drop).
+    // Links from outside the box with Smart Mode off (the extension, the tray, a second launch, a drop).
     function showLinks(links, kind) {
         if (kind !== page.kind) page.setKind(kind)
         linkField.setLinks(links.join(" "))
@@ -150,11 +150,8 @@ Item {
                 id: linkField
                 Layout.fillWidth: true
                 placeholderText: "Paste a link to a video, playlist, or channel"
-                toolTipText: "Works with YouTube and many other sites. Press Enter to download."
                 downloadEnabled: toolsController.ready
-                downloadToolTip: !toolsController.ready ? "Get the download tools first"
-                    : page.smart ? "Download as " + page.kind + " with your defaults from Preferences (Enter)"
-                    : "Choose the quality, subtitles, and videos, then download (Enter)"
+                downloadToolTip: toolsController.ready ? "" : "Get the download tools first"
                 onAccepted: page.download()
                 onDownloadRequested: page.download()
                 // Reading starts as soon as a link is pasted, so Download options open quickly.
@@ -166,22 +163,10 @@ Item {
                 accessibleName: "Download as"
                 value: page.kind
                 options: [
-                    {"label": "Video", "code": "video", "icon": "video", "tip": "Download videos (the defaults in Preferences > Video)"},
-                    {"label": "Audio", "code": "audio", "icon": "audio", "tip": "Download only the sound, as songs (the defaults in Preferences > Audio)"}
+                    {"label": "Video", "code": "video", "icon": "video"},
+                    {"label": "Audio", "code": "audio", "icon": "audio"}
                 ]
                 onActivated: function (code) { page.setKind(code) }
-            }
-            AppButton {
-                text: "Smart"
-                iconName: "smart"
-                checked: page.smart
-                toolTipText: page.smart
-                    ? "Smart mode is on: Download downloads at once with your defaults from Preferences > Video and Audio. Click to choose each time."
-                    : "Smart mode is off: Download opens Download options first. Click to download at once with your defaults."
-                Accessible.name: "Smart mode"
-                Accessible.checkable: true
-                Accessible.checked: page.smart
-                onClicked: prefsController.saveSettings({"downloads.smart_mode": !page.smart})
             }
         }
 
@@ -200,7 +185,6 @@ Item {
                 visible: analyzeController.errorAction === "signin"
                 text: "Sign in"
                 iconName: "key"
-                toolTipText: "Sign in to " + analyzeController.siteLabel + " so its private or age-restricted videos can download"
                 onClicked: page.openSignIns()
             }
             AppButton {
@@ -242,7 +226,6 @@ Item {
                 text: "Pause"
                 iconName: "pause"
                 enabled: page.picked.canPause === true
-                toolTipText: "Pause the selected downloads; they continue from where they stopped"
                 onClicked: page.applyToPicked("pause")
             }
             AppButton {
@@ -259,7 +242,6 @@ Item {
                 text: "Try again"
                 iconName: "refresh"
                 enabled: page.picked.canRetry === true
-                toolTipText: "Try the selected failed or finished downloads again"
                 onClicked: page.applyToPicked("retry")
             }
             AppButton {
@@ -267,7 +249,6 @@ Item {
                 compact: true
                 text: "Remove"
                 iconName: "delete"
-                toolTipText: "Take the selected downloads off the list (Delete)"
                 onClicked: page.removeJobs(selection.ids, selection.count === 1 ? "1 download" : selection.count + " downloads")
             }
         }
@@ -293,7 +274,7 @@ Item {
                 compact: true
                 text: "Clear finished"
                 iconName: "clear"
-                toolTipText: "Take finished and cancelled downloads off this list; their files stay in the Library"
+                toolTipText: "Their files stay in the Library"
                 onClicked: queueController.clearFinished()
             }
         }
@@ -423,7 +404,7 @@ Item {
                 iconName: "download"
                 title: "Nothing downloading yet"
                 text: "Copy a link from your browser and press Download, or drag links onto this window. "
-                    + "With Smart mode on, Download uses your defaults; turn it off to pick the quality, subtitles, and videos each time."
+                    + "With Smart Mode on, Download uses your defaults; turn it off to pick the quality, subtitles, and videos each time."
             }
         }
     }
@@ -469,7 +450,8 @@ Item {
             text: "Cancel and delete unfinished files"
             danger: true
             enabled: jobMenu.row.canPause === true || jobMenu.row.jobState === "paused"
-            onTriggered: queueController.cancel(jobMenu.jobId)
+            // Remove without the question: the download leaves the list, its saved files stay.
+            onTriggered: queueController.remove(jobMenu.jobId, false)
         }
         AppMenuSeparator {}
         AppMenuItem {

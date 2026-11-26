@@ -92,7 +92,6 @@ Rectangle {
             text: group.fileCount + (group.kind === "audio" ? (group.fileCount === 1 ? " song" : " songs")
                                                              : (group.fileCount === 1 ? " video" : " videos"))
             iconName: group.expanded ? "chevronDown" : "chevronRight"
-            toolTipText: (group.expanded ? "Hide the files (Left arrow)" : "Show the files (Right arrow)")
             Accessible.name: (group.expanded ? "Hide " : "Show ") + group.title
             onClicked: group.expandToggled(group.groupKey, !group.expanded)
         }

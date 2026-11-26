@@ -60,7 +60,7 @@ def test_drop_invalid_keeps_good_values():
 
 
 def test_the_download_buttons_preset_becomes_the_smart_mode_defaults():
-    """1.0.0's presets became Smart mode: the one the Download button used sets the Video or Audio
+    """1.0.0's presets became Smart Mode: the one the Download button used sets the Video or Audio
     defaults and the switch, so Download keeps doing what it did; the presets themselves go."""
     defaults = get_default_settings()
     built_in = {"downloads": {"preset": "video-best"}, "formats": {"container": "mp4", "codec_profile": "compatible"}}
