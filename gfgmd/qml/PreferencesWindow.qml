@@ -140,12 +140,14 @@ AppWindow {
                                     color: Theme.text
                                     elide: Text.ElideRight
                                 }
-                                // The Smart Mode defaults live on this page.
-                                Icon {
+                                // The Smart Mode defaults live on this page; its bulb is always lit here,
+                                // as it marks the feature rather than its on or off state.
+                                SmartBulb {
                                     visible: navItem.modelData.smart === true
-                                    name: "smart"
+                                    lit: true
                                     size: Theme.iconSm
-                                    color: Theme.textMuted
+                                    Layout.preferredWidth: Theme.iconSm
+                                    Layout.preferredHeight: Theme.iconSm
                                 }
                                 Text {
                                     textFormat: Text.PlainText
