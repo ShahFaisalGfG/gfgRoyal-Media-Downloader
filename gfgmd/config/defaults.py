@@ -13,7 +13,7 @@ class AppInfo:
     APP_NAME = "gfgRoyal Media Downloader"
     # The name used where spaces get in the way: executables, release files, and mutexes.
     FILE_NAME = "gfgRoyal-Media-Downloader"
-    APP_VERSION = "1.0.0"
+    APP_VERSION = "1.2.0"
     APP_AUTHOR = "Shah Faisal"
     APP_DESCRIPTION = "Download and play videos, music, playlists, Shorts, and live streams from YouTube and other sites"
     CLI_NAME = "gfgmd"
@@ -243,7 +243,8 @@ class ScheduleDefaults:
 
 
 class ToolDefaults:
-    """Where yt-dlp, FFmpeg, and Deno come from, and which yt-dlp releases to follow."""
+    """Where the download tools (yt-dlp, FFmpeg, Deno, gallery-dl, spotDL) come from, and which yt-dlp
+    releases to follow."""
 
     SOURCE_OPTIONS = [
         ("Kept up to date by the app (recommended)", "managed"),
@@ -267,6 +268,10 @@ def get_default_settings() -> Dict[str, Any]:
             "folder": "",
             # "" uses Music\gfgRoyal Media Downloader for audio downloads.
             "audio_folder": "",
+            # "" uses Pictures\gfgRoyal Media Downloader for pictures from posts.
+            "photo_folder": "",
+            # A post's pictures are saved along with its videos (gallery-dl), and picture-only posts too.
+            "save_photos": True,
             # Smart Mode: Download downloads at once with the Video or Audio defaults below ("formats");
             # off, it opens Download options first. "kind" is the Video | Audio switch's choice.
             "smart_mode": True,
@@ -315,6 +320,11 @@ def get_default_settings() -> Dict[str, Any]:
             "audio_embed_cover": True,
             "audio_embed_metadata": True,
             "audio_embed_chapters": True,
+            # One file per chapter of a video that has chapters, for videos and for songs (an album).
+            "split_chapters": False,
+            "audio_split_chapters": False,
+            # A part of a video is cut at the exact times (re-encoding it) instead of at keyframes.
+            "exact_cut": False,
             # SponsorBlock applies to video and audio alike.
             "sponsorblock": "off",
             "sponsorblock_categories": ["sponsor", "selfpromo", "interaction"],
@@ -343,6 +353,8 @@ def get_default_settings() -> Dict[str, Any]:
             "ytdlp_path": "",
             "ffmpeg_path": "",
             "deno_path": "",
+            "gallery_dl_path": "",
+            "spotdl_path": "",
         },
         "player": {
             "volume": 0.8,

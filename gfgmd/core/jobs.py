@@ -13,8 +13,11 @@ the sign-in, into the list's folder.
 
 from __future__ import annotations
 
+import glob
 import json
+import os
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -25,17 +28,18 @@ from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
 from gfgmd.core.archive import ArchiveLock
-from gfgmd.core.command import Auth, RunPaths, download_command, run_marker, url_args
+from gfgmd.core.command import CHAPTERS_FOLDER, Auth, RunPaths, download_command, run_marker, url_args
 from gfgmd.core.errors import CATEGORIES, Failure, Policy, classify, folder_failure, given_up, judge
 from gfgmd.core.lyrics import Fetch, add_lyrics
-from gfgmd.core.naming import finalize_file, inside_root
+from gfgmd.core.naming import MEDIA_EXTENSIONS, clean_stem, finalize_file, inside_root
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import PHASE_WAIT, Event, ProgressTracker, Snapshot, listed_entries, read_convert_progress
 from gfgmd.core.retry import retry_delay
-from gfgmd.core.runner import run_to_completion
+from gfgmd.core.runner import Runner, run_to_completion
 from gfgmd.core.sources import Source
+from gfgmd.core.tags import retag
 from gfgmd.core.tools import ToolSet
-from gfgmd.utils.format import count_media, format_wait, media_noun
+from gfgmd.utils.format import count_media, format_wait
 
 # Conversion and merge failures are retried this many times before the job gives up.
 POSTPROCESS_ATTEMPTS = 2
@@ -52,10 +56,11 @@ _WATCH_EVERY = 1.0
 MAX_SET_ASIDE = 5
 # Marks a playlist file in the finishing queue, which otherwise holds saved files' details.
 _LIST_KEY = "__playlist_file__"
+# A chapter file as --split-chapters names it in the staging folder: "007 Title [id] (requested-...)".
+_CHAPTER_NUMBER = re.compile(r"^(?P<number>\d{3}) (?P<rest>.+)$")
 # The format names in "Converting to MP3".
 _FORMAT_LABELS = {"mp3": "MP3", "m4a": "M4A", "opus": "Opus", "vorbis": "OGG", "flac": "FLAC", "wav": "WAV"}
 
-Runner = Callable[..., tuple[int, bool]]
 # ("listed", [entry dicts]) or ("state", (video id, state, message)); see JobExecutor.take_updates.
 Update = tuple[str, Any]
 
@@ -96,8 +101,12 @@ class JobResult:
     # Videos the archive skipped as downloaded before, and their IDs when yt-dlp named them.
     archived: int = 0
     archived_ids: list[str] = field(default_factory=list)
-    # "audio" or "video", for "3 songs saved".
+    # "audio", "video", or "photo", for "3 songs saved".
     kind: str = "video"
+    # Pictures among `files`, saved by a post's pictures pass ("1 video and 4 pictures saved").
+    pictures: int = 0
+    # Said after the summary: why a post's pictures couldn't be saved.
+    note: str = ""
 
     @property
     def message(self) -> str:
@@ -107,15 +116,26 @@ class JobResult:
         if not self.files and self.archived and not self.skipped:
             return "Already downloaded" if self.archived == 1 else f"All {self.archived} were downloaded before"
         if not self.files and not self.archived and not self.skipped and self.state == "done":
+            if self.kind == "photo":
+                return "There were no pictures to save"
             return "There was nothing to download: the list is empty"
         # "7 downloaded before, 1 couldn't be downloaded": a count of nothing saved is left out.
-        parts = [f"{count_media(len(self.files), self.kind)} saved"] if self.files else []
+        parts = [f"{self._saved_text()} saved"] if self.files else []
         if self.archived:
             parts.append(f"{self.archived} downloaded before")
         if self.skipped:
             failed = len(self.skipped)
             parts.append(f"{failed if parts else count_media(failed, self.kind)} couldn't be downloaded")
-        return ", ".join(parts) or f"{count_media(0, self.kind)} saved"
+        summary = ", ".join(parts) or f"{count_media(0, self.kind)} saved"
+        return f"{summary}; {self.note}" if self.note else summary
+
+    def _saved_text(self) -> str:
+        """"3 videos", "4 pictures", or "1 video and 4 pictures"."""
+        media = len(self.files) - self.pictures
+        if not self.pictures:
+            return count_media(media, self.kind)
+        pictures = count_media(self.pictures, "photo")
+        return f"{count_media(media, self.kind)} and {pictures}" if media else pictures
 
 
 class JobExecutor:
@@ -656,6 +676,8 @@ class JobExecutor:
             self._finalized.add(path)
         if not inside_root(Path(path), self._spec.paths.root):
             return  # yt-dlp saves only in the download folder; anything else is never touched
+        if self._spec.options.split_chapters and self._finish_chapters(info, Path(path), tools):
+            return
         try:
             final = finalize_file(Path(path), self._spec.paths.root, tools.ffprobe, self._spec.label_quality)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
@@ -672,6 +694,72 @@ class JobExecutor:
         if self._on_file is not None:
             self._on_file(info, final)
 
+    def _finish_chapters(self, info: dict[str, Any], whole: Path, tools: ToolSet) -> bool:
+        """Finish a video split into chapters: move its chapter files from their staging folder into a
+        folder named after the video, give each its clean name, its own title and track number (the
+        video's title as the album), and lyrics, report each one, and delete the whole file.
+
+        False when the video had no chapters to split (yt-dlp then saves it whole), so it is finished
+        as one file.
+        """
+        video_id = str(info.get("id") or "")
+        staging = whole.parent / f"{CHAPTERS_FOLDER}{video_id}"
+        root = self._spec.paths.root
+        if not video_id or not staging.is_dir() or not inside_root(staging, root):
+            return False
+        numbered = [(int(match.group("number")), match.group("rest"), path) for path in sorted(staging.iterdir())
+                    if path.is_file() and path.suffix[1:].lower() in MEDIA_EXTENSIONS
+                    and (match := _CHAPTER_NUMBER.match(path.name))]
+        if not numbered:
+            return False
+        folder = whole.parent / clean_stem(whole.stem)
+        folder.mkdir(exist_ok=True)
+        listed = info.get("chapters")
+        chapters: list[Any] = listed if isinstance(listed, list) else []
+        album = str(info.get("title") or clean_stem(whole.stem))
+        width = 2 if len(numbered) < 100 else 3
+        for number, rest, staged in numbered:
+            found = chapters[number - 1] if 0 < number <= len(chapters) else None
+            chapter: dict[str, Any] = found if isinstance(found, dict) else {}
+            # The staged name carries the video's ID and request, so a file of that name is this app's own
+            # (left by an interrupted run) and is replaced; the clean name below never overwrites one.
+            moved = folder / f"{number:0{width}d} {rest}"
+            os.replace(staged, moved)
+            try:
+                final = finalize_file(moved, root, tools.ffprobe, self._spec.label_quality)
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+                with self._files_lock:
+                    self._rename_errors.append(f"{moved.name}: {error}")
+                final = moved
+            if not final.exists():
+                continue
+            title = str(chapter.get("title") or "").strip() or clean_stem(rest.rsplit(".", 1)[0])
+            retag(final, {"title": title, "track": f"{number}/{len(numbered)}", "album": album},
+                  tools.ffmpeg, tools.ffprobe)
+            song = {**info, "title": title, "track": title, "album": album, "filepath": str(final)}
+            if isinstance(chapter.get("start_time"), (int, float)) and isinstance(chapter.get("end_time"), (int, float)):
+                song["duration"] = chapter["end_time"] - chapter["start_time"]
+            self._add_lyrics(final, song, tools)
+            with self._files_lock:
+                self._saved.append(final)
+            if self._on_file is not None:
+                self._on_file(song, final)
+        with self._files_lock:
+            self._saved_ids.add(video_id)
+        self._drop_whole(whole)
+        shutil.rmtree(staging, ignore_errors=True)
+        return True
+
+    @staticmethod
+    def _drop_whole(whole: Path) -> None:
+        """Delete the whole file a split leaves, with its own side files (they share its staged name, so
+        nothing else matches)."""
+        for path in [whole, *whole.parent.glob(f"{glob.escape(whole.stem)}.*")]:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                continue  # held open (a virus scan): the chapters are saved, the whole file stays
+
     def _finalize(self, result: JobResult) -> None:
         """After an attempt: finish what yt-dlp reported, then anything only its own journal recorded."""
         self._finish_queue.join()
@@ -685,7 +773,8 @@ class JobExecutor:
     def _add_lyrics(self, audio: Path, info: dict[str, Any], tools: ToolSet) -> None:
         """Save timed lyrics beside a finished audio file and put plain lyrics in its tags."""
         options = self._spec.options
-        if options.kind != "audio" or not options.lyrics:
+        # A part of a song has no lyrics of its own to line up with.
+        if options.kind != "audio" or not options.lyrics or options.has_section:
             return
         online = options.lyrics_online and self._lyrics_fetch is not None
         add_lyrics(audio, info, options.subtitle_langs, online, tools.ffmpeg, tools.ffprobe,

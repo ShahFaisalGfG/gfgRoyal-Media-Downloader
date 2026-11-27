@@ -116,7 +116,7 @@ def local_subdir(name: str) -> Path:
 
 
 def tools_dir() -> Path:
-    """Where the managed copies of yt-dlp, FFmpeg, and Deno live."""
+    """Where the managed copies of the download tools live."""
     return local_subdir("tools")
 
 
@@ -132,12 +132,13 @@ def updates_dir() -> str:
     return str(local_subdir("updates"))
 
 
-# Windows' known-folder IDs for the user's Videos and Music folders.
-_FOLDER_IDS = {"Videos": "18989B1D-99B5-455B-841C-AB7C74E4DDFC", "Music": "4BD8D571-6D19-48D3-BE97-422220080E43"}
+# Windows' known-folder IDs for the user's Videos, Music, and Pictures folders.
+_FOLDER_IDS = {"Videos": "18989B1D-99B5-455B-841C-AB7C74E4DDFC", "Music": "4BD8D571-6D19-48D3-BE97-422220080E43",
+               "Pictures": "33E28130-4E1E-4676-835A-98395C3BC3BB"}
 
 
 def known_folder(name: str) -> Path:
-    """The user's Videos or Music folder, wherever Windows keeps it (moved or synced); else ~/<name>."""
+    """The user's Videos, Music, or Pictures folder, wherever Windows keeps it (moved or synced); else ~/<name>."""
     if sys.platform == "win32":
         guid = uuid.UUID(_FOLDER_IDS[name])
         buffer = ctypes.c_wchar_p()
@@ -168,6 +169,16 @@ def default_download_root() -> Path:
 def default_audio_root() -> Path:
     """Music\\gfgRoyal Media Downloader: where audio downloads go unless the user picks a folder."""
     return known_folder("Music") / DOWNLOAD_FOLDER
+
+
+def file_url(path: str) -> str:
+    """A file:// address for a local file, which QML loads ("" for none)."""
+    return Path(path).absolute().as_uri() if path else ""
+
+
+def default_photo_root() -> Path:
+    """Pictures\\gfgRoyal Media Downloader: where pictures from posts go unless the user picks a folder."""
+    return known_folder("Pictures") / DOWNLOAD_FOLDER
 
 
 def _ensure(folder: str) -> str:

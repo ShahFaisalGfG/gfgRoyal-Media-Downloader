@@ -39,6 +39,11 @@ OPTION_SETS = {
     "audio-original": DownloadOptions(kind="audio", audio_format="best", lyrics=False),
     "multi-audio": DownloadOptions(container="mp4", audio_tracks="languages", audio_langs=("es", "pt-BR"),
                                    subtitles="both", subtitle_format="vtt", embed_thumbnail=True),
+    "part": DownloadOptions(section_start="1:05", section_end="2:10.5", exact_cut=True, sponsorblock="remove",
+                            embed_chapters=True),
+    "part-to-end": DownloadOptions(kind="audio", section_start="30"),
+    "chapters": DownloadOptions(kind="audio", split_chapters=True, embed_thumbnail=True, embed_metadata=True,
+                                embed_chapters=True),
 }
 
 

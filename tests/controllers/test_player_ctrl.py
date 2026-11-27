@@ -219,3 +219,39 @@ def test_release_files_closes_the_video_and_the_song_playing(player, tmp_path):
     assert not player.hasAudio and player.queue.count == 0
     player.closeVideo()  # the window's own close afterwards changes nothing
     assert changes == [""]
+
+
+def test_pictures_open_in_the_photo_viewer_with_their_neighbours(player, tmp_path):
+    """A picture opens the viewer with the list's other pictures; videos and songs keep out of it."""
+    first, clip, second, animated = files(tmp_path, "a.jpg", "clip.mp4", "b.png", "c.gif")
+    requests = []
+    player.photoRequested.connect(lambda: requests.append("photo"))
+    player.videoRequested.connect(lambda: requests.append("video"))
+    player.playFrom(second, [first, clip, second, animated])
+    assert requests == ["photo"] and player.photoPath == second
+    assert (player.photoIndex, player.photoCount) == (1, 3) and not player.photoAnimated
+    assert player.photoUrls[0].startswith("file:///") and player.photoTitle == "b"
+    player.stepPhoto(1, False)
+    assert player.photoPath == animated and player.photoAnimated
+    player.stepPhoto(1, False)  # the last picture: Next stops there, the slideshow goes round
+    assert player.photoPath == animated
+    player.stepPhoto(1, True)
+    assert player.photoPath == first
+    player.showPhoto(2)
+    assert player.photoPath == animated and player.photoHistoryId == 0
+    # A video's Previous and Next leave the pictures out.
+    player.playFrom(clip, [first, clip, second])
+    assert requests == ["photo", "video"] and not player.hasNextVideo
+
+
+def test_release_files_moves_the_viewer_on_or_closes_it(player, tmp_path):
+    first, second, third = files(tmp_path, "a.jpg", "b.jpg", "c.jpg")
+    player.viewPhotos([first, second, third], 1)
+    player.release_files([second.upper()])
+    assert player.photoPath == third and player.photoCount == 2
+    player.release_files([third])
+    assert player.photoPath == first and player.photoCount == 1
+    player.release_files([first])
+    assert player.photoPath == "" and player.photoCount == 0
+    player.closePhoto()  # the window's own close afterwards changes nothing
+    assert player.photoIndex == -1

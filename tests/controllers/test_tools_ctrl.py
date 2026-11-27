@@ -1,5 +1,6 @@
 """The download tools: what the window says about installs, update checks, and missing programs."""
 
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ import pytest
 
 from gfgmd.controllers import tools_ctrl
 from gfgmd.controllers.tools_ctrl import ToolsController
-from gfgmd.core.tool_install import ToolDownloadError, ToolInstallCancelled, ToolStartError, ToolVerifyError
+from gfgmd.core.tool_install import ToolDownloadError, ToolInstallCancelled, ToolStartError, ToolVerifyError, packages
 from gfgmd.core.tools import ToolsMissing
 from gfgmd.services import tool_manager
 from gfgmd.services.tool_manager import ToolManager
@@ -18,8 +19,12 @@ class FakeManager:
     """Stands in for ToolManager: reports missing programs, and installs or fails as told."""
 
     def __init__(self, missing: tuple[str, ...] = (), failure: BaseException | None = None,
-                 check_failure: BaseException | None = None) -> None:
+                 check_failure: BaseException | None = None, extras: tuple[str, ...] = (),
+                 extras_fail: tuple[str, ...] = ()) -> None:
         self._missing = list(missing)
+        self._extras = list(extras)
+        self.extras_fail = extras_fail
+        self.asked: list[list[str]] = []
         self.failure = failure
         self.check_failure = check_failure
         self.tools_root = Path(".")
@@ -32,15 +37,20 @@ class FakeManager:
     def missing(self) -> list[str]:
         return list(self._missing)
 
+    def missing_extras(self) -> list[str]:
+        return list(self._extras)
+
     def status(self) -> list[dict]:
         return []
 
     def install(self, names, progress, cancel) -> list[str]:
+        self.asked.append(list(names))
         progress("Deno: Downloading", 5, 10)
         if self.failure is not None:
             raise self.failure
         self._missing = []
-        return ["deno"]
+        self._extras = [name for name in self._extras if name in self.extras_fail]
+        return [name for name in names if name not in self.extras_fail] or ["deno"]
 
     def check_updates(self) -> list[str]:
         self.checks += 1
@@ -130,6 +140,64 @@ def test_partly_missing_tools_are_told_apart_from_a_first_run(qapp, make):
     assert not damaged.ready and damaged.partlyMissing
 
 
+def test_a_first_run_gets_the_extras_too_and_a_failed_extra_leaves_the_app_ready(qapp, make):
+    """gallery-dl and spotDL come with the first download; one that fails is named, and downloads still work."""
+    manager = FakeManager(missing=("yt-dlp", "deno"), extras=("gallery-dl", "spotdl"), extras_fail=("spotdl",))
+    controller, notices = make(manager)
+    assert "gallery-dl (saving pictures from posts) and spotDL" in controller.extrasNote
+    controller.installMissing()
+    settle(qapp, controller)
+    assert manager.asked == [["yt-dlp", "deno", "gallery-dl", "spotdl"]]
+    failed = "spotDL (reading long Spotify playlists) couldn't be installed. Click Update tools in Preferences > Tools to try again."
+    assert controller.stage == "The download tools are ready. " + failed and notices == [failed]
+    assert controller.ready and controller.extrasNote.startswith("spotDL (reading long Spotify playlists) is not installed")
+
+
+def test_a_missing_extra_alone_is_installed_on_its_own(qapp, make):
+    manager = FakeManager(extras=("gallery-dl",))
+    controller, _notices = make(manager)
+    assert controller.ready
+    controller.installMissing()
+    settle(qapp, controller)
+    assert manager.asked == [["gallery-dl"]] and controller.extrasNote == ""
+
+
+def _size(*tools: str) -> str:
+    return f"about {sum(package.approx_mb for package in packages() if package.tool in tools):,} MB"
+
+
+def test_downloads_offers_the_missing_extras_once_the_app_is_ready(qapp, make, monkeypatch):
+    """An app set up before gallery-dl and spotDL existed offers them on Downloads, sized for just them."""
+    monkeypatch.setattr(tools_ctrl.sys, "platform", "win32")
+    manager = FakeManager(extras=("gallery-dl", "spotdl"))
+    controller, _notices = make(manager)
+    assert controller.ready and controller.offerExtras
+    assert controller.downloadSize == _size("gallery-dl", "spotdl")
+    assert controller.extrasTitle == "Get the picture and Spotify tools"
+    assert controller.extrasOffer == (
+        "Saving pictures from posts needs gallery-dl, and reading long Spotify playlists needs spotDL "
+        f"({_size('gallery-dl', 'spotdl')}). They come from their official sources, are checked for safety, "
+        "and stay up to date on their own. Other downloads work without them.")
+    controller.installMissing()
+    settle(qapp, controller)
+    assert manager.asked == [["gallery-dl", "spotdl"]] and not controller.offerExtras
+
+
+def test_not_now_a_first_run_and_other_tool_sources_dont_offer_the_extras(qapp, make, monkeypatch):
+    monkeypatch.setattr(tools_ctrl.sys, "platform", "win32")
+    later, _ = make(FakeManager(extras=("spotdl",)))
+    assert later.offerExtras and later.extrasTitle == "Get the Spotify tool"
+    assert later.extrasOffer.startswith(f"Reading long Spotify playlists needs spotDL ({_size('spotdl')}). It comes")
+    later.extrasLater()
+    assert not later.offerExtras and later.extrasNote  # Preferences > Tools still names it
+    first_run, _ = make(FakeManager(missing=("yt-dlp", "deno"), extras=("spotdl",)))
+    assert not first_run.offerExtras  # the first-run card gets them with the rest
+    assert first_run.downloadSize == _size("yt-dlp", "deno", "spotdl")
+    monkeypatch.setattr(tools_ctrl, "load_settings", lambda: {"tools": {"source": "path"}})
+    on_path, _ = make(FakeManager(extras=("gallery-dl",)))
+    assert not on_path.offerExtras  # Download tools would save copies the app doesn't use
+
+
 def test_ffprobe_is_shown_as_part_of_ffmpeg():
     row = {"version": "n7.1", "path": "C:/tools/x.exe", "canRollBack": False}
     rows = [{**row, "name": "yt-dlp", "label": "yt-dlp", "origin": "managed"},
@@ -145,6 +213,26 @@ def test_ffprobe_is_shown_as_part_of_ffmpeg():
 def test_missing_tools_are_described_without_program_names():
     error = ToolsMissing(["yt-dlp", "ffprobe"])
     assert str(error) == "The download tools aren't installed yet." and error.missing == ["yt-dlp", "ffprobe"]
+
+
+def test_a_failed_extra_doesnt_stop_the_required_tools(tmp_path, monkeypatch):
+    """ToolManager logs an extra that fails and installs the rest; a required program's failure stops it."""
+    done: list[str] = []
+
+    def fake_install(package, root, progress, cancel, channel="stable"):
+        if package.tool in ("gallery-dl", "deno") and package.tool in failing:
+            raise ToolDownloadError(f"{package.label} is unreachable")
+        done.append(package.tool)
+        return {}
+
+    monkeypatch.setattr(tool_manager, "install", fake_install)
+    monkeypatch.setattr(tool_manager, "remove_unused", lambda root: None)
+    manager = ToolManager(SimpleNamespace(settings=lambda: {}, tools_root=tmp_path))  # type: ignore[arg-type]
+    failing = {"gallery-dl"}
+    assert manager.install(["yt-dlp", "gallery-dl", "spotdl"], lambda *args: None, threading.Event()) == ["yt-dlp", "spotdl"]
+    failing = {"deno"}
+    with pytest.raises(ToolDownloadError):
+        manager.install(["deno", "gallery-dl"], lambda *args: None, threading.Event())
 
 
 class TestUpdateCheck:
@@ -206,6 +294,32 @@ def test_yt_dlp_waits_for_an_unmetered_connection_after_a_failure(tmp_path, monk
                                           tools_root=tmp_path), metered=lambda: True)
     assert metered.hold_updates() and not allowed.hold_updates()
     assert not allowed.update_ytdlp() and asked == ["yt-dlp", "yt-dlp", "yt-dlp"]
+
+
+def test_managed_versions_come_from_the_manifest_and_others_run(tmp_path, monkeypatch):
+    """A finished install's versions show at once: managed copies aren't started again, and a program
+    from PATH is; a missing extra doesn't hide the programs that were found."""
+    tools_root = tmp_path / "tools"
+    for name in ("yt-dlp", "deno"):
+        (tools_root / name / "v1").mkdir(parents=True)
+        (tools_root / name / "v1" / f"{name}.exe").write_bytes(b"")
+    (tools_root / "manifest.json").write_text(
+        '{"yt-dlp": {"path": "yt-dlp/v1/yt-dlp.exe", "version": "2026.11.23"},'
+        ' "deno": {"path": "deno/v1/deno.exe", "version": "2.9.8", "previous": {"path": "deno/v0/deno.exe"}}}',
+        encoding="utf-8")
+    ffmpeg = str(tmp_path / "bin" / "ffmpeg.exe")
+    monkeypatch.setattr(tool_manager, "path_tools", lambda: {"ffmpeg": ffmpeg})
+    started: list[str] = []
+    monkeypatch.setattr(tool_manager, "tool_version", lambda name, path: started.append(name) or "n7.1")
+    found = {**tool_manager.managed_tools(tools_root), "ffmpeg": ffmpeg}
+    manager = ToolManager(SimpleNamespace(settings=lambda: {}, tools_root=tools_root,  # type: ignore[arg-type]
+                                          tool_paths=lambda: found))
+    rows = {row["name"]: row for row in manager.status()}
+    assert started == ["ffmpeg"]
+    assert (rows["yt-dlp"]["version"], rows["yt-dlp"]["origin"]) == ("2026.11.23", "managed")
+    assert rows["deno"]["canRollBack"] and not rows["yt-dlp"]["canRollBack"]
+    assert (rows["ffmpeg"]["version"], rows["ffmpeg"]["origin"]) == ("n7.1", "path")
+    assert rows["spotdl"]["origin"] == "missing" and rows["spotdl"]["version"] == ""
 
 
 def test_tool_versions_read_plainly() -> None:

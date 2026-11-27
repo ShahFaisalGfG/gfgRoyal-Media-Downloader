@@ -1,10 +1,10 @@
 ---
 name: gfgmd
-description: Download videos, music, playlists, channels, Shorts, Reels, TikToks, and live streams from YouTube and the other sites yt-dlp supports, with gfgmd, the command line of gfgRoyal Media Downloader. Use it when the user asks to download, save, or archive a video or its audio (MP3, M4A, FLAC, WAV), a whole playlist or channel, subtitles, or song lyrics from a link.
+description: Download videos, music, playlists, channels, Shorts, Reels, TikToks, live streams, and the pictures in posts from YouTube and the other sites yt-dlp supports, picture sites such as pixiv, Imgur, and Flickr, and Spotify playlists, albums, and songs (found on YouTube), with gfgmd, the command line of gfgRoyal Media Downloader. Use it when the user asks to download, save, or archive a video or its audio (MP3, M4A, FLAC, WAV), a whole playlist or channel, subtitles, song lyrics, or a post's pictures from a link, or to find a video or song by name.
 license: MIT
 compatibility: Windows 10 or 11 with gfgRoyal Media Downloader installed (or its portable 7z); elsewhere from source with Python 3.12 and yt-dlp, FFmpeg, and Deno on PATH.
 metadata:
-  version: "1.0.0"
+  version: "1.2.0"
   homepage: https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader
 ---
 
@@ -37,13 +37,27 @@ gfgmd "https://www.youtube.com/playlist?list=PLAYLIST_ID" --items 1:5 --json
 gfgmd "https://www.youtube.com/@CHANNEL/videos" --items 1:3 --json
 gfgmd "https://youtu.be/VIDEO_ID" --subs "en.*" --embed-subs --json
 gfgmd "https://www.tiktok.com/@USER/video/VIDEO_ID" --json
+gfgmd "https://www.instagram.com/p/POST_ID/" --cookies-from-browser firefox --json
+gfgmd "https://imgur.com/a/ALBUM_ID" --json
+gfgmd "https://open.spotify.com/playlist/PLAYLIST_ID" --json
 ```
 
 - `-r HEIGHT` caps the shorter side (default 1080; `0` is the best there is).
 - `--audio [FORMAT]` saves audio only: MP3 at 320 kbps by default, with a square cover, artist and title tags, and synced lyrics (`.lrc`) when the site or LRCLIB has them.
-- Video goes to `Videos\gfgRoyal Media Downloader`, audio to `Music\gfgRoyal Media Downloader`, unless `--output-dir` names another folder (made if it doesn't exist). A single video lands in that folder; a playlist, channel, or profile gets a folder of its own inside it.
+- Video goes to `Videos\gfgRoyal Media Downloader`, audio to `Music\gfgRoyal Media Downloader`, and pictures to `Pictures\gfgRoyal Media Downloader`, unless `--output-dir` names another folder (made if it doesn't exist). A single video lands in that folder; a playlist, channel, or profile gets a folder of its own inside it.
 - The download folder also gets working folders: `.archives` (what was downloaded), `.incomplete` (unfinished parts), and `.gfgmd` (the command line's resume state). Leave them: they make a rerun resume and skip what is done.
 - A video downloaded before into the same folder with the same choices is skipped as already downloaded.
+
+- `--section 1:30-4:05` downloads only that part of the video; `--split-chapters` saves one file per chapter (an album becomes one song each).
+- A post (Instagram, X, Reddit, and others) saves its videos and then its pictures; a post with pictures only saves them, and `--no-photos` keeps to the videos. A picture site's link (pixiv, DeviantArt, Imgur, ArtStation, Flickr) or a direct link to a picture saves pictures. Instagram and X usually need `--cookies-from-browser`.
+- A Spotify playlist, album, or song downloads as songs found on YouTube, named and tagged with Spotify's details; songs without a good match are listed as skipped.
+
+When the user names a song or a video rather than giving a link, search first, then download the link they pick (or the first result when they asked for it outright):
+
+```powershell
+gfgmd search "pasoori ali sethi" --music --limit 5 --json
+gfgmd search "how to tie a tie" --json
+```
 
 Every option is in [references/commands.md](references/commands.md).
 

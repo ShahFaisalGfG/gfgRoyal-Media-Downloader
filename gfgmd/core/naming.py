@@ -13,6 +13,8 @@ from gfgmd.core.platform import hidden_window_flags
 
 MEDIA_EXTENSIONS = {"mp4", "mkv", "webm", "m4a", "mp3", "opus", "ogg", "flac", "wav", "mov", "aac"}
 AUDIO_EXTENSIONS = {"m4a", "mp3", "opus", "ogg", "flac", "wav", "aac"}
+# Pictures saved from posts (core/gallery.py).
+IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "avif", "heic", "bmp", "tif", "tiff"}
 # The extension each audio format saves (yt-dlp's --audio-format names); "best" keeps the site's own.
 _AUDIO_FORMAT_EXTENSIONS = {"mp3": "mp3", "m4a": "m4a", "opus": "opus", "vorbis": "ogg", "flac": "flac", "wav": "wav"}
 
@@ -23,7 +25,7 @@ def format_label(path: str = "", options: dict[str, object] | None = None) -> st
     "" when it isn't known yet (the original audio, kept in whatever format the site sends).
     """
     extension = Path(path).suffix[1:] if path else ""
-    if not extension and options:
+    if not extension and options and options.get("kind") != "photo":  # pictures keep the site's own formats
         if options.get("kind") == "audio":
             extension = _AUDIO_FORMAT_EXTENSIONS.get(str(options.get("audio_format", "mp3")), "")
         else:

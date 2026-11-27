@@ -27,9 +27,22 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def format_views(count: int) -> str:
+    """A view count as people read it: 950 -> "950 views", 12_400 -> "12K views", 3_200_000 -> "3.2M views"."""
+    if count < 1:
+        return ""
+    for limit, unit in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if count >= limit:
+            value = count / limit
+            text = f"{value:.1f}".rstrip("0").rstrip(".") if value < 10 else f"{value:.0f}"
+            return f"{text}{unit} views"
+    return "1 view" if count == 1 else f"{count} views"
+
+
 def media_noun(kind: str, count: int = 1) -> str:
-    """What to call downloaded media: "song" for audio, "video" otherwise, plural unless count is 1."""
-    noun = "song" if kind == "audio" else "video"
+    """What to call downloaded media: "song" for audio, "picture" for photos, "video" otherwise, plural
+    unless count is 1."""
+    noun = {"audio": "song", "photo": "picture"}.get(kind, "video")
     return noun if count == 1 else noun + "s"
 
 

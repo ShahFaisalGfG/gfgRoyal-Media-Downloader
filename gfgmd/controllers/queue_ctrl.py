@@ -29,15 +29,18 @@ from gfgmd.core.archive import archive_path, read_archive_ids
 from gfgmd.core.auth import Checkout
 from gfgmd.core.command import SESSION_ARCHIVE, Auth, RunPaths
 from gfgmd.core.extract import AudioExtractor, ExtractSpec
-from gfgmd.core.jobs import STALL_SECONDS, JobExecutor, JobResult, JobSpec, Runner
+from gfgmd.core.gallery import (GalleryExecutor, GallerySpec, has_photos_pass, merge_results, photos_only,
+                                pictures_follow)
+from gfgmd.core.jobs import STALL_SECONDS, JobExecutor, JobResult, JobSpec
 from gfgmd.core.lyrics import Fetch
 from gfgmd.core.quick_info import Fetch as QuickFetch, QuickInfo, quick_info
-from gfgmd.core.naming import AUDIO_EXTENSIONS, group_of, remove_empty_scratch, remove_partials
+from gfgmd.core.naming import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, group_of, remove_empty_scratch, remove_partials
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import Event, Snapshot
-from gfgmd.core.runner import run_to_completion
+from gfgmd.core.runner import Runner, run_to_completion
 from gfgmd.core.schedule import limit_at, next_queue_start, per_job_limit
 from gfgmd.core.secret_store import SecretError, wipe
+from gfgmd.core.spotify import SpotifyExecutor
 from gfgmd.core.sources import (Source, as_link, canonical_url, playlist_link, single_video, source_from_url,
                                  video_link)
 from gfgmd.core.store import ACTIVE_STATES
@@ -83,7 +86,7 @@ class _Running:
     site: str  # "" for an audio extraction, which no site limits
     live: bool
     root: str = ""  # the download folder it saves into
-    executor: JobExecutor | AudioExtractor | None = None
+    executor: JobExecutor | AudioExtractor | GalleryExecutor | SpotifyExecutor | None = None
     stop_reason: str = ""
     files: list[tuple[dict[str, Any], str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -126,6 +129,9 @@ def base_options(settings: dict[str, Any], kind: str = "video") -> DownloadOptio
         "embed_thumbnail": formats.get("audio_embed_cover" if audio else "embed_thumbnail", True),
         "embed_metadata": formats.get("audio_embed_metadata" if audio else "embed_metadata", True),
         "embed_chapters": formats.get("audio_embed_chapters" if audio else "embed_chapters", True),
+        "split_chapters": formats.get("audio_split_chapters" if audio else "split_chapters", False),
+        "exact_cut": formats.get("exact_cut", False),
+        "save_photos": downloads.get("save_photos", True),
         "sponsorblock": formats.get("sponsorblock", "off"),
         "sponsorblock_categories": formats.get("sponsorblock_categories", ["sponsor"]),
         "filename_style": downloads.get("filename_style", "title-quality"),
@@ -402,12 +408,14 @@ class QueueController(QObject):
 
     def download_again(self, url: str, kind: str, extension: str) -> None:
         """Queue a link even if it was downloaded before (the Library's Download again), as the same type
-        of file as the one in the Library: a song stays a song, an MKV stays an MKV. The rest of the
-        choices are the Video or Audio defaults from Preferences."""
+        of file as the one in the Library: a song stays a song, an MKV stays an MKV, a picture is saved
+        again as a picture. The rest of the choices are the Video or Audio defaults from Preferences."""
         settings = load_settings()
         try:
             switch = settings.get("downloads", {}).get("kind", "video")
             options = base_options(settings, kind if kind in ("audio", "video") else switch)
+            if kind == "photo":
+                options = options.with_changes(kind="photo")
             audio_format = {"ogg": "vorbis"}.get(extension, extension)
             if options.kind == "audio" and audio_format in FormatDefaults.AUDIO_FORMATS:
                 options = options.with_changes(audio_format=audio_format)
@@ -463,12 +471,14 @@ class QueueController(QObject):
         return added + listed + held
 
     def _listed(self, url: str, options: DownloadOptions) -> bool:
-        """True when this link waits or downloads already with the same type and quality."""
+        """True when this link waits or downloads already with the same type and quality (and the same
+        part of the video, since two parts are two files)."""
         for job in self._context.store.jobs(ACTIVE_STATES):
             # A subscription's uploads carry its link but are not that whole channel or playlist.
             if job["url"] == url and not job["input_path"] and not job["batch"]:
                 listed = DownloadOptions.from_dict(json.loads(job["options_json"]))
-                if (listed.kind, listed.profile) == (options.kind, options.profile):
+                if (listed.kind, listed.profile, listed.section_start, listed.section_end) == \
+                        (options.kind, options.profile, options.section_start, options.section_end):
                     return True
         return False
 
@@ -537,6 +547,12 @@ class QueueController(QObject):
              title: str = "", thumbnail: str = "", not_before: float = 0.0, subscription_id: int | None = None,
              account_id: int | None = None, state: str = "", input_path: str = "", folder: str = "",
              batch: bool = False) -> int:
+        if options.kind != "photo" and photos_only(source, url):
+            options = options.with_changes(kind="photo")  # a picture site's link saves pictures, whatever was chosen
+        elif source.site == "spotify" and options.kind != "audio":
+            # Spotify's links are songs: the Audio defaults, whatever was chosen (the network choices kept).
+            settings = load_settings()
+            options = with_network(base_options(settings, "audio"), settings).with_changes(items=options.items)
         root = str(self._context.download_root(options.kind))
         job_id = self._context.store.add_job(
             url, source.kind, source.source_id, source.site, options.to_dict(), root, source.tab, title, thumbnail,
@@ -943,35 +959,61 @@ class QueueController(QObject):
             except (SecretError, OSError, TimeoutError) as error:
                 write_log(f"Sign-in for {job['site']} couldn't be used: {error}", "critical")
                 context.store.update_account(account["id"], status="expired")
+        def saved(info: dict[str, Any], path: Path) -> None:
+            with running.lock:
+                running.files.append((info, str(path)))
+
+        def noted(event: Event) -> None:
+            if event.kind == "error":  # yt-dlp's own words, for the log; the row shows the plain one
+                write_log(f"Download {job['id']}: {event.text}", "critical")
+
         try:
+            if options.kind == "photo":
+                return self._save_pictures(running, job, source, auth, options, saved, images_only=False)
             root = Path(job["output_root"])
             paths = RunPaths(root, Path(running.archive), context.job_dir(job["id"]), context.cache_dir)
             urls = tuple(str(item["url"]) for item in context.store.job_items(job["id"]) if item["url"]) \
                 if job["batch"] else ()
             spec = JobSpec(job["url"], source, options, paths, auth, max_attempts, retry_delay, skip, urls,
                            job["folder"])
-
-            def saved(info: dict[str, Any], path: Path) -> None:
-                with running.lock:
-                    running.files.append((info, str(path)))
-
-            def noted(event: Event) -> None:
-                if event.kind == "error":  # yt-dlp's own words, for the log; the row shows the plain one
-                    write_log(f"Download {job['id']}: {event.text}", "critical")
-
-            executor = JobExecutor(spec, context.tools, on_file=saved, on_event=noted,
-                                   update_tools=self._tools.update_ytdlp, stall_seconds=self._stall_seconds,
-                                   runner=self._program_runner, lyrics_fetch=self._lyrics_fetch)
+            executor: JobExecutor | SpotifyExecutor
+            if source.site == "spotify":
+                # The songs come from YouTube; the ones Download options picked are in the options' items.
+                executor = SpotifyExecutor(spec, context.tools, context.cache_dir / "spotdl", on_file=saved,
+                                           on_event=noted, update_tools=self._tools.update_ytdlp,
+                                           runner=self._program_runner, lyrics_fetch=self._lyrics_fetch,
+                                           stall_seconds=self._stall_seconds)
+            else:
+                executor = JobExecutor(spec, context.tools, on_file=saved, on_event=noted,
+                                       update_tools=self._tools.update_ytdlp, stall_seconds=self._stall_seconds,
+                                       runner=self._program_runner, lyrics_fetch=self._lyrics_fetch)
             running.executor = executor
             if running.stop_reason:
                 return JobResult("stopped")
-            return executor.run()
+            result = executor.run()
+            if has_photos_pass(source, options) and pictures_follow(result) and not running.stop_reason:
+                # The post's pictures, after its videos (yt-dlp saves no pictures).
+                pictures = self._save_pictures(running, job, source, auth, options, saved, images_only=True)
+                result = merge_results(result, pictures)
+            return result
         finally:
             if checkout is not None and account is not None:
                 try:
                     context.vault.checkin(account["id"], checkout)
                 except (SecretError, OSError, TimeoutError) as error:
                     write_log(f"Sign-in cookies couldn't be stored back: {error}", "critical")
+
+    def _save_pictures(self, running: _Running, job: dict[str, Any], source: Source, auth: Auth | None,
+                       options: DownloadOptions, saved: Callable[[dict[str, Any], Path], None],
+                       images_only: bool) -> JobResult:
+        """On the pool: save a picture link's pictures, or (images_only) a post's after its videos."""
+        spec = GallerySpec(job["url"], source, self._context.download_root("photo"),
+                           self._context.job_dir(job["id"]) / "pictures", auth, options, images_only, job["title"])
+        gallery = GalleryExecutor(spec, self._context.tools, on_file=saved, runner=self._program_runner)
+        running.executor = gallery  # stop and progress reach the pictures now
+        if running.stop_reason:
+            return JobResult("stopped", kind="photo")
+        return gallery.run()
 
     def _extract_audio(self, running: _Running, job: dict[str, Any], options: DownloadOptions) -> JobResult:
         """On the pool: write a downloaded video's audio into the audio folder."""
@@ -1006,7 +1048,7 @@ class QueueController(QObject):
     def _take_updates(self, running: _Running) -> bool:
         """Store what the download learned about its videos (its list, skips, stalls); True when any changed."""
         executor = running.executor
-        if not isinstance(executor, JobExecutor):
+        if not isinstance(executor, (JobExecutor, SpotifyExecutor)):
             return False
         updates = executor.take_updates()
         job = self._context.store.job(running.job_id)
@@ -1062,11 +1104,14 @@ class QueueController(QObject):
                 size = 0
             extension = Path(path).suffix[1:].lower()
             height, duration = info.get("height"), info.get("duration")
-            group_key, group_title = group_of(Path(path), Path(job["output_root"]) if job else None)
+            # A post's pictures go under the pictures folder, whatever folder its videos went to.
+            root = str(info.get("_root") or (job["output_root"] if job else ""))
+            group_key, group_title = group_of(Path(path), Path(root) if root else None)
+            kind = "photo" if extension in IMAGE_EXTENSIONS else "audio" if extension in AUDIO_EXTENSIONS else "video"
             position = info.get("playlist_index")
             history_id = self._context.store.add_history(
                 path, job_id=running.job_id, video_id=str(info.get("id") or ""),
-                site=job["site"] if job else "", kind="audio" if extension in AUDIO_EXTENSIONS else "video",
+                site=job["site"] if job else "", kind=kind,
                 title=str(info.get("title") or Path(path).stem),
                 uploader=str(info.get("uploader") or info.get("channel") or ""),
                 url=str(info.get("webpage_url") or ""),
@@ -1075,7 +1120,7 @@ class QueueController(QObject):
                 size=size, thumbnail=str(info.get("thumbnail") or (job or {}).get("thumbnail", "")),
                 group_key=group_key, group_title=group_title,
                 position=position if isinstance(position, int) else 0,
-                output_root=job["output_root"] if job else "")
+                output_root=root)
             if job is not None and info.get("id") and source_of(job).is_collection:
                 # A video the list didn't name (a site without a playlist file) is added as it is saved.
                 self._context.store.add_items(running.job_id, [{

@@ -86,6 +86,11 @@ CATEGORIES = {category.key: category for category in (
              final_message="Another program kept the file open. Close it and try again."),
     Category("tools", Policy.STOP, "The download tools are missing or damaged. Update them, then try again.",
              "repair_tools"),
+    Category("no_match", Policy.SKIP, "No matching song was found on YouTube."),
+    Category("spotify_unreadable", Policy.STOP, "Spotify's page couldn't be read. Update the download tools, then "
+             "try again.", "update_tools"),
+    Category("gallery_missing", Policy.STOP, "Saving pictures needs gallery-dl, one of the download tools, "
+             "which isn't installed yet.", "repair_tools"),
     Category("upcoming", Policy.STOP, "This stream hasn't started yet. Try again once it starts, or choose to wait "
              "for it."),
     Category("postprocess", Policy.RETRY, "The file couldn't be finished after downloading; trying again.",

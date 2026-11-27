@@ -2,8 +2,11 @@
 import QtQuick
 import QtQuick.Layouts
 
-// One file in the Library: cover, title, details, and Play, Show in folder, and More. Inside an open
-// playlist or channel group it is indented under the group and numbered by its place in the list.
+import "MediaKind.js" as MediaKind
+
+// One file in the Library: cover, title, details, and Play (View for a picture), Show in folder, and
+// More. Inside an open playlist, channel, or post group it is indented under the group and numbered
+// by its place in the list.
 Rectangle {
     id: record
 
@@ -46,7 +49,7 @@ Rectangle {
     border.color: Theme.focusRing
     Accessible.role: Accessible.ListItem
     Accessible.name: (record.inGroup ? record.number + ", " : "") + record.title
-        + (record.kind === "audio" ? ", song" : ", video") + (record.missing ? ", file moved or deleted" : "")
+        + ", " + MediaKind.noun(record.kind) + (record.missing ? ", file moved or deleted" : "")
     Accessible.selectable: true
     Accessible.selected: record.selected
     HoverHandler { id: rowHover }
@@ -114,8 +117,9 @@ Rectangle {
             visible: !record.missing
             kind: "ghost"
             compact: true
-            iconName: "play"
-            toolTipText: record.inGroup ? "Play from here (Enter)" : "Play here (Enter)"
+            iconName: record.kind === "photo" ? "photo" : "play"
+            toolTipText: record.kind === "photo" ? "View (Enter)"
+                : record.inGroup ? "Play from here (Enter)" : "Play here (Enter)"
             onClicked: record.playRequested(record.path, record.groupKey)
         }
         AppButton {

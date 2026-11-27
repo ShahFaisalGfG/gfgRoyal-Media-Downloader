@@ -8,6 +8,7 @@ import QtQml.Models
 
 import "../components"
 import "../components/ListMenu.js" as ListMenu
+import "../components/MediaKind.js" as MediaKind
 
 // Paste a link and press Download: Video or Audio as the switch beside the box says. With Smart Mode
 // on it downloads at once with the defaults from Preferences; off, Download options open first.
@@ -98,7 +99,8 @@ Item {
     // Smart Mode downloads at once; without it, Download options open first.
     function download() {
         if (linkField.links.length === 0) page.pasteLink()
-        if (linkField.links.length === 0) return
+        if (linkField.links.length === 0 || linkField.searching) return
+        searchController.close()
         if (!page.smart) {
             page.showOptions()
             return
@@ -110,14 +112,41 @@ Item {
     // Download options for the links in the box: one link's details, or one set of choices for several.
     function showOptions() {
         if (linkField.text.length === 0) page.pasteLink()
-        if (linkField.links.length === 0) {
+        if (linkField.links.length === 0 || linkField.searching) {
             appController.notice("Paste a link first, then open its download options.")
             return
         }
+        searchController.close()
         page.optionsOpen = true
         if (linkField.links.length > 1) analyzeController.showLinks(linkField.links)
         else analyzeController.analyze(linkField.links[0])
     }
+
+    // Search for the words in the link box: videos with Video chosen, songs on YouTube Music with Audio.
+    function search() {
+        if (!toolsController.ready || !linkField.searching) return
+        page.optionsOpen = false
+        searchController.search(linkField.text, page.kind === "audio")
+    }
+
+    // Download what a search found, as Download does for the link box: at once with Smart Mode, else
+    // in Download options (one result's details, or one set of choices for several); the results stay.
+    function downloadFound(links) {
+        if (links.length === 0) return
+        if (page.smart) {
+            if (queueController.addLinks(links.join("\n"), page.kind) > 0) {
+                searchController.checkAll(false)
+                appController.notice(links.length === 1 ? "Added to Downloads." : links.length + " added to Downloads.")
+            }
+            return
+        }
+        page.optionsOpen = true
+        if (links.length > 1) analyzeController.showLinks(links)
+        else analyzeController.analyze(links[0])
+    }
+
+    // Switching between Video and Audio searches the same words where that kind is found.
+    onKindChanged: if (searchController.shown) searchController.search(searchController.query, page.kind === "audio")
 
     // Put a link in the link box and open its download options (the Sign-ins page's library shortcuts).
     function openLink(url) {
@@ -149,14 +178,14 @@ Item {
             LinkField {
                 id: linkField
                 Layout.fillWidth: true
-                placeholderText: "Paste a link to a video, playlist, or channel"
+                placeholderText: "Paste a link, or type words to search"
                 downloadEnabled: toolsController.ready
                 downloadToolTip: toolsController.ready ? "" : "Get the download tools first"
-                onAccepted: page.download()
+                onAccepted: linkField.searching ? page.search() : page.download()
                 onDownloadRequested: page.download()
+                onSearchRequested: page.search()
                 // Reading starts as soon as a link is pasted, so Download options open quickly.
                 onLinkReady: function (url) { if (toolsController.ready) analyzeController.prefetch(url) }
-                onNotLink: appController.notice("The copied text isn't a link. Copy the link from your browser's address bar.")
                 input.Keys.onEscapePressed: linkField.clear()
             }
             SegmentedChoice {
@@ -172,7 +201,7 @@ Item {
 
         ToolsCard {
             Layout.fillWidth: true
-            visible: !toolsController.ready
+            visible: !toolsController.ready || toolsController.offerExtras
             onChooseLocations: page.openPreferences()
         }
 
@@ -200,6 +229,13 @@ Item {
                 toolTipText: "Dismiss"
                 onClicked: analyzeController.clear()
             }
+        }
+
+        SearchResults {
+            Layout.fillWidth: true
+            visible: searchController.shown && !page.optionsShown
+            maxHeight: Math.max(240, page.height * (queueView.count === 0 ? 0.8 : 0.62))
+            onDownloadRequested: function (links) { page.downloadFound(links) }
         }
 
         OptionsPanel {
@@ -373,7 +409,7 @@ Item {
                             if (action === "signin") page.openSignIns()
                             else if (action === "choose_folder") {
                                 folderDialog.jobId = jobId
-                                folderDialog.audio = jobRow.kind === "audio"
+                                folderDialog.kind = jobRow.kind
                                 folderDialog.open()
                             }
                             else {
@@ -400,7 +436,7 @@ Item {
 
             EmptyState {
                 anchors.centerIn: parent
-                visible: queueView.count === 0 && !page.optionsShown
+                visible: queueView.count === 0 && !page.optionsShown && !searchController.shown
                 iconName: "download"
                 title: "Nothing downloading yet"
                 text: "Copy a link from your browser and press Download, or drag links onto this window. "
@@ -437,7 +473,7 @@ Item {
         AppMenuItem {
             // On a finished download it fetches only what was skipped (a private video, one that kept failing).
             text: jobMenu.row.jobState === "done"
-                ? "Try the skipped " + (jobMenu.row.kind === "audio" ? "songs" : "videos") + " again" : "Try again"
+                ? "Try the skipped " + MediaKind.noun(jobMenu.row.kind, 2) + " again" : "Try again"
             enabled: jobMenu.row.canRetry === true
             onTriggered: queueController.retry(jobMenu.jobId)
         }
@@ -456,7 +492,7 @@ Item {
         AppMenuSeparator {}
         AppMenuItem {
             text: "Extract audio"
-            visible: jobMenu.row.kind !== "audio"
+            visible: jobMenu.row.kind !== "audio" && jobMenu.row.kind !== "photo"
             enabled: jobMenu.row.jobState === "done" && (jobMenu.row.lastFile || "").length > 0
             onTriggered: extractDialog.forJob(jobMenu.jobId, jobMenu.row.title)
         }
@@ -589,14 +625,21 @@ Item {
     FolderDialog {
         id: folderDialog
         property int jobId: -1
-        property bool audio: false
-        title: folderDialog.audio ? "Choose the audio folder" : "Choose the video folder"
+        // The download's kind: its folder preference is the video, audio, or pictures folder.
+        property string kind: "video"
+        readonly property string key: folderDialog.kind === "audio" ? "downloads.audio_folder"
+                                    : folderDialog.kind === "photo" ? "downloads.photo_folder" : "downloads.folder"
+        title: folderDialog.kind === "audio" ? "Choose the audio folder"
+             : folderDialog.kind === "photo" ? "Choose the pictures folder" : "Choose the video folder"
         onAccepted: {
             var path = appController.localPath(selectedFolder.toString())
             if (path.length > 0) {
-                prefsController.saveSettings(folderDialog.audio ? {"downloads.audio_folder": path} : {"downloads.folder": path})
+                var change = {}
+                change[folderDialog.key] = path
+                prefsController.saveSettings(change)
                 if (folderDialog.jobId >= 0) queueController.moveToFolder(folderDialog.jobId, path)
-                appController.notice((folderDialog.audio ? "Songs" : "Videos") + " now save in " + path + ".")
+                var noun = MediaKind.noun(folderDialog.kind, 2)
+                appController.notice(noun.charAt(0).toUpperCase() + noun.slice(1) + " now save in " + path + ".")
             }
         }
     }

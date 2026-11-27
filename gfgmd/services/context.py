@@ -12,8 +12,9 @@ from gfgmd.core.auth import SignInVault
 from gfgmd.core.command import Auth
 from gfgmd.core.sites import Site, resolve_site, site_by_key
 from gfgmd.core.store import Store
-from gfgmd.core.tools import ToolSet, resolve_tools
-from gfgmd.utils.paths import cache_dir, default_audio_root, default_download_root, local_dir, local_subdir, tools_dir
+from gfgmd.core.tools import ToolSet, find_tools, resolve_tools
+from gfgmd.utils.paths import (cache_dir, default_audio_root, default_download_root, default_photo_root, local_dir,
+                               local_subdir, tools_dir)
 from gfgmd.utils.settings import load_settings
 
 # Sign-in methods whose cookies live in the vault (the others read a browser on each run).
@@ -44,20 +45,33 @@ class AppContext:
         return load_settings()
 
     def download_root(self, kind: str = "video") -> Path:
-        """Where downloads of this kind go: the preference, else Videos (or Music for audio)."""
+        """Where downloads of this kind go: the preference, else Videos (Music for audio, Pictures for photos)."""
         prefs = self.settings().get("downloads", {})
         if kind == "audio":
             folder = str(prefs.get("audio_folder", "") or "")
             return Path(folder) if folder else default_audio_root()
+        if kind == "photo":
+            folder = str(prefs.get("photo_folder", "") or "")
+            return Path(folder) if folder else default_photo_root()
         folder = str(prefs.get("folder", "") or "")
         return Path(folder) if folder else default_download_root()
 
     def tools(self) -> ToolSet:
         """The programs to run, from the chosen source; raises ToolsMissing."""
+        source, custom = self._tool_source()
+        return resolve_tools(source, self.tools_root, custom)
+
+    def tool_paths(self) -> dict[str, str]:
+        """Every program found with the current settings, by name; missing ones are left out."""
+        source, custom = self._tool_source()
+        return find_tools(source, self.tools_root, custom)
+
+    def _tool_source(self) -> tuple[str, dict[str, str]]:
         prefs = self.settings().get("tools", {})
         custom = {"yt-dlp": prefs.get("ytdlp_path", ""), "ffmpeg": prefs.get("ffmpeg_path", ""),
-                  "ffprobe": _beside(prefs.get("ffmpeg_path", ""), "ffprobe"), "deno": prefs.get("deno_path", "")}
-        return resolve_tools(str(prefs.get("source", "managed")), self.tools_root, custom)
+                  "ffprobe": _beside(prefs.get("ffmpeg_path", ""), "ffprobe"), "deno": prefs.get("deno_path", ""),
+                  "gallery-dl": prefs.get("gallery_dl_path", ""), "spotdl": prefs.get("spotdl_path", "")}
+        return str(prefs.get("source", "managed")), custom
 
     def roots_of(self, records: Sequence[dict[str, Any]]) -> list[Path | None]:
         """The download folder each library file was saved under, in order.

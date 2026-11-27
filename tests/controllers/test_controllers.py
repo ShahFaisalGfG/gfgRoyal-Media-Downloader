@@ -626,3 +626,94 @@ def test_every_row_value_is_a_model_role(context, tmp_path):
     assert set(queue_rows.job_row(job, "YouTube", "", {}, True, "video")) == set(queue_rows.ROLES)
     item = context.store.job_items(job_id)[0]
     assert set(queue_rows.entry_row(job, item, 1, "video", "", None)) == set(queue_rows.ROLES)
+
+
+# ── Download options: pictures ────────────────────────────────────────────
+
+PICTURE_TOOLS = ToolSet("FAKE-YT-DLP", "ffmpeg", "ffprobe", "deno", gallery_dl="FAKE-GALLERY-DL")
+
+
+def reading_pictures(fake_gallerydl):
+    """list_pictures with the fake gallery-dl in place of the real one."""
+    from gfgmd.controllers import analyze_ctrl
+    from gfgmd.core.gallery import list_pictures
+    runner = fake_runner(fake_gallerydl)
+    return patch.object(analyze_ctrl, "list_pictures",
+                        lambda spec, tools, stop=None: list_pictures(spec, tools, runner=runner, stop=stop))
+
+
+def test_a_picture_link_lists_its_pictures_and_queues_them(qapp, context, paused_queue, fake_gallerydl, monkeypatch):
+    monkeypatch.setattr(context, "tools", lambda: PICTURE_TOOLS)
+    controller = AnalyzeController(context, paused_queue)
+    with reading_pictures(fake_gallerydl):
+        controller.analyze("https://imgur.com/a/album1")
+        assert wait_for(qapp, lambda: controller.ready)
+    assert controller.photos and not controller.isPlaylist and not controller.postPictures
+    assert controller.details == "3 pictures" and controller.title == "Imgur album1"
+    assert [picture["preview"] for picture in controller.pictures] == [
+        "https://i.fake.test/album_01.jpg", "https://i.fake.test/album_02.png", "https://i.fake.test/album_03.gif"]
+    assert controller.thumbnail == "https://i.fake.test/album_01.jpg"
+    assert controller.addToQueue({"kind": "video", "max_height": 1080})
+    job = context.store.jobs()[0]
+    assert json.loads(job["options_json"])["kind"] == "photo" and job["title"] == "Imgur album1"
+    controller.shutdown()
+
+
+def test_a_post_without_a_video_lists_its_pictures(qapp, context, paused_queue, fake_ytdlp, fake_gallerydl,
+                                                   tmp_path, monkeypatch):
+    """yt-dlp finds no video in the post, so gallery-dl lists its pictures instead of an error."""
+    monkeypatch.setattr(context, "tools", lambda: PICTURE_TOOLS)
+    controller = AnalyzeController(context, paused_queue)
+    with (patch.object(analyze_module, "run_to_completion", fake_runner(fake_ytdlp + ["--paths", str(tmp_path)])),
+          reading_pictures(fake_gallerydl)):
+        controller.analyze("https://x.com/pictures/status/2")
+        assert wait_for(qapp, lambda: controller.ready or controller.error)
+    assert controller.error == "" and controller.photos and controller.details == "4 pictures"
+    controller.shutdown()
+
+
+def test_a_post_offers_to_save_its_pictures(qapp, context, paused_queue, fake_ytdlp, tmp_path, monkeypatch):
+    controller = AnalyzeController(context, paused_queue)
+    with patch.object(analyze_module, "run_to_completion", fake_runner(fake_ytdlp + ["--paths", str(tmp_path)])):
+        controller.analyze("https://x.com/mixed/status/1")
+        assert wait_for(qapp, lambda: controller.ready)
+    assert controller.postPictures and not controller.photos
+    assert controller.addToQueue({"kind": "video", "save_photos": False})
+    assert json.loads(context.store.jobs()[0]["options_json"])["save_photos"] is False
+    controller.shutdown()
+
+
+def test_a_picture_link_without_gallery_dl_says_so(qapp, context, paused_queue):
+    controller = AnalyzeController(context, paused_queue)
+    controller.analyze("https://imgur.com/a/album1")
+    assert wait_for(qapp, lambda: controller.error != "")
+    assert controller.error.startswith("Saving pictures needs gallery-dl") and controller.errorAction == "repair_tools"
+    controller.shutdown()
+
+# ── Download options: Spotify ─────────────────────────────────────────────
+
+def test_a_spotify_album_lists_its_songs_and_queues_the_picked_ones(qapp, context, paused_queue):
+    from tests.core.test_spotify import ALBUM_ID, album_page
+    from gfgmd.controllers import analyze_ctrl
+    from gfgmd.core.spotify import read_page
+    controller = AnalyzeController(context, paused_queue)
+    with patch.object(analyze_ctrl, "read_page", lambda url: read_page(url, page=lambda _: album_page("A", "B", "C"))):
+        controller.analyze(f"https://open.spotify.com/album/{ALBUM_ID}")
+        assert wait_for(qapp, lambda: controller.ready)
+    assert controller.songsOnly and controller.isPlaylist and controller.details == "3 songs"
+    assert controller.listNote == "" and controller.entries.totalCount == 3
+    controller.entries.toggle(1)  # leave out the second song
+    assert controller.addToQueue({"kind": "video", "max_height": 1080})
+    job = context.store.jobs()[0]
+    options = json.loads(job["options_json"])
+    assert (options["kind"], options["items"]) == ("audio", "1,3")
+    assert context.store.job_items(job["id"]) == []  # the songs are listed as each is found on YouTube
+    controller.shutdown()
+
+
+def test_subscriptions_leave_spotify_and_picture_sites_out(qapp, context, paused_queue):
+    subs = SubscriptionsController(context, paused_queue, Notifier(lambda: None, lambda p: None))
+    for link in ("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M", "https://imgur.com/a/album1"):
+        assert "can't be followed" in subs.linkProblem(link)
+        assert subs.add(link, {}, 24, False, True) is False
+    assert context.store.subscriptions() == []

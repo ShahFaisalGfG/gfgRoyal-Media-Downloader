@@ -8,7 +8,7 @@ import QtQml.Models
 import "../components"
 import "../components/ListMenu.js" as ListMenu
 
-// Everything downloaded, newest first: search, filter by type and site, play, show in folder,
+// Everything downloaded, newest first: search, filter by type and site, play or view, show in folder,
 // download again, or move files to the Recycle Bin. A playlist's or channel's files make one group
 // row that opens into them, in the playlist's order.
 Item {
@@ -109,8 +109,8 @@ Item {
             }
             StyledComboBox {
                 Layout.preferredWidth: 150
-                model: [{"label": "Videos and audio", "code": ""}, {"label": "Videos", "code": "video"},
-                        {"label": "Audio", "code": "audio"}]
+                model: [{"label": "All files", "code": ""}, {"label": "Videos", "code": "video"},
+                        {"label": "Audio", "code": "audio"}, {"label": "Pictures", "code": "photo"}]
                 value: page.kindFilter
                 accessibleName: "Type"
                 onActivated: { page.kindFilter = currentValue; page.applyFilters() }
@@ -317,7 +317,7 @@ Item {
             menu.openAt(at || null)
         }
         AppMenuItem {
-            text: "Open in another player"
+            text: menu.kind === "photo" ? "Open in another app" : "Open in another player"
             enabled: !menu.missing
             onTriggered: appController.openPath(libraryController.pathOf(menu.historyId))
         }
@@ -355,7 +355,7 @@ Item {
             groupMenu.folder = folder
             groupMenu.openAt(at || null)
         }
-        AppMenuItem { text: "Play all"; onTriggered: page.playGroup(groupMenu.groupKey) }
+        AppMenuItem { text: groupMenu.kind === "photo" ? "View all" : "Play all"; onTriggered: page.playGroup(groupMenu.groupKey) }
         AppMenuItem { text: "Open folder"; onTriggered: appController.openPath(groupMenu.folder) }
         AppMenuItem {
             text: "Extract audio"

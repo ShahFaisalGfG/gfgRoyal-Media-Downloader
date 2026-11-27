@@ -42,6 +42,15 @@ class Entry:
 
 
 @dataclass(frozen=True)
+class Chapter:
+    """One chapter of a video, as its creator marked it: its title and where it starts and ends."""
+
+    title: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True)
 class AudioTrack:
     """One audio language a video offers; sites such as YouTube add dubbed tracks to the original."""
 
@@ -74,6 +83,7 @@ class Analysis:
     track: str = ""
     album: str = ""
     entries: list[Entry] = field(default_factory=list)
+    chapters: list[Chapter] = field(default_factory=list)
     # False when entries are themselves lists (a channel's tabs), which can't be picked one by one.
     selectable: bool = True
     size_estimate: int = 0
@@ -124,7 +134,21 @@ def parse_info(info: dict[str, Any], options: DownloadOptions | None = None) -> 
     result.subtitle_langs = sorted(str(key) for key in (info.get("subtitles") or {}) if key != "live_chat")
     result.auto_subtitle_langs = sorted(str(key) for key in (info.get("automatic_captions") or {}))
     result.size_estimate = estimate_size(formats, options or DownloadOptions())
+    result.chapters = chapters_of(info)
     return result
+
+
+def chapters_of(info: dict[str, Any]) -> list[Chapter]:
+    """The video's chapters in order; ones without a title or a time are left out."""
+    chapters = []
+    for item in info.get("chapters") or []:
+        if not isinstance(item, dict):
+            continue
+        start, end = item.get("start_time"), item.get("end_time")
+        title = str(item.get("title") or "").strip()
+        if title and isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start:
+            chapters.append(Chapter(title, float(start), float(end)))
+    return chapters
 
 
 def entry_from(entry: dict[str, Any], position: int) -> Entry | None:

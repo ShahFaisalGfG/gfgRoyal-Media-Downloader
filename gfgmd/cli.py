@@ -25,19 +25,26 @@ from typing import Any, Sequence
 
 from gfgmd.config.defaults import AppInfo, DownloadDefaults, FormatDefaults
 from gfgmd.core import web
+from gfgmd.core.analyze import AnalyzeError
 from gfgmd.core.archive import archive_path
 from gfgmd.core.command import Auth, RunPaths
 from gfgmd.core.errors import CATEGORIES, Category, Failure, classify
+from gfgmd.core.gallery import (GalleryExecutor, GallerySpec, has_photos_pass, merge_results, photos_only,
+                                pictures_follow)
 from gfgmd.core.jobs import JobExecutor, JobResult, JobSpec
 from gfgmd.core.lyrics import fetch_json
 from gfgmd.core.naming import normalize_downloads
-from gfgmd.core.options import DownloadOptions, check_proxy
+from gfgmd.core.options import DownloadOptions, check_proxy, parse_time
 from gfgmd.core.progress import Event, Snapshot
+from gfgmd.core.search import FIRST_RESULTS, MORE_RESULTS, SearchResult, clean_query
+from gfgmd.core.search import search as run_search
+from gfgmd.core.spotify import SpotifyExecutor
 from gfgmd.core.sources import Source, as_link, canonical_url, single_video, source_from_url, video_link
 from gfgmd.core.tools import ToolSet, ToolsMissing, resolve_tools
 from gfgmd.utils import agent_skills
-from gfgmd.utils.format import format_bytes, format_time_left, format_wait, media_noun
-from gfgmd.utils.paths import cache_dir, default_audio_root, default_download_root, tools_dir
+from gfgmd.utils.format import (format_bytes, format_duration, format_time_left, format_views, format_wait,
+                                media_noun)
+from gfgmd.utils.paths import cache_dir, default_audio_root, default_download_root, default_photo_root, tools_dir
 
 EXIT_OK, EXIT_FAILED, EXIT_INVALID, EXIT_STOPPED = 0, 1, 2, 130
 _RATE = re.compile(r"^(\d+(?:\.\d+)?)([KMG]?)(?:i?B)?(?:/s)?$", re.IGNORECASE)
@@ -47,6 +54,11 @@ _EXAMPLES = r"""examples:
   gfgmd "https://youtu.be/VIDEO_ID" -r 720 --output-dir "D:\Videos"
   gfgmd "https://www.youtube.com/playlist?list=PLAYLIST_ID" --audio --items 1:5
   gfgmd "https://www.tiktok.com/@user/video/VIDEO_ID" --json
+  gfgmd "https://www.instagram.com/p/POST_ID/"   its videos and pictures
+  gfgmd "https://imgur.com/a/ALBUM_ID"            a picture site's album
+
+search (YouTube, or YouTube Music's songs with --music):
+  gfgmd search "lofi beats" --limit 5
 
 agent skill (teaches AI coding agents to use gfgmd):
   gfgmd skill install           into ~/.agents/skills and ~/.claude/skills
@@ -64,6 +76,7 @@ _CLI_HINTS = {
     "disk_full": _ELSEWHERE, "access_denied": _ELSEWHERE, "folder_missing": _ELSEWHERE,
     "upcoming": "Add --wait-for-video to wait for it.",
     "extractor_broken": "Open the app to update the download tools.",
+    "gallery_missing": "Open the app and update the download tools to get it.",
 }
 
 
@@ -119,6 +132,21 @@ def rate_limit(value: str) -> int:
     return scaled
 
 
+def section_range(value: str) -> tuple[str, str]:
+    """Parse a part of a video, START-END, as times such as 1:30-4:05; either end may be left out
+    ("2:00-" runs to the end, "-1:00" starts at the beginning)."""
+    start, dash, end = value.strip().partition("-")
+    if not dash or not (start.strip() or end.strip()):
+        raise argparse.ArgumentTypeError("must be a part such as 1:30-4:05, or 2:00- to the end")
+    try:
+        for time in (start, end):
+            if time.strip():
+                parse_time(time)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    return start.strip(), end.strip()
+
+
 def proxy_url(value: str) -> str:
     """Parse a proxy URL."""
     try:
@@ -137,7 +165,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="highest resolution on the shorter side, 0 for the best (default: 1080)")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help=f"folder to save into (default: Videos\\{DownloadDefaults.FOLDER_NAME}, "
-                             f"or Music\\{DownloadDefaults.FOLDER_NAME} with --audio)")
+                             f"Music\\{DownloadDefaults.FOLDER_NAME} with --audio, or "
+                             f"Pictures\\{DownloadDefaults.FOLDER_NAME} for pictures)")
     parser.add_argument("--max-attempts", type=nonnegative_int, default=0, metavar="N",
                         help="how many times to try; 0 keeps trying until it works or you press Ctrl+C (default: 0)")
     parser.add_argument("--retry-delay", type=positive_int, default=DownloadDefaults.RETRY_DELAY, metavar="SECONDS",
@@ -186,6 +215,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="put the thumbnail, title and details, and chapters inside the file")
     media.add_argument("--sponsorblock", choices=("mark", "remove"),
                        help="mark or cut the sponsor parts SponsorBlock lists (YouTube)")
+    media.add_argument("--split-chapters", action="store_true",
+                       help="save one file per chapter of a video that has them, in a folder named after the video")
+    media.add_argument("--no-photos", action="store_true",
+                       help="save only the videos of a post (Instagram, X, Reddit, ...), not its pictures too")
     media.add_argument("--filename-style", choices=DownloadDefaults.FILENAME_STYLES, default="title-quality",
                        help="file name style (default: title-quality)")
     network = parser.add_argument_group("network")
@@ -199,6 +232,10 @@ def build_parser() -> argparse.ArgumentParser:
     selection.add_argument("--items", metavar="SPEC",
                            help="which playlist videos to download, by number, such as 1:5,8 (a link to a "
                                 "video inside a playlist then means the playlist)")
+    selection.add_argument("--section", type=section_range, metavar="START-END",
+                           help="download only this part of the video, such as 1:30-4:05 (2:00- runs to the end)")
+    selection.add_argument("--exact-cut", action="store_true",
+                           help="cut --section at the exact times (converts the part again, slower)")
     selection.add_argument("--live-from-start", action="store_true", help="record live streams from the start")
     selection.add_argument("--wait-for-video", action="store_true", help="wait for scheduled streams to begin")
     selection.add_argument("--strict", action="store_true",
@@ -251,6 +288,11 @@ def options_from_args(args: argparse.Namespace) -> DownloadOptions:
         items=args.items or "",
         live_from_start=args.live_from_start,
         wait_for_video=args.wait_for_video,
+        section_start=args.section[0] if args.section else "",
+        section_end=args.section[1] if args.section else "",
+        exact_cut=args.exact_cut,
+        split_chapters=args.split_chapters,
+        save_photos=not args.no_photos,
     ).validate()
 
 
@@ -361,7 +403,7 @@ class _Reporter:
     The download tools' own error text and their warnings come only with --verbose.
     """
 
-    def __init__(self, executor_ref: list[JobExecutor], spec: JobSpec, verbose: bool,
+    def __init__(self, executor_ref: list[JobExecutor | SpotifyExecutor], spec: JobSpec, verbose: bool,
                  console: _Console | None = None) -> None:
         self._console = console or _Console()
         self._executor_ref = executor_ref
@@ -451,6 +493,11 @@ def run(argv: Sequence[str] | None = None) -> int:
     video_alone = bool(source.video_id) and not (args.whole_playlist or args.items)
     if video_alone:
         url, source = video_link(source, url), single_video(source)
+    if photos_only(source, url):
+        options = options.with_changes(kind="photo")  # a picture site's link saves pictures, whatever was asked
+    elif source.site == "spotify" and not args.audio:
+        args.audio = "mp3"  # Spotify's links are songs, saved as with --audio
+        options = options_from_args(args)
     web.use_proxy(options.proxy)  # the lyrics lookup goes through --proxy too
     if args.cookies is not None and not args.cookies.is_file():
         return _invalid(f"The sign-in file wasn't found: {args.cookies}", console=console)
@@ -459,7 +506,8 @@ def run(argv: Sequence[str] | None = None) -> int:
     except ToolsMissing as exc:
         return _invalid(_TOOLS_MISSING, f"Missing: {', '.join(exc.missing)}" if args.verbose else "", console)
     try:
-        default_root = default_audio_root() if options.kind == "audio" else default_download_root()
+        default_root = {"audio": default_audio_root, "photo": default_photo_root}.get(
+            options.kind, default_download_root)()
         output_root = (args.output_dir or default_root).resolve()
         (output_root / ".archives").mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -472,19 +520,34 @@ def run(argv: Sequence[str] | None = None) -> int:
         auth = Auth(cookies_file=str(args.cookies.resolve()))
     elif args.cookies_from_browser:
         auth = Auth(browser=args.cookies_from_browser)
+    if options.kind == "photo":
+        console.started(url, options.kind, output_root)
+        pictures = _save_pictures(url, source, output_root, auth, options, tools, console, images_only=False)
+        return _report(pictures, output_root, args.strict, options.kind, verbose=args.verbose, console=console)
     archive = archive_path(output_root, source, options.profile)
     paths = RunPaths(output_root, archive, job_folder(output_root, source, options.profile), cache_dir())
     spec = JobSpec(canonical_url(source, url), source, options, paths, auth, args.max_attempts,
                    args.retry_delay)
-    holder: list[JobExecutor] = []
+    holder: list[JobExecutor | SpotifyExecutor] = []
     reporter = _Reporter(holder, spec, args.verbose, console)
-    executor = JobExecutor(spec, lambda: tools, on_file=console.saved, on_event=reporter, lyrics_fetch=fetch_json)
+    executor: JobExecutor | SpotifyExecutor
+    if source.site == "spotify":
+        # Each song is found on YouTube and tagged with Spotify's details.
+        executor = SpotifyExecutor(spec, lambda: tools, cache_dir() / "spotdl", on_file=console.saved,
+                                   on_event=reporter, lyrics_fetch=fetch_json)
+    else:
+        executor = JobExecutor(spec, lambda: tools, on_file=console.saved, on_event=reporter, lyrics_fetch=fetch_json)
     holder.append(executor)
     console.started(url, options.kind, output_root)
     if video_alone:
         console.notice("This link is a video in a playlist, so only that video downloads. "
                        "Add --whole-playlist for every video.")
     result = executor.run(sleep=_sleep_reporting(executor, console))
+    if has_photos_pass(source, options) and pictures_follow(result):
+        # The post's pictures, after its videos: in --output-dir when given, else the Pictures folder.
+        picture_root = output_root if args.output_dir else default_photo_root()
+        result = merge_results(result, _save_pictures(spec.url, source, picture_root, auth, options, tools, console,
+                                                      images_only=True))
     if options.kind == "video" and options.filename_style == "title-quality":
         try:
             normalize_downloads(output_root, archive, tools.ffprobe)
@@ -494,7 +557,18 @@ def run(argv: Sequence[str] | None = None) -> int:
     return _report(result, output_root, args.strict, options.kind, reporter, args.verbose, console)
 
 
-def _sleep_reporting(executor: JobExecutor, console: _Console) -> Callable[[float], bool]:
+def _save_pictures(url: str, source: Source, root: Path, auth: Auth | None, options: DownloadOptions,
+                   tools: ToolSet, console: _Console, images_only: bool) -> JobResult:
+    """Save a picture link's pictures, or (images_only) a post's after its videos, with gallery-dl."""
+    if images_only and not tools.gallery_dl:
+        # The videos are saved; the pictures need a tool the app downloads.
+        console.notice(f"{CATEGORIES['gallery_missing'].message} {_CLI_HINTS['gallery_missing']}")
+        return JobResult("done", kind="photo")
+    spec = GallerySpec(url, source, root, job_folder(root, source, "photos"), auth, options, images_only)
+    return GalleryExecutor(spec, lambda: tools, on_file=console.saved).run()
+
+
+def _sleep_reporting(executor: JobExecutor | SpotifyExecutor, console: _Console) -> Callable[[float], bool]:
     """The wait between attempts, saying when the next one starts."""
     def wait(seconds: float) -> bool:
         console.retrying(executor.retries, seconds)
@@ -550,12 +624,60 @@ def skill_command(argv: Sequence[str]) -> int:
     return agent_skills.run_skill_command(parser.parse_args(argv), AppInfo.CLI_NAME)
 
 
+def search_parser() -> argparse.ArgumentParser:
+    """The `gfgmd search` command's options."""
+    parser = argparse.ArgumentParser(prog=f"{AppInfo.CLI_NAME} search",
+                                     description="Search YouTube for videos, or YouTube Music for songs, and list "
+                                                 "each result's link to download.")
+    parser.add_argument("words", nargs="+", help="what to search for")
+    parser.add_argument("--music", action="store_true", help="search YouTube Music's songs instead of YouTube's videos")
+    parser.add_argument("--limit", type=positive_int, default=FIRST_RESULTS, metavar="N",
+                        help=f"how many results, up to {MORE_RESULTS} (default: {FIRST_RESULTS})")
+    parser.add_argument("--json", action="store_true", help="one JSON object per line, for scripts and AI agents")
+    return parser
+
+
+def search_command(argv: Sequence[str]) -> int:
+    """`gfgmd search WORDS`: search YouTube (or YouTube Music's songs) and list the links found."""
+    args = search_parser().parse_args(argv)
+    console = _Console(args.json)
+    words = clean_query(" ".join(args.words))
+    if not words:
+        return _invalid("Type the words to search for.", console=console)
+    try:
+        tools = find_dependencies()
+    except ToolsMissing:
+        return _invalid(_TOOLS_MISSING, console=console)
+    found: list[SearchResult] = []
+
+    def show(result: SearchResult) -> None:
+        found.append(result)
+        if console.json:
+            console.emit("result", position=len(found), id=result.id, title=result.title, url=result.url,
+                         channel=result.channel, duration=result.duration, views=result.views,
+                         thumbnail=result.thumbnail)
+            return
+        detail = "  ·  ".join(part for part in (result.channel, format_duration(result.duration) if result.duration
+                                                else "", format_views(result.views)) if part)
+        print(f"{len(found)}. {result.title}" + (f"\n   {detail}" if detail else "") + f"\n   {result.url}", flush=True)
+
+    try:
+        run_search(words, args.music, min(args.limit, MORE_RESULTS), tools, cache_dir(), on_result=show)
+    except AnalyzeError:
+        return console.done(EXIT_FAILED, "The search couldn't be run. Check your internet connection and try again.",
+                            error=True, found=0)
+    message = f"{len(found)} {'songs' if args.music else 'videos'} found." if found else "Nothing found. Try other words."
+    return console.done(EXIT_OK, message, found=len(found))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the downloader and turn Ctrl+C into a stop that can be resumed."""
     console_safe()
     args = list(sys.argv[1:] if argv is None else argv)
     if args[:1] == ["skill"]:  # no link is ever the word "skill"
         return skill_command(args[1:])
+    if args[:1] == ["search"]:  # nor the word "search"
+        return search_command(args[1:])
     try:
         return run(args)
     except KeyboardInterrupt:

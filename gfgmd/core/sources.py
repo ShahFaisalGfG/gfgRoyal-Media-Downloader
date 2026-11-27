@@ -104,6 +104,8 @@ def source_from_url(url: str) -> Source:
     site = resolve_site(host)
     if site.key == "youtube":  # youtube-nocookie.com and other YouTube domains
         return _youtube_source(parsed.path, parsed.query, "www.youtube.com")
+    if site.key == "spotify":
+        return _spotify_source(parsed.path, host)
     link = clean_url(url, site)
     kind = site.link_kind(host, parsed.path or "/")
     if kind in ("short", "post", "profile"):
@@ -115,6 +117,15 @@ def source_from_url(url: str) -> Source:
 _MEDIA_FILE = re.compile(r"\.(?:mp4|m4v|mkv|webm|mov|mp3|m4a|aac|opus|ogg|flac|wav|m3u8|mpd)$", re.IGNORECASE)
 
 
+# Direct links to pictures, which gallery-dl saves as they are.
+_IMAGE_FILE = re.compile(r"\.(?:jpe?g|png|gif|webp|avif|bmp|tiff?)$", re.IGNORECASE)
+
+
+def is_image_link(url: str) -> bool:
+    """True for a direct link to a picture file ("https://.../photo.jpg")."""
+    return bool(_IMAGE_FILE.search(urlparse(url.strip()).path))
+
+
 def likely_media(url: str) -> bool:
     """True for a link worth offering to download: a known media site, or a direct media file.
 
@@ -124,7 +135,7 @@ def likely_media(url: str) -> bool:
         source = source_from_url(url)
     except ValueError:
         return False
-    return site_by_key(source.site) is not None or bool(_MEDIA_FILE.search(urlparse(url).path))
+    return site_by_key(source.site) is not None or bool(_MEDIA_FILE.search(urlparse(url).path)) or is_image_link(url)
 
 
 def clean_url(url: str, site: Site | None = None) -> str:
@@ -135,6 +146,23 @@ def clean_url(url: str, site: Site | None = None) -> str:
     query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True)
              if key not in drop and not key.startswith("utm_")]
     return urlunparse(parsed._replace(query=urlencode(query, doseq=True), fragment=""))
+
+
+# A Spotify song, album, or playlist link's path; a country part ("intl-de") or "embed" may come first.
+_SPOTIFY = re.compile(r"^/(?:intl-[a-z]{2}(?:-[a-z]{2,4})?/)?(?:embed/)?(track|album|playlist)/([A-Za-z0-9]{22})(?:/|$)",
+                      re.IGNORECASE)
+
+
+def _spotify_source(path: str, host: str) -> Source:
+    """A Spotify song (one "video") or album or playlist ("playlist"), keyed by its plain link."""
+    match = _SPOTIFY.match(path)
+    if match is None:
+        if host == "spotify.link":
+            raise ValueError("Open this Spotify share link in your browser, then copy the open.spotify.com "
+                             "address it shows.")
+        raise ValueError("Only Spotify playlists, albums, and songs can be downloaded. Copy a link to one of them.")
+    kind, item_id = match.group(1).lower(), match.group(2)
+    return Source("video" if kind == "track" else "playlist", f"https://open.spotify.com/{kind}/{item_id}", "spotify")
 
 
 def _youtube_source(path: str, query_text: str, host: str) -> Source:

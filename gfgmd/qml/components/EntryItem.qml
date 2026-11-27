@@ -3,6 +3,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+import "MediaKind.js" as MediaKind
+
 // One video (or song) of a playlist, under its download in the queue: its number, thumbnail, title,
 // and how it is doing, in words with an icon as well as color. The one downloading shows its
 // progress; a saved one can be played.
@@ -60,7 +62,8 @@ Rectangle {
     border.color: Theme.focusRing
 
     Accessible.role: Accessible.ListItem
-    Accessible.name: (entry.kind === "audio" ? "Song " : "Video ") + entry.number + ", " + entry.title + ", "
+    Accessible.name: MediaKind.noun(entry.kind).charAt(0).toUpperCase() + MediaKind.noun(entry.kind).slice(1) + " "
+        + entry.number + ", " + entry.title + ", "
         + entry.statusText + (entry.detail ? ", " + entry.detail : "")
 
     HoverHandler { id: hover }
@@ -152,7 +155,7 @@ Rectangle {
             kind: "ghost"
             compact: true
             iconName: "play"
-            toolTipText: entry.kind === "audio" ? "Play this song" : "Play this video"
+            toolTipText: entry.kind === "photo" ? "View this picture" : "Play this " + MediaKind.noun(entry.kind)
             onClicked: entry.playRequested(entry.jobId, entry.lastFile)
         }
         AppButton {

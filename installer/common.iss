@@ -15,7 +15,7 @@
   #define MyFileName "gfgRoyal-Media-Downloader"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #define MyAppVersion "1.2.0"
 #endif
 #ifndef MyAppPublisher
   #define MyAppPublisher "gfgRoyal"
@@ -107,7 +107,7 @@ Name: "addtopath"; Description: "Add the gfgmd command to PATH (download from an
 Name: "companion"; Description: "Connect the companion browser extension (Chrome, Edge, Brave, Opera, Vivaldi)"; GroupDescription: "Browser:"
 ; Clearing one turns that connection off at the app's next start; Preferences turns it back on.
 Name: "updatecheck"; Description: "Check GitHub for app updates once a day"; GroupDescription: "Connections the app makes on its own (see the privacy policy):"
-Name: "toolupdates"; Description: "Keep yt-dlp, FFmpeg, and Deno up to date from GitHub"; GroupDescription: "Connections the app makes on its own (see the privacy policy):"
+Name: "toolupdates"; Description: "Keep the download tools (yt-dlp, FFmpeg, Deno, gallery-dl, spotDL) up to date from GitHub and Codeberg"; GroupDescription: "Connections the app makes on its own (see the privacy policy):"
 Name: "lyricsonline"; Description: "Look up song lyrics on LRCLIB (lrclib.net) when a site has none"; GroupDescription: "Connections the app makes on its own (see the privacy policy):"
 
 [Files]

@@ -103,6 +103,11 @@ class PrefsController(QObject):
         """The folder audio downloads go to, as a path (Music\\gfgRoyal Media Downloader by default)."""
         return str(self._context.download_root("audio"))
 
+    @Property(str, notify=settingsChanged)
+    def photoFolder(self) -> str:
+        """The folder pictures go to, as a path (Pictures\\gfgRoyal Media Downloader by default)."""
+        return str(self._context.download_root("photo"))
+
     @Property(bool, notify=settingsChanged)
     def autoCheckUpdates(self) -> bool:
         return bool(self._get("updates", "auto_check", default=True))

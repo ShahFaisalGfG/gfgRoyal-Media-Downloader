@@ -4,7 +4,7 @@
 
 # gfgRoyal Media Downloader
 
-**Download and play videos, music, Shorts, playlists, channels, and live streams from YouTube, TikTok, Instagram, Facebook, X, and the other sites yt-dlp supports: a desktop app with a queue, built-in players, synced lyrics, subscriptions, website sign-ins, and a command-line tool, free and open source.**
+**Download and play videos, music, Shorts, playlists, channels, live streams, and pictures from YouTube, TikTok, Instagram, Facebook, X, and the other sites yt-dlp supports, and songs from Spotify links: a desktop app with a queue, search, built-in players, synced lyrics, subscriptions, website sign-ins, and a command-line tool, free and open source.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg?logo=python&logoColor=white)](pyproject.toml)
@@ -19,7 +19,7 @@ gfgRoyal Media Downloader saves a single video, a whole playlist, a channel, a S
 
 > *Paste once. Come back to a finished playlist.*
 
-It grew out of YouTube Video Downloader, an earlier command-line script. Version 1.0.0 is the first release of the desktop app for video and music, and the script lives on as the `gfgmd` command line, with the same options.
+It grew out of YouTube Video Downloader, an earlier command-line script. Version 1.0.0 was the first release of the desktop app for video and music, and the script lives on as the `gfgmd` command line, with the same options. Version 1.2.0 adds search from the link box, parts of videos and one file per chapter, pictures from posts and picture sites with a photo viewer, and Spotify playlists, albums, and songs.
 
 ---
 
@@ -29,9 +29,13 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - [Features](#features)
 - [Download & Install](#download--install)
 - [Quick Start](#quick-start)
+- [Search](#search)
 - [Video and Audio Formats](#video-and-audio-formats)
 - [Lyrics](#lyrics)
 - [Extract Audio](#extract-audio)
+- [Part of a Video and Chapters](#part-of-a-video-and-chapters)
+- [Pictures](#pictures)
+- [Spotify](#spotify)
 - [Built-in Players](#built-in-players)
 - [Shorts, Reels, and Other Sites](#shorts-reels-and-other-sites)
 - [Signing In to Sites](#signing-in-to-sites)
@@ -69,7 +73,11 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - 🎯 **Video your way**: best quality up to 4K or any limit, MP4, MKV, or WebM, files that play everywhere or the best picture the site has, and the original audio track or dubbed languages too
 - 🎵 **Music your way**: MP3 at 320 kbps by default, or 64 to 256 kbps, M4A, Opus, OGG, lossless FLAC or WAV, or the site's own stream; the thumbnail becomes a square album cover, and artist and title go in the tags
 - 🎤 **Synced lyrics**: songs get a timed `.lrc` file from the site's captions, or from LRCLIB when the length matches, and plain lyrics in the file's tags
-- ▶️ **Built-in players**: a video player with subtitles, audio tracks, speed, and fullscreen, and a music player with a queue, shuffle, repeat, cover art, and lyrics that follow the song
+- 🔎 **Search**: type words in the link box to search YouTube, or YouTube Music's songs with Audio chosen, and download one result or several
+- ✂️ **Parts and chapters**: download only part of a video by its times or one of its chapters, or save one file per chapter (an album video becomes one song each, numbered and tagged)
+- 🖼️ **Pictures**: a post's pictures saved with its videos (Instagram, X, Reddit, Pinterest, TikTok, Facebook, Tumblr, Bluesky), a post with pictures only, picture sites (pixiv, DeviantArt, Imgur, ArtStation, Flickr), and direct links to pictures
+- 🟢 **Spotify**: playlists, albums, and songs, each song found on YouTube and saved as "Artist - Title" with Spotify's title, artists, album, track number, and cover
+- ▶️ **Built-in players**: a video player with subtitles, audio tracks, speed, and fullscreen, a music player with a queue, shuffle, repeat, cover art, and lyrics that follow the song, and a photo viewer with zoom, a slideshow, and a filmstrip
 - 🧾 **Pick the videos**: read a playlist or channel first, then filter, check ranges, or take only the videos you don't have yet
 - 💬 **Subtitles and extras**: written or automatic subtitles in the languages you pick, embedded, as SRT or WebVTT files, or both; embedded thumbnail, details, and chapters; SponsorBlock marks or cuts sponsor segments
 - 🗂️ **A full queue**: several downloads at once, per-site limits, pause, resume, retry, reorder, and progress on the taskbar; a playlist, channel, or subscription lists every video under it, each saved, waiting, or downloading
@@ -80,7 +88,7 @@ It grew out of YouTube Video Downloader, an earlier command-line script. Version
 - 🕑 **Scheduling**: start the queue at a set time, limit the speed by time of day, and sleep or shut down the PC when everything is done
 - 🔴 **Live streams**: record from the start, or wait for a scheduled stream or premiere and record it when it begins
 - 🧩 **Companion extension**: send the page you are watching to the app, or sign a site in, from Chrome, Edge, Opera, Brave, or Vivaldi
-- 🗄️ **Library**: every finished download, searchable, with each playlist and channel grouped in its own order, and Play, Play all, show in folder, extract audio, download again, and Recycle Bin
+- 🗄️ **Library**: every finished download, searchable and filtered by videos, audio, or pictures, with each playlist, channel, and post grouped in its own order, and Play or View, Play all, show in folder, extract audio, download again, and Recycle Bin
 - ⌨️ **Command line**: `gfgmd` keeps the original script's options and exit codes for scripts and scheduled tasks
 - 🎨 **Built for everyday use**: light and dark themes, buttons and switches that ease between states (still when Windows' Animation effects is off), keyboard shortcuts, tooltips on icon buttons and the choices that need explaining, tray icon, notifications, and in-app updates
 
@@ -100,7 +108,7 @@ Get the latest release from the [Releases page](https://github.com/ShahFaisalGfG
 
 The Windows files are signed as the [Code signing policy](#code-signing-policy) describes, and the installers show the [privacy policy](PRIVACY.md) before they install.
 
-Windows 10 version 1809 or later, 64-bit. On first start the app offers to download yt-dlp, FFmpeg, and Deno (about 280 MB) from their official releases; or choose **Use the installed tools** if you installed them yourself with winget.
+Windows 10 version 1809 or later, 64-bit. On first start the app offers to download its tools from their official releases: yt-dlp, FFmpeg, and Deno, which every download needs, and gallery-dl and spotDL, for pictures and long Spotify playlists (about 350 MB in all). Or choose **Use the installed tools** if you installed them yourself with winget. The app works without gallery-dl and spotDL: while either is missing, the same card on Downloads offers it, and one **Download tools** gets every missing tool (**Not now** hides the offer until the app starts again).
 
 ### Updating
 
@@ -112,7 +120,7 @@ On mobile data or another metered connection, nothing updates on its own: app up
 
 ## Quick Start
 
-1. Copy a link from your browser.
+1. Copy a link from your browser, or type what you're looking for (see [Search](#search)).
 2. Press **Ctrl+V** in the app (or the paste button inside the empty link box), choose **Video** or **Audio** beside the box, and press **Download**, which appears inside the box once it holds a link.
 3. With **Smart Mode** on (the default; its button sits at the right of the page tabs and its bulb glows while it is on), Download downloads at once with your Video or Audio defaults from Preferences. Turn **Smart Mode** off and Download opens **Download options** first, to choose the quality, subtitles, and which videos; Ctrl+Shift+O opens them either way.
 
@@ -146,6 +154,14 @@ Songs show a square cover and videos a wide thumbnail, each with a badge naming 
 | F5 | Check subscriptions now (on Subscriptions) |
 | F1 | About |
 | Ctrl+Q | Quit (closing the window keeps the app in the tray; asks first while downloading) |
+
+---
+
+## Search
+
+Type words instead of a link and the button inside the link box becomes **Search**: the results show where Download options open, each with its thumbnail, title, channel, length, and views. With **Video** chosen beside the box it searches YouTube; with **Audio**, YouTube Music's songs. **Download** on a result follows Smart Mode (at once, or Download options first); tick several and **Download selected** takes them all. **More results** shows up to 50, Esc closes the results, and a search made in the last ten minutes comes back at once. Words pasted into the box search too.
+
+From the command line, `gfgmd search WORDS` lists the results with their links (`--music` for songs, `--limit N` for how many).
 
 ---
 
@@ -184,12 +200,45 @@ Audio downloads save the song's lyrics as `<song>.lrc` beside the file, timed li
 
 ---
 
+## Part of a Video and Chapters
+
+For one video that isn't live, Download options offer **Part**: type where it starts and ends (`1:30`, `1:02:30`, or seconds; leave the end empty to run to the end), or pick one of the video's chapters to fill both. The file name carries the times, such as `Talk (1m30s-4m05s).mp4`, so several parts of one video sit side by side, and a part never counts as the whole video being downloaded. Parts start at the nearest keyframe, up to a few seconds early; **Exact cut** (under Advanced, with a default in Preferences > Downloads) converts the part again to start and end on the times you typed, which takes longer. SponsorBlock only marks the sponsor parts of a part.
+
+**Chapters** (a switch for a video with chapters, or for a playlist, where each video splits by its own) saves one file per chapter instead of the whole video, in a folder named after the video: `01 Intro.mp3`, `02 First Song.mp3`, and so on. Each file is tagged with its chapter's title and its place (track 2 of 13), with the video's title as the album, and songs keep the cover and get their own lyrics. A part and chapters don't combine. Preferences > Video and Audio each hold a default for it, off to start with; `gfgmd` takes `--section START-END`, `--exact-cut`, and `--split-chapters`.
+
+---
+
+## Pictures
+
+Pictures download with **gallery-dl**, one of the download tools.
+
+- **Posts.** A video download of an Instagram, X, Reddit, Pinterest, TikTok, Facebook, Tumblr, or Bluesky post saves its videos, then its pictures, so a carousel of both keeps both. A post with pictures only saves them. **Save the pictures in posts** in Preferences > Downloads (on by default), and the **Pictures** switch in Download options for a post, turn this off; audio downloads never save pictures.
+- **Picture sites.** A link to pixiv, DeviantArt, Imgur, ArtStation, or Flickr (a post, an album, or a profile) saves its pictures whatever Video or Audio says, and so does a direct link to a picture file, which keeps its own name. Download options show the link's first pictures before you download.
+- **Where they go.** `Pictures\gfgRoyal Media Downloader` (Preferences > Downloads changes it). A post with one picture puts it straight in; several get a folder named after the site and the post, such as `Instagram DLtSAJ3t3Ia`. Pictures saved before are skipped.
+- **In the Library.** Pictures show themselves as thumbnails, **Pictures** filters the list to them, and a post's pictures group in one row. **View** opens the photo viewer (see [Built-in Players](#built-in-players)).
+- Instagram and X usually need a sign-in to the site for their pictures, as for their videos. A post whose pictures couldn't be saved keeps its saved videos and says why.
+
+---
+
+## Spotify
+
+Spotify's own audio can't be downloaded, so a Spotify playlist, album, or song link downloads each song from YouTube, as audio with your Audio defaults whatever Video or Audio says:
+
+1. The app reads the link's songs from Spotify's public page in about a second. Download options list them with their lengths, to tick the ones you want.
+2. Each song is searched on YouTube by its artist and title, and the result that fits best is taken: the title's words, the artists, and the length must match (a result more than 15 seconds off is never taken), and remixes, live versions, covers, karaoke, and sped-up copies lose out unless Spotify's title names them. YouTube's own copy of the released recording is preferred.
+3. The songs download into a folder named after the playlist or album, named "Artist - Title", and get Spotify's title, artists, album, track number (for an album), and cover, with lyrics as for any song.
+
+A song with no good match is listed as skipped, by name. Spotify's page lists a playlist's first 100 songs; a longer playlist is read whole by **spotDL**, one of the download tools, which takes a few minutes, and without spotDL the first 100 songs download and the download says so. Artist and podcast links aren't supported, and no Spotify account is needed or used. `gfgmd` takes Spotify links too.
+
+---
+
 ## Built-in Players
 
 **Play** in the Library, or on a finished download, opens videos in the player window and songs in the music bar at the bottom of the app; **Play all** plays the list as filtered. Both continue where a file last stopped, and **Open in another player** uses the program Windows chooses.
 
 - **Video player**: its own window, so downloads stay in view. Subtitles (embedded, or files saved beside the video), audio tracks, speed from 0.25× to 2×, loop, keep on top, and fullscreen. Portrait videos open in a portrait window.
 - **Music player**: cover art, previous and next, shuffle, repeat the list or one song, speed, and volume. **Lyrics and up next** opens the Now playing view: a large cover, lyrics that light up and scroll with the song (click a line to jump to it), and the play order.
+- **Photo viewer**: its own window, opened by **View** on a picture. The picture fits the window (never past its own size); the wheel zooms where the pointer is, dragging moves a zoomed picture, and a filmstrip shows the post's or list's other pictures. A slideshow, turning the view, fullscreen, **Open in another app**, **Show in folder**, and **Move to the Recycle Bin** are on its bar; GIFs and animated WebP pictures play.
 
 | Key (video player) | Action |
 |---|---|
@@ -202,6 +251,16 @@ Audio downloads save the song's lyrics as `<song>.lrc` beside the file, timed li
 | C | Next subtitle choice |
 | [ / ] | Slower or faster |
 | P / N | Previous or next video |
+
+| Key (photo viewer) | Action |
+|---|---|
+| Left / Right, Page Up / Page Down | Previous or next picture |
+| Home / End | First or last picture |
+| + / - / 0 | Zoom in, zoom out, fit to the window |
+| R / Shift+R | Turn the view right or left |
+| Space | Start or stop the slideshow |
+| F (Esc leaves) | Fullscreen |
+| Delete | Move the picture to the Recycle Bin (asks first) |
 
 Media keys play, pause, and skip songs while the app is in front, and the tray menu plays or pauses the music. The players use Qt Multimedia with FFmpeg, decoding on the graphics card where it can.
 
@@ -220,7 +279,7 @@ Paste a link from any site yt-dlp supports. These short-form and social links ar
 | X (Twitter) | Posts with one or more videos (`/status/`), and `t.co` links |
 | Snapchat, Pinterest, Reddit | Spotlight, pins (`pin.it`), and posts (`v.redd.it`) |
 
-Posts with only pictures are skipped with a clear message. Many Instagram and Facebook posts, and some TikToks and X posts, need a sign-in to the site; sites protected with DRM (Netflix, Spotify) can't be downloaded.
+A post's pictures are saved too (see [Pictures](#pictures)). Many Instagram and Facebook posts, and some TikToks and X posts, need a sign-in to the site; sites protected with DRM (Netflix, Disney+) can't be downloaded, and Spotify's songs come from YouTube (see [Spotify](#spotify)).
 
 ---
 
@@ -289,13 +348,16 @@ gfgmd "https://youtu.be/VIDEO_ID" -r 720 -c 4
 gfgmd "https://music.youtube.com/playlist?list=PLAYLIST_ID" --audio
 gfgmd "https://www.tiktok.com/@user/video/VIDEO_ID"
 gfgmd "https://vimeo.com/123456" --subs "en.*" --embed-subs --limit-rate 2M
+gfgmd "https://www.instagram.com/p/POST_ID/" --cookies-from-browser firefox
+gfgmd "https://open.spotify.com/album/ALBUM_ID"
+gfgmd search "lofi beats" --limit 5
 ```
 
 | Option | Default | What it does |
 |---|---|---|
-| `URL` | (required) | A video, Short, playlist, or channel, or a page on another site |
+| `URL` | (required) | A video, Short, playlist, or channel, a page on another site, a picture link, or a Spotify playlist, album, or song |
 | `-r`, `--resolution HEIGHT` | `1080` | Highest resolution on the shorter side; `0` for the best |
-| `--output-dir PATH` | `Videos\gfgRoyal Media Downloader` (`Music\…` for audio) | Download root (the original script's folder is kept when it exists) |
+| `--output-dir PATH` | `Videos\gfgRoyal Media Downloader` (`Music\…` for audio, `Pictures\…` for pictures) | Download root (the original script's folder is kept when it exists); a post's pictures go there too |
 | `-c`, `--concurrent-fragments N` | `8` | Pieces of a video downloaded at the same time, 1 to 16 |
 | `--max-attempts N` | `0` | Attempts before giving up on temporary failures; `0` keeps trying |
 | `--retry-delay SECONDS` | `10` | First wait between attempts; it doubles up to five minutes |
@@ -311,15 +373,20 @@ gfgmd "https://vimeo.com/123456" --subs "en.*" --embed-subs --limit-rate 2M
 | `--embed-subs`, `--keep-subs`, `--sub-format srt\|vtt` | | Embed subtitles, embed and keep the files, and the files' format |
 | `--embed` | | Embed the thumbnail, details, and chapters |
 | `--sponsorblock mark\|remove` | | SponsorBlock on YouTube |
+| `--split-chapters` | | One file per chapter, numbered and tagged, in a folder named after the video |
+| `--no-photos` | | Save only a post's videos, not its pictures too |
 | `--limit-rate RATE`, `--proxy URL`, `--force-ipv4` | | Network |
 | `--whole-playlist` | | A link to a video inside a playlist downloads the whole playlist (without it, only that video) |
 | `--items SPEC` | | Which playlist videos, by number, such as `1:5,8` (a link to a video inside a playlist then means the playlist) |
+| `--section START-END`, `--exact-cut` | | Only part of the video, such as `1:30-4:05` (`2:00-` runs to the end), cut at keyframes or exactly |
 | `--live-from-start`, `--wait-for-video` | | Live streams |
 | `--strict` | | Exit with status 1 when any video couldn't be downloaded |
 | `-v`, `--verbose` | | Also print yt-dlp's warnings and its own error text |
 | `--json` | | One JSON object per line on stdout, for scripts and AI agents (below) |
 
-Progress reads like `Video 2 of 8  Downloading  45% of 40.0 MB  2.1 MB/s  about 1 minute left`, and a video that can't be downloaded is named with the reason. Exit status: `0` when every available video was saved (private or removed ones are listed but don't fail the run unless `--strict`), `1` when failures remain after `--max-attempts`, `2` when the link, the tools, or the folders can't be used, and `130` after Ctrl+C. The command line uses the app's managed tools when the app is installed, otherwise yt-dlp, FFmpeg, and Deno on PATH. It needs only Python's standard library, so it also runs on Linux.
+`gfgmd search WORDS` lists YouTube's results with their links (`--music` searches YouTube Music's songs, `--limit N` up to 50, `--json` for scripts).
+
+Progress reads like `Video 2 of 8  Downloading  45% of 40.0 MB  2.1 MB/s  about 1 minute left`, and a video that can't be downloaded is named with the reason. Exit status: `0` when every available video was saved (private or removed ones are listed but don't fail the run unless `--strict`), `1` when failures remain after `--max-attempts`, `2` when the link, the tools, or the folders can't be used, and `130` after Ctrl+C. The command line uses the app's managed tools when the app is installed, otherwise yt-dlp, FFmpeg, Deno, gallery-dl, and spotDL on PATH. It needs only Python's standard library, so it also runs on Linux.
 
 ### For Scripts and AI Agents
 
@@ -345,7 +412,7 @@ Without the app, `npx skills add ShahFaisalGfG/gfgRoyal-Media-Downloader` instal
 
 ## Where Files Go
 
-Videos go to `Videos\gfgRoyal Media Downloader` and audio to `Music\gfgRoyal Media Downloader` (Preferences > Downloads), wherever Windows keeps those folders. The original script's `Videos\youtube-video-downloader` is used instead when it already holds downloads, so its archives keep working.
+Videos go to `Videos\gfgRoyal Media Downloader`, audio to `Music\gfgRoyal Media Downloader`, and pictures to `Pictures\gfgRoyal Media Downloader` (Preferences > Downloads), wherever Windows keeps those folders. The original script's `Videos\youtube-video-downloader` is used instead when it already holds downloads, so its archives keep working.
 
 A single download goes straight into that folder; anything holding several videos gets a folder of its own. Subscriptions use the same folders as downloading the channel or playlist yourself.
 
@@ -356,6 +423,9 @@ A single download goes straight into that folder; anything holding several video
 | A playlist, including Watch later and Liked videos | `<playlist name>\` |
 | A YouTube channel | `<channel>\Videos\`, `Shorts\`, `Live\` |
 | A TikTok, Instagram, or X profile | `<account>\` |
+| A video split by chapters | `<video title>\`, one numbered file per chapter |
+| A post's pictures, or a picture site's post, album, or profile | The pictures folder; several pictures get `<site> <post>\` |
+| A Spotify playlist or album | `<playlist or album name>\` in the audio folder (a single song goes straight in) |
 
 Files are named after the title and the quality measured from the finished file, such as `Episode 001 (1080p).mp4`: a 1080p request that was only offered at 720p ends in `(720p)`, and videos that share a title get ` (2)`, ` (3)` instead of overwriting each other. Preferences offers other name styles (title only, date first, playlist number first). Unfinished files wait in the `.incomplete` folder, and per-playlist, per-format archives in `.archives` record what is done; both folders are hidden.
 
@@ -373,15 +443,15 @@ The quality limit applies to the shorter side, so 1080 suits landscape videos an
 
 ## The Download Tools
 
-yt-dlp does the downloading, FFmpeg merges and converts, and Deno solves YouTube's player challenges. The app downloads them from their official GitHub releases ([yt-dlp](https://github.com/yt-dlp/yt-dlp/releases), [yt-dlp's FFmpeg builds](https://github.com/yt-dlp/FFmpeg-Builds/releases), [Deno](https://github.com/denoland/deno/releases)), checks every file against the checksums those projects publish, and keeps them in `%LOCALAPPDATA%\gfgRoyal Media Downloader\tools`. They update once a day and right after a download fails in a way a newer yt-dlp usually fixes. Preferences > Tools shows each version, switches yt-dlp to early fixes (updated daily), goes back to the previous version, or uses programs already installed on this PC or in a folder you choose.
+yt-dlp does the downloading, FFmpeg merges, converts, and tags, Deno solves YouTube's player challenges, gallery-dl saves pictures, and spotDL reads Spotify playlists past their first 100 songs. The app downloads them from their official releases ([yt-dlp](https://github.com/yt-dlp/yt-dlp/releases), [yt-dlp's FFmpeg builds](https://github.com/yt-dlp/FFmpeg-Builds/releases), [Deno](https://github.com/denoland/deno/releases), [gallery-dl](https://codeberg.org/mikf/gallery-dl/releases) on Codeberg, [spotDL](https://github.com/spotDL/spotify-downloader/releases)), checks every file against the checksums those projects publish, and keeps them in `%LOCALAPPDATA%\gfgRoyal Media Downloader\tools`. They update once a day and right after a download fails in a way a newer yt-dlp usually fixes. gallery-dl ignores its configuration files, and spotDL keeps its settings in the app's folder, so neither reads or changes a setup of your own. Preferences > Tools shows each version, switches yt-dlp to early fixes (updated daily), goes back to the previous version, or uses programs already installed on this PC or in a folder you choose.
 
 ---
 
 ## Privacy and Security
 
-- **No accounts, no telemetry, no ads.** The app contacts the sites you download from, GitHub (for its own updates and the tools), LRCLIB for lyrics (title, artist, album, and length only), and nothing else. The [privacy policy](PRIVACY.md) lists each connection; the installers let you turn off the ones the app makes on its own, and Preferences turns them off at any time.
+- **No accounts, no telemetry, no ads.** The app contacts the sites you download from, GitHub and Codeberg (for its own updates and the tools), LRCLIB for lyrics (title, artist, album, and length only), YouTube's search when you search, Spotify's public pages for Spotify links, and nothing else. The [privacy policy](PRIVACY.md) lists each connection; the installers let you turn off the ones the app makes on its own, and Preferences turns them off at any time.
 - **No configuration from elsewhere runs.** Every yt-dlp run ignores yt-dlp's own configuration files, plugins, and remote code, and links are always passed after `--`, so nothing can add options such as `--exec`.
-- **Verified downloads.** Tools must match their published SHA-256 checksums and come only from GitHub over HTTPS; app updates must carry the release signature.
+- **Verified downloads.** Tools must match their published SHA-256 checksums and come only from GitHub or Codeberg over HTTPS; app updates must carry the release signature.
 - **Sign-ins stay on your PC**, encrypted for your Windows account, and are never written to logs. A download that needs one gets a copy for that run only, removed when it ends (and at the next start after a crash). A browser window's sign-in is read over a private pipe, never a network port another program could reach.
 - **Your proxy covers the app's own requests.** Lyrics, thumbnails, and tool downloads go through the HTTP proxy set in Preferences > Network, as downloads do (a SOCKS proxy applies to downloads only); app updates follow Windows' proxy settings.
 - **Text from sites is only text.** Titles and names are shown as plain text, and nothing a site puts in a title can pose as the app's own progress lines or point it at a file outside the download folder.
@@ -399,7 +469,7 @@ Releases are built from this repository by GitHub Actions and signed through Sig
 - Committers and reviewers: [Shah Faisal](https://github.com/ShahFaisalGfG)
 - Approvers: [Shah Faisal](https://github.com/ShahFaisalGfG)
 
-Privacy policy: see [PRIVACY.md](PRIVACY.md). This program connects only to the sites you use, GitHub, and LRCLIB, as that page describes.
+Privacy policy: see [PRIVACY.md](PRIVACY.md). This program connects only to the sites you use, GitHub, Codeberg, and LRCLIB, as that page describes.
 
 ---
 
@@ -408,7 +478,9 @@ Privacy policy: see [PRIVACY.md](PRIVACY.md). This program connects only to the 
 | Message | What to do |
 |---|---|
 | **Sign-in needed** / **This is private. Sign in with an account that can see it** | Sign in to the site on the Sign-ins page; waiting downloads and the link you opened continue on their own |
-| **This post has only pictures, no video** | The post has no video to save; it's skipped |
+| **Saving pictures needs gallery-dl** | Click **Download tools** on Downloads, **Update tools** on the download, or Preferences > Tools > **Update tools** |
+| **No matching song was found on YouTube** | The Spotify song isn't on YouTube under its name and length; the rest of the list downloads |
+| **Spotify's page couldn't be read** | Update the download tools, then try again; a playlist past 100 songs needs spotDL |
 | **The site wants to check that you aren't a bot** | The app updates its download tools and tries again; signing in to the site usually ends these checks |
 | **The site is getting too many downloads from you** | Downloads from that site wait and resume; lower **Downloads at once** if it keeps happening |
 | **This is private** / **removed** / **isn't available in your country** | The video is skipped; the rest of the playlist continues |
@@ -437,7 +509,7 @@ Running from source keeps settings next to the code and the library and tools in
 
 | Command | What it does |
 |---|---|
-| `python -m pytest` | Every test, with Qt offscreen (`$env:QT_QPA_PLATFORM = "offscreen"`); a fake yt-dlp means no test contacts a site |
+| `python -m pytest` | Every test, with Qt offscreen (`$env:QT_QPA_PLATFORM = "offscreen"`); a fake yt-dlp and a fake gallery-dl mean no test contacts a site |
 | `python -m pytest tests/core tests/test_cli.py` | The engine and command line only (no PySide6 needed, also on Linux) |
 | `pyright gfgmd` | Type check |
 | `pyside6-qmllint -I gfgmd/qml -I gfgmd/qml/components <files>` | QML lint |
@@ -463,9 +535,9 @@ The SignPath project takes its artifact configurations from `.signpath/artifact-
 
 | Target | Plan |
 |---|---|
-| **1.0.x** | Fixes and polish from the first users |
-| **Companion** | Chrome Web Store listing |
-| **Later** | Per-subscription folders and file names, more languages for the interface |
+| **1.2.x** | Fixes and polish |
+| **Companion** | Chrome Web Store listing, and sending a right-clicked picture to the app |
+| **Later** | A whole profile's pictures from a post site, Spotify artist pages, per-subscription folders and file names, more languages for the interface |
 
 Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-Media-Downloader/issues).
 
@@ -473,7 +545,19 @@ Have a feature idea? [Open an issue](https://github.com/ShahFaisalGfG/gfgRoyal-M
 
 ## Changelog
 
-### v1.0.0 - November 2026 *(current)*
+### v1.2.0 - November 2026 *(current)*
+- 🔎 **Search from the link box**: words search YouTube, or YouTube Music's songs with Audio chosen; results show with thumbnails, channels, lengths, and views, to download one or several; `gfgmd search` lists them
+- ✂️ **Part of a video**: From and To times, or a chapter, download only that part, named with its times; **Exact cut** converts it to the exact times
+- 📑 **One file per chapter**: a chaptered video becomes one numbered, tagged file per chapter in its own folder; an album video becomes its songs, each with its lyrics
+- 🖼️ **Pictures**: a post's pictures save with its videos, a post with pictures only saves them, picture sites (pixiv, DeviantArt, Imgur, ArtStation, Flickr) and direct picture links save their pictures, into `Pictures\gfgRoyal Media Downloader`; Download options preview them, and `gfgmd` takes `--no-photos`
+- 🔍 **Photo viewer**: zoom, pan, turn, slideshow, filmstrip, fullscreen, and Recycle Bin, with animated GIFs and WebP pictures playing
+- 🗄️ The Library lists pictures with their own thumbnails, with a **Pictures** filter, and groups a post's pictures
+- 🟢 **Spotify**: playlists, albums, and songs download from YouTube, matched on title, artists, and length, named "Artist - Title", and tagged with Spotify's details and cover; Download options list the songs to pick from
+- 🧰 Two more download tools: gallery-dl (from Codeberg) for pictures and spotDL for long Spotify playlists, installed with the others, checked against their published checksums, and optional: the app works without them, and Downloads offers them while they're missing
+- 🐞 Fixed: a copy of the app installed with pip couldn't load its window style
+- 🐞 Fixed: after the tools updated, Preferences > Tools showed their old versions for several seconds
+
+### v1.0.0 - November 2026
 - 🖥️ The first release of the desktop app: queue, Download options, Library, Subscriptions, Sign-ins, Preferences, tray, notifications, and in-app updates
 - 🌐 Every site yt-dlp supports, with YouTube channels and their tabs, and TikToks, Reels, X posts, and other short-form links
 - 🎵 Music as MP3 320 kbps or other formats and bitrates, with square covers, tags, and synced lyrics
@@ -542,7 +626,7 @@ Download only videos you own or have permission to save, and follow each site's 
 
 Released under the [MIT License](LICENSE): free to use, modify, and distribute. Bundled components and the separately downloaded tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Downloads are made by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with [FFmpeg](https://ffmpeg.org/) for merging and probing and [Deno](https://deno.com/) for YouTube's JavaScript challenges.
+Downloads are made by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with [FFmpeg](https://ffmpeg.org/) for merging and probing and [Deno](https://deno.com/) for YouTube's JavaScript challenges. Pictures are saved by [gallery-dl](https://github.com/mikf/gallery-dl), and long Spotify playlists are read by [spotDL](https://github.com/spotDL/spotify-downloader).
 
 Built with ❤️ by **Shah Faisal** · [Portfolio](https://shahfaisalgfg.github.io/) · [LinkedIn](https://www.linkedin.com/in/shahfaisalgfg) · [shahfaisalgfg@gmail.com](mailto:shahfaisalgfg@gmail.com)
 

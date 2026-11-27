@@ -13,6 +13,7 @@ from typing import Any
 from gfgmd.core.naming import format_label
 from gfgmd.core.progress import PHASE_DOWNLOAD, PHASE_POST, PHASE_WAIT, Snapshot
 from gfgmd.utils.format import about_time, format_bytes, format_time_left, media_noun
+from gfgmd.utils.paths import file_url
 
 ROLES = ("rowKey", "rowType", "jobId", "itemId", "number", "title", "url", "site", "kind", "thumbnail", "jobState",
          "entryState", "statusText", "progress", "detail", "itemText", "message", "action", "folder", "lastFile",
@@ -134,7 +135,9 @@ def job_row(job: dict[str, Any], site_label: str, last_file: str, counts: dict[s
     return {
         **BLANK,
         "rowKey": job_key(job["id"]), "rowType": "job", "jobId": job["id"], "title": job["title"] or "Reading the link...",
-        "url": job["url"], "site": site_label, "kind": kind_of(options), "thumbnail": job["thumbnail"],
+        "url": job["url"], "site": site_label, "kind": kind_of(options),
+        # A picture download without a picture of its own shows the last picture it saved.
+        "thumbnail": job["thumbnail"] or (file_url(last_file) if options.get("kind") == "photo" else ""),
         "jobState": state, "statusText": STATE_TEXT.get(state, ""), "progress": progress, "detail": detail,
         "message": job["message"], "action": job["action"], "folder": job["output_root"], "lastFile": last_file,
         "canPause": state in ("queued", "scheduled", "waiting_live", "running", "retry_wait"),

@@ -23,6 +23,9 @@ from gfgmd.core.tools import ToolSet
 # The start of the lines the app asks yt-dlp to print. Each run uses its own random one (run_marker),
 # so a site's title that yt-dlp prints in its messages can't pass for one of them.
 MARKER = "@@gfgr:"
+# The folder --split-chapters writes a video's chapters to, beside the whole file, followed by its ID;
+# the app moves them to a folder named after the video once it is saved.
+CHAPTERS_FOLDER = ".chapters-"
 # The archive file of a Download again, in the job's folder (see RunPaths.session_archive).
 SESSION_ARCHIVE = "session-archive.txt"
 # More links than this go through a batch file, which keeps the command line short.
@@ -34,7 +37,7 @@ MAX_SKIP_FILTERS = 200
 _ITEM_FIELDS = ("id,extractor_key,title,uploader,channel,duration,live_status,playlist_title,"
                 "playlist_index,n_entries,format_id,webpage_url,filename,thumbnail,release_timestamp")
 _FILE_FIELDS = ("id,extractor_key,title,filepath,height,width,vcodec,acodec,webpage_url,duration,uploader,"
-                "channel,playlist_title,playlist_index,thumbnail,artist,creator,track,album")
+                "channel,playlist_title,playlist_index,thumbnail,artist,creator,track,album,chapters")
 _ENTRY_FIELDS = ("id,url,title,duration,live_status,availability,release_timestamp,timestamp,"
                  "playlist_index,ie_key,channel,uploader")
 _DOWNLOAD_PROGRESS = (
@@ -300,9 +303,23 @@ def output_template(source: Source, options: DownloadOptions, folder: str = "") 
     downloaded by its own link, carry no playlist name.
     """
     prefix = _FILENAME_PREFIX[options.filename_style]
-    where = "/".join(escape_template(folder_name(part)) for part in folder.split("/")) if folder \
+    # A part's times are in its name, so two parts of one video don't overwrite each other.
+    part = f" ({options.section_label})" if options.has_section else ""
+    return f"{_output_folder(source, folder)}/{prefix}%(title).100B{part} [%(id).64B] (requested-{options.profile}).%(ext)s"
+
+
+def chapter_template(source: Source, options: DownloadOptions, folder: str = "") -> str:
+    """Where --split-chapters writes each chapter: a folder of the video's own beside the whole file,
+    named by its ID so the app finds it when yt-dlp reports the whole file (it prints nothing for the
+    chapters), and numbered by the chapter's place in the video."""
+    return (f"{_output_folder(source, folder)}/{CHAPTERS_FOLDER}%(id).64B/%(section_number)03d "
+            f"%(section_title).100B [%(id).64B] (requested-{options.profile}).%(ext)s")
+
+
+def _output_folder(source: Source, folder: str) -> str:
+    """The download's folder as a template: `folder` named outright, or from the video's details."""
+    return "/".join(escape_template(folder_name(part)) for part in folder.split("/")) if folder \
         else folder_template(source)
-    return f"{where}/{prefix}%(title).100B [%(id).64B] (requested-{options.profile}).%(ext)s"
 
 
 def media_args(source: Source, options: DownloadOptions) -> list[str]:
@@ -324,19 +341,27 @@ def media_args(source: Source, options: DownloadOptions) -> list[str]:
     # several tracks always get it.
     if options.embed_metadata or options.multi_audio:
         args.append("--embed-metadata")
-    if options.embed_chapters:
+    # A part or a chapter's file would carry the whole video's chapter marks, at the wrong times.
+    if options.embed_chapters and not options.has_section and not options.split_chapters:
         args.append("--embed-chapters")
     if source.site == "facebook":
         args += ["--replace-in-metadata", "title", _FACEBOOK_COUNTS, ""]
     if options.sponsorblock != "off" and source.site == "youtube":
-        flag = "--sponsorblock-mark" if options.sponsorblock == "mark" else "--sponsorblock-remove"
-        args += [flag, ",".join(options.sponsorblock_categories)]
+        # SponsorBlock's times are the whole video's, so a part can only have them marked, not cut out.
+        cut = options.sponsorblock == "remove" and not options.has_section
+        args += ["--sponsorblock-remove" if cut else "--sponsorblock-mark", ",".join(options.sponsorblock_categories)]
     return args
 
 
 def cuts_segments(source: Source, options: DownloadOptions) -> bool:
     """True when SponsorBlock cuts parts out, which shifts every caption and lyric timing after them."""
-    return options.sponsorblock == "remove" and source.site == "youtube"
+    return options.sponsorblock == "remove" and source.site == "youtube" and not options.has_section
+
+
+def keeps_caption_timings(source: Source, options: DownloadOptions) -> bool:
+    """True when the saved file starts where the video does and keeps its length, so the site's
+    captions line up with it: not a part, not a chapter, and nothing cut out."""
+    return not (cuts_segments(source, options) or options.has_section or options.split_chapters)
 
 
 def _audio_args(source: Source, options: DownloadOptions) -> list[str]:
@@ -357,9 +382,10 @@ def _audio_args(source: Source, options: DownloadOptions) -> list[str]:
             args += ["--postprocessor-args", SQUARE_COVER]
     if options.embed_metadata:
         args += ["--replace-in-metadata", "uploader", ARTIST_SUFFIX, "", "--parse-metadata", _TITLE_TAGS]
-    if options.lyrics and not cuts_segments(source, options):
+    if options.lyrics and keeps_caption_timings(source, options):
         # Captions become timed lyrics (.lrc) beside the audio; the lyrics step names and checks them.
-        # Cut segments would shift every line, so those downloads look lyrics up by length instead.
+        # Cut segments would shift every line, so those downloads look lyrics up by length instead;
+        # a chapter's song is looked up on its own, and a part gets none.
         args.append("--write-subs")
         if options.auto_subtitles:
             args.append("--write-auto-subs")
@@ -443,15 +469,15 @@ def download_command(url: str, source: Source, options: DownloadOptions, tools: 
         "--continue",
         "--part",
         "--no-overwrites",
-        # Downloading again past the archive still keeps one, for this run only, so a restart after a
-        # stall doesn't fetch what the run already saved.
-        "--download-archive", str(paths.session_archive if options.ignore_archive else paths.archive),
+        *_archive_args(options, paths),
         "--paths", str(root),
         "--paths", f"temp:{paths.incomplete}",
         "--output", output_template(source, options, folder),
         "--http-chunk-size", "8M",
         "--concurrent-fragments", str(options.fragments),
     ]
+    if options.split_chapters:
+        command += ["--split-chapters", "--output", f"chapter:{chapter_template(source, options, folder)}"]
     command += media_args(source, options)
     if options.kind == "audio":
         # ffmpeg's own progress, written as it converts; forward slashes, since yt-dlp splits these
@@ -465,10 +491,25 @@ def download_command(url: str, source: Source, options: DownloadOptions, tools: 
         command.append("--live-from-start")
     if options.wait_for_video:
         command += ["--wait-for-video", "15-120"]
+    if options.has_section:
+        start, end = options.section
+        command += ["--download-sections", f"*{start:g}-{'inf' if end is None else f'{end:g}'}"]
+        if options.exact_cut:
+            command.append("--force-keyframes-at-cuts")
     command += skip_filter(skip_ids)
     command += structured_output_args(paths.journal, marker)
     command += playlist_list_args(paths.lists)
     return command + (url_args(urls, paths.job_dir)[0] if urls else ["--", url])
+
+
+def _archive_args(options: DownloadOptions, paths: RunPaths) -> list[str]:
+    """The download archive: the job's own, or one for this run only when downloading again past it
+    (so a restart after a stall doesn't fetch what the run already saved). A part keeps none: yt-dlp
+    would record the whole video as downloaded, and another part, or the whole video later, would be
+    skipped."""
+    if options.has_section:
+        return ["--no-download-archive"]
+    return ["--download-archive", str(paths.session_archive if options.ignore_archive else paths.archive)]
 
 
 def analyze_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None = None,
@@ -487,7 +528,7 @@ def analyze_command(url: str, tools: ToolSet, cache_dir: Path, auth: Auth | None
 
 
 # What a list's read prints for each of its videos, and for the list itself once it is read.
-_LIST_ENTRY_FIELDS = f"{_ENTRY_FIELDS},thumbnails,_type"
+_LIST_ENTRY_FIELDS = f"{_ENTRY_FIELDS},thumbnails,_type,view_count"
 _LIST_FIELDS = "id,title,uploader,channel,playlist_uploader,webpage_url,extractor_key,thumbnails"
 
 

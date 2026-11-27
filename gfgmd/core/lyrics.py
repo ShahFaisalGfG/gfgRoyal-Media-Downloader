@@ -25,6 +25,7 @@ from gfgmd.config.defaults import AppInfo, UpdateInfo
 from gfgmd.core import web
 from gfgmd.core.captions import is_synced_lrc, parse_lrc, plain_text, to_lrc
 from gfgmd.core.platform import hidden_window_flags
+from gfgmd.core.tags import stream_count
 
 LRCLIB_URL = "https://lrclib.net"
 # LRCLIB asks clients to name themselves; no personal details are sent.
@@ -231,13 +232,6 @@ def _replace(path: Path, content: bytes) -> bool:
         return False
 
 
-def _stream_count(ffprobe: str, path: Path) -> int:
-    result = subprocess.run([ffprobe, "-v", "error", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
-                            capture_output=True, text=True, check=False, timeout=60,
-                            creationflags=hidden_window_flags())
-    return len(result.stdout.split()) if result.returncode == 0 else -1
-
-
 def tag_with_ffmpeg(path: Path, text: str, ffmpeg: str, ffprobe: str) -> bool:
     """Copy an M4A or FLAC file with a lyrics tag added; kept only when every stream came through."""
     temporary = path.with_name(f"{path.stem}.lyrics-tmp{path.suffix}")
@@ -246,7 +240,7 @@ def tag_with_ffmpeg(path: Path, text: str, ffmpeg: str, ffprobe: str) -> bool:
             [ffmpeg, "-v", "error", "-y", "-i", str(path), "-map", "0", "-c", "copy", "-map_metadata", "0",
              "-metadata", f"lyrics={text}", str(temporary)],
             capture_output=True, check=False, timeout=300, creationflags=hidden_window_flags())
-        if result.returncode != 0 or _stream_count(ffprobe, temporary) != _stream_count(ffprobe, path):
+        if result.returncode != 0 or stream_count(ffprobe, temporary) != stream_count(ffprobe, path):
             return False
         os.replace(temporary, path)
         return True

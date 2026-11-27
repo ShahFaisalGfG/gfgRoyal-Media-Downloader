@@ -424,50 +424,6 @@ AppWindow {
         onChosen: function (index) { subtitleMenu.pick(index) }
     }
 
-    // The control-bar buttons: icon or text, light over the video, with a checked state.
-    component PlayerButton: AbstractButton {
-        id: button
-        property string iconName: ""
-        property string toolTipText: ""
-        implicitWidth: button.text.length > 0 ? label.implicitWidth + 20 : 36
-        implicitHeight: 36
-        focusPolicy: Qt.TabFocus
-        hoverEnabled: true
-        opacity: button.enabled ? 1 : 0.4
-        Accessible.role: Accessible.Button
-        Accessible.name: button.toolTipText
-        Accessible.checkable: button.checkable
-        Accessible.checked: button.checked
-        ToolTip.visible: button.toolTipText.length > 0 && (button.hovered || button.visualFocus)
-        ToolTip.text: button.toolTipText
-        ToolTip.delay: 500
-        background: Rectangle {
-            radius: Theme.radius
-            color: button.down ? Theme.overlayPressed : button.checked ? Theme.overlayChecked
-                : button.hovered ? Theme.overlayHover : "transparent"
-            border.width: button.visualFocus ? 2 : 0
-            border.color: Theme.overlayText
-        }
-        contentItem: Item {
-            Icon {
-                anchors.centerIn: parent
-                visible: button.text.length === 0
-                name: button.iconName
-                size: Theme.iconLg
-                color: button.checked ? Theme.overlayAccent : Theme.overlayText
-            }
-            Text {
-                id: label
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                visible: button.text.length > 0
-                text: button.text
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontCaption
-                font.weight: Font.DemiBold
-                color: Theme.overlayText
-            }
-        }
-        onClicked: playerWin.showControls()
-    }
+    // The control-bar buttons; a click keeps the controls shown.
+    component PlayerButton: OverlayButton { onClicked: playerWin.showControls() }
 }

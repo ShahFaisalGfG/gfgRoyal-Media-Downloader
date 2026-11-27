@@ -48,3 +48,11 @@ def fake_ytdlp(tmp_path):
     state = tmp_path / "fake-state"
     state.mkdir()
     return [sys.executable, str(FAKES / "fake_ytdlp.py"), "--fake-state", str(state)]
+
+
+@pytest.fixture
+def fake_gallerydl(tmp_path):
+    """A command prefix that runs tests/fakes/fake_gallerydl.py in place of gallery-dl."""
+    state = tmp_path / "fake-gallery-state"
+    state.mkdir()
+    return [sys.executable, str(FAKES / "fake_gallerydl.py"), "--fake-state", str(state)]

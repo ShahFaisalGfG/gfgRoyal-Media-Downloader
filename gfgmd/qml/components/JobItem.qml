@@ -3,6 +3,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+import "MediaKind.js" as MediaKind
+
 // One download in the queue: thumbnail, title, where it stands, and its buttons. Status is always
 // spelled out in text with an icon, never by color alone; a failure that the user can fix offers
 // its fix as a button (sign in, update the tools, choose another folder). A playlist's button shows
@@ -81,7 +83,7 @@ Rectangle {
     border.color: Theme.focusRing
 
     Accessible.role: Accessible.ListItem
-    Accessible.name: job.title + ", " + (job.kind === "audio" ? "audio" : "video") + ", " + job.statusText
+    Accessible.name: job.title + ", " + MediaKind.noun(job.kind) + ", " + job.statusText
         + (job.detail ? ", " + job.detail : "")
     Accessible.selectable: true
     Accessible.selected: job.selected
@@ -180,7 +182,7 @@ Rectangle {
             visible: job.entryCount > 0
             kind: "ghost"
             compact: true
-            text: job.entryCount + (job.kind === "audio" ? " songs" : " videos")
+            text: MediaKind.count(job.entryCount, job.kind)
             iconName: job.expanded ? "chevronDown" : "chevronRight"
             Accessible.name: (job.expanded ? "Hide the " : "Show the ") + text
             onClicked: job.expandToggled(job.jobId, !job.expanded)

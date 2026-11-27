@@ -110,7 +110,7 @@ def test_missing_cookies_file_exits_2(tmp_path: Path) -> None:
         assert cli.run([URL, "--output-dir", str(tmp_path), "--cookies", str(tmp_path / "nope.txt")]) == 2
 
 
-def run_fake(fake_ytdlp: list[str], argv: list[str]) -> int:
+def run_fake(fake_ytdlp: list[str], argv: list[str], tools: ToolSet = TOOLS) -> int:
     def runner(command, on_line, stop):
         return run_to_completion(fake_ytdlp + command[1:], on_line, stop)
     original = cli.JobExecutor
@@ -118,7 +118,7 @@ def run_fake(fake_ytdlp: list[str], argv: list[str]) -> int:
     def executor(*args, **kwargs):
         kwargs["runner"] = runner
         return original(*args, **kwargs)
-    with (patch.object(cli, "find_dependencies", return_value=TOOLS), patch.object(cli, "JobExecutor", executor),
+    with (patch.object(cli, "find_dependencies", return_value=tools), patch.object(cli, "JobExecutor", executor),
           patch.object(naming, "video_quality", return_value=720), patch.object(cli.time, "sleep")):
         return cli.run(argv)
 
@@ -334,6 +334,8 @@ def test_every_command_in_the_skill_parses() -> None:
     for argv in commands:
         if argv[1] == "skill":
             skill_parser.parse_args(argv[2:])
+        elif argv[1] == "search":
+            cli.search_parser().parse_args(argv[2:])
         elif argv[1] not in ("URL",):
             cli.parse_args(argv[1:])
 
@@ -341,8 +343,8 @@ def test_every_command_in_the_skill_parses() -> None:
 def test_the_skill_documents_every_option_and_no_others() -> None:
     """Each option of gfgmd is in the command reference, and every option the skill names exists."""
     reference = (SKILL_DIR / "references" / "commands.md").read_text(encoding="utf-8")
-    options = {flag for action in cli.build_parser()._actions for flag in action.option_strings
-               if flag.startswith("--") and flag != "--help"}
+    options = {flag for parser in (cli.build_parser(), cli.search_parser()) for action in parser._actions
+               for flag in action.option_strings if flag.startswith("--") and flag != "--help"}
     named = set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]+", "".join(
         doc.read_text(encoding="utf-8") for doc in SKILL_DIR.rglob("*.md"))))
     skill_options = {"--agent", "--dir"}
@@ -390,3 +392,66 @@ def test_a_video_inside_a_playlist_downloads_alone_unless_the_playlist_is_asked_
     assert (spec.source.kind, spec.source.source_id, spec.url) == ("playlist", "PLabcdefghijklmnop", link)
     assert not [event for event in json_events(capsys.readouterr().out) if event["event"] == "warning"]
     assert _planned([link, "--items", "1:3"], tmp_path).source.kind == "playlist"
+
+
+def run_fakes(fake_ytdlp: list[str], fake_gallerydl: list[str], argv: list[str], tools: ToolSet = TOOLS) -> int:
+    """cli.run with the fake yt-dlp and the fake gallery-dl in place of the real ones."""
+    original = cli.GalleryExecutor
+
+    def gallery(*args, **kwargs):
+        kwargs["runner"] = lambda command, on_line, stop: run_to_completion(fake_gallerydl + command[1:], on_line, stop)
+        return original(*args, **kwargs)
+    with patch.object(cli, "GalleryExecutor", gallery):
+        return run_fake(fake_ytdlp, argv, tools)
+
+
+PICTURE_TOOLS = ToolSet("FAKE-YT-DLP", "ffmpeg", "ffprobe", "deno", gallery_dl="FAKE-GALLERY-DL")
+
+
+def test_a_picture_site_link_saves_its_pictures(fake_ytdlp: list[str], fake_gallerydl: list[str], tmp_path: Path,
+                                                capsys: pytest.CaptureFixture[str]) -> None:
+    status = run_fakes(fake_ytdlp, fake_gallerydl, ["https://imgur.com/a/album1", "--output-dir", str(tmp_path)],
+                       PICTURE_TOOLS)
+    assert status == 0
+    assert sorted(path.name for path in (tmp_path / "Imgur album1").iterdir()) == [
+        "album 01.jpg", "album 02.png", "album 03.gif"]
+    assert "Finished: 3 pictures saved." in capsys.readouterr().out
+
+
+def test_a_post_saves_its_video_and_its_pictures(fake_ytdlp: list[str], fake_gallerydl: list[str], tmp_path: Path,
+                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    argv = ["https://x.com/mixed/status/1", "--output-dir", str(tmp_path)]
+    assert run_fakes(fake_ytdlp, fake_gallerydl, argv, PICTURE_TOOLS) == 0
+    assert "Finished: 1 video and 1 picture saved." in capsys.readouterr().out
+    assert (tmp_path / "mixed 01.jpg").is_file() and (tmp_path / "Mixed Post (720p).mp4").is_file()
+    # --no-photos: the video only (saved before now), and gallery-dl isn't run.
+    gallery_argv = Path(fake_gallerydl[-1]) / "gallery-argv.json"
+    gallery_argv.unlink()
+    assert run_fakes(fake_ytdlp, fake_gallerydl, [*argv, "--no-photos"], PICTURE_TOOLS) == 0
+    assert "Finished: Already downloaded." in capsys.readouterr().out and not gallery_argv.exists()
+
+
+def test_a_posts_pictures_without_gallery_dl_leave_the_video_saved(
+        fake_ytdlp: list[str], fake_gallerydl: list[str], tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert run_fakes(fake_ytdlp, fake_gallerydl, ["https://x.com/mixed/status/1", "--output-dir", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    said = captured.out + captured.err
+    assert "Saving pictures needs gallery-dl" in said and "update the download tools to get it" in said
+    assert "Finished: 1 video saved." in captured.out
+
+
+def test_a_spotify_album_downloads_as_songs(fake_ytdlp: list[str], tmp_path: Path,
+                                            capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.core.test_spotify import ALBUM_ID, album_page
+
+    class Offline(cli.SpotifyExecutor):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, page=lambda url: album_page("Song One", "Song Two"),
+                             cover=lambda url: b"\xff\xd8\xff",
+                             runner=lambda command, on_line, stop=None, env=None: run_to_completion(
+                                 fake_ytdlp + command[1:], on_line, stop), **kwargs)
+    with patch.object(cli, "SpotifyExecutor", Offline):
+        assert run_fake(fake_ytdlp, [f"https://open.spotify.com/album/{ALBUM_ID}", "--output-dir", str(tmp_path)]) == 0
+    assert "Finished: 2 songs saved." in capsys.readouterr().out
+    assert sorted(path.name for path in (tmp_path / "Fake Album").iterdir()) == [
+        "Fake Artist - Song One.mp4", "Fake Artist - Song Two.mp4"]

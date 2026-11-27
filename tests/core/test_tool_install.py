@@ -6,6 +6,7 @@ An in-memory stand-in for GitHub serves the files, so nothing is downloaded.
 import errno
 import hashlib
 import io
+import json
 import os
 import threading
 import urllib.error
@@ -30,7 +31,7 @@ from gfgmd.core.tool_install import (
     rollback,
     safe_extract,
 )
-from gfgmd.core.tools import managed_tools, path_tools, read_manifest
+from gfgmd.core.tools import ToolsMissing, managed_tools, path_tools, read_manifest, resolve_tools
 
 BASE = "https://github.com/owner/repo/releases/latest/download/"
 
@@ -89,9 +90,11 @@ def package() -> Package:
     return Package("deno", "Deno", BASE, "SUMS", (r"deno-win\.zip",), {"deno": "deno.exe"}, 1)
 
 
-def test_check_url_allows_only_github_https() -> None:
+def test_check_url_allows_only_the_release_hosts_over_https() -> None:
     check_url("https://github.com/x")
     check_url("https://release-assets.githubusercontent.com/x")
+    check_url("https://api.github.com/repos/x/y/releases/latest")
+    check_url("https://codeberg.org/x/y/releases/download/v1/gallery-dl.exe")
     for bad in ("http://github.com/x", "https://evil.example/x", "https://github.com.evil.example/x", "file:///c:/x"):
         with pytest.raises(ToolInstallError):
             check_url(bad)
@@ -165,6 +168,93 @@ def test_install_switch_rollback_and_cleanup(tmp_path: Path) -> None:
     assert not (root / ".staging").exists()
 
 
+CODEBERG_API = "https://codeberg.org/api/v1/repos/mikf/gallery-dl/releases/latest"
+GITHUB_API = "https://api.github.com/repos/spotDL/spotify-downloader/releases/latest"
+
+
+def release_json(tag: str, files: dict[str, str], digests: dict[str, str] | None = None) -> bytes:
+    """A forge's latest-release answer listing these files at these links (and GitHub's digests)."""
+    assets = [{"name": name, "browser_download_url": url,
+               **({"digest": f"sha256:{digests[name]}"} if digests and name in digests else {})}
+              for name, url in files.items()]
+    return json.dumps({"tag_name": tag, "assets": assets}).encode()
+
+
+def gallery_package() -> Package:
+    return Package("gallery-dl", "gallery-dl", "", "SHA256SUMS", (r"gallery-dl\.exe",),
+                   {"gallery-dl": "gallery-dl.exe"}, 1, release_api=CODEBERG_API, bare_exe=True)
+
+
+def spotdl_package() -> Package:
+    return Package("spotdl", "spotDL", "", "", (r"spotdl-[0-9.]+-win32\.exe",), {"spotdl": "spotdl.exe"}, 1,
+                   release_api=GITHUB_API, bare_exe=True)
+
+
+def test_a_codeberg_release_installs_its_program_file(tmp_path: Path) -> None:
+    """gallery-dl: the release API names the files, SHA256SUMS gives the hash, the exe is the program."""
+    root = tmp_path / "tools"
+    base = "https://codeberg.org/mikf/gallery-dl/releases/download/v1.32.21/"
+    for program in (b"first build", b"second build"):
+        sums = f"{sha(b'linux')}  gallery-dl.bin\n{sha(program)}  gallery-dl.exe\n".encode()
+        server = Server({"latest": release_json("v1.32.21", {name: base + name for name in
+                                                             ("gallery-dl.bin", "gallery-dl.exe", "SHA256SUMS")}),
+                         "SHA256SUMS": sums, "gallery-dl.exe": program})
+        entries = install(gallery_package(), root, opener=server)
+    assert entries["gallery-dl"]["tag"] == "v1.32.21" and entries["gallery-dl"]["sha256"] == sha(b"second build")
+    assert Path(managed_tools(root)["gallery-dl"]).name == "gallery-dl.exe"
+    assert Path(managed_tools(root)["gallery-dl"]).read_bytes() == b"second build"
+    assert [url for url, _ in server.requests] == [CODEBERG_API, base + "SHA256SUMS", base + "gallery-dl.exe"]
+    stale = root / "gallery-dl" / "v1.0.0-00000000"
+    stale.mkdir()
+    remove_unused(root)  # the folders of programs beyond yt-dlp, FFmpeg, and Deno are tidied too
+    assert not stale.exists() and len(list((root / "gallery-dl").iterdir())) == 2  # current and previous
+
+
+def test_a_github_release_without_sums_uses_the_hash_github_records(tmp_path: Path) -> None:
+    """spotDL: GitHub's per-file SHA-256 checks the download; the program takes the name the app runs."""
+    root = tmp_path / "tools"
+    program = b"spotdl build"
+    link = "https://github.com/spotDL/spotify-downloader/releases/download/v4.6.0/spotdl-4.6.0-win32.exe"
+    listing = release_json("v4.6.0", {"spotdl-4.6.0-darwin": link[:-9] + "darwin", "spotdl-4.6.0-win32.exe": link},
+                           {"spotdl-4.6.0-win32.exe": sha(program)})
+    install(spotdl_package(), root, opener=Server({"latest": listing, "spotdl-4.6.0-win32.exe": program}))
+    assert Path(managed_tools(root)["spotdl"]).name == "spotdl.exe"
+    tampered = Server({"latest": listing, "spotdl-4.6.0-win32.exe": b"something else"})
+    with pytest.raises(ToolVerifyError, match="checksum"):
+        install(spotdl_package(), tmp_path / "other", opener=tampered)
+
+
+def test_a_release_without_a_hash_or_off_the_release_hosts_is_refused(tmp_path: Path) -> None:
+    link = "https://github.com/spotDL/spotify-downloader/releases/download/v4.6.0/spotdl-4.6.0-win32.exe"
+    unhashed = Server({"latest": release_json("v4.6.0", {"spotdl-4.6.0-win32.exe": link})})
+    with pytest.raises(ToolVerifyError, match="no SHA-256"):
+        install(spotdl_package(), tmp_path / "a", opener=unhashed)
+    elsewhere = Server({"latest": release_json("v4.6.0", {"spotdl-4.6.0-win32.exe": "https://evil.example/spotdl.exe"},
+                                               {"spotdl-4.6.0-win32.exe": "a" * 64})})
+    with pytest.raises(ToolVerifyError, match="Refused"):
+        install(spotdl_package(), tmp_path / "b", opener=elsewhere)
+    unreadable = Server({"latest": b"<html>not json</html>"})
+    with pytest.raises(ToolVerifyError, match="can't be read"):
+        install(spotdl_package(), tmp_path / "c", opener=unreadable)
+
+
+def test_gallery_dl_and_spotdl_are_extras_downloads_run_without(tmp_path: Path, monkeypatch) -> None:
+    """Only yt-dlp, FFmpeg, ffprobe, and Deno are required; an extra that is found is used."""
+    monkeypatch.setenv("PATH", "")
+    root = tmp_path / "tools"
+    for name in ("yt-dlp", "ffmpeg", "ffprobe", "deno", "gallery-dl"):
+        (root / name).mkdir(parents=True)
+        (root / name / f"{name}.exe").write_bytes(b"x")
+    tool_install.write_manifest(root, {name: {"path": f"{name}/{name}.exe"}
+                                       for name in ("yt-dlp", "ffmpeg", "ffprobe", "deno", "gallery-dl")})
+    tools = resolve_tools("managed", root)
+    assert tools.gallery_dl.endswith("gallery-dl.exe") and tools.spotdl == ""
+    (root / "deno" / "deno.exe").unlink()
+    with pytest.raises(ToolsMissing) as missing:
+        resolve_tools("managed", root)
+    assert missing.value.missing == ["deno"]
+
+
 def test_install_refuses_a_package_without_the_program(tmp_path: Path) -> None:
     bundle = make_zip({"readme.txt": b"no exe"})
     server = Server({"SUMS": f"{sha(bundle)}  deno-win.zip\n".encode(), "deno-win.zip": bundle})
@@ -210,6 +300,18 @@ def test_a_program_that_doesnt_run_names_its_package(tmp_path: Path, monkeypatch
     with pytest.raises(ToolStartError) as raised:
         install(package(), tmp_path / "tools", opener=server)
     assert raised.value.label == "Deno"
+
+
+def test_install_starts_each_program_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The check that a program works also reads its version for the manifest (gallery-dl and spotDL
+    unpack themselves on every start, so each extra start costs seconds)."""
+    started: list[str] = []
+    monkeypatch.setattr(tool_install, "tool_version", lambda name, path: started.append(path) or "2.9.8")
+    bundle = make_zip({"deno.exe": b"one"})
+    server = Server({"SUMS": f"{sha(bundle)}  deno-win.zip\n".encode(), "deno-win.zip": bundle})
+    entries = install(package(), tmp_path / "tools", opener=server)
+    assert entries["deno"]["version"] == "2.9.8" and read_manifest(tmp_path / "tools")["deno"]["version"] == "2.9.8"
+    assert len(started) == 1
 
 
 def test_install_reports_its_steps_in_plain_words(tmp_path: Path) -> None:

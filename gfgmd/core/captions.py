@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from gfgmd.core.naming import MEDIA_EXTENSIONS
+from gfgmd.core.naming import IMAGE_EXTENSIONS, MEDIA_EXTENSIONS
 
 # Caption and lyric files are small; anything larger isn't one.
 MAX_CAPTION_BYTES = 4 * 1024 * 1024
@@ -178,6 +178,11 @@ def sidecars(media: Path) -> list[Path]:
 
 
 def companion_files(media: Path) -> list[Path]:
-    """The caption, lyric, and cover files beside `media` that belong to it (removed along with it)."""
+    """The caption, lyric, and cover files beside `media` that belong to it (removed along with it).
+
+    A saved picture has none: another picture of the same name beside it is a picture of its own.
+    """
+    if media.suffix[1:].lower() in IMAGE_EXTENSIONS:
+        return []
     covers = [media.with_suffix(extension) for extension in COVER_EXTENSIONS]
     return sidecars(media) + [cover for cover in covers if cover.is_file()]

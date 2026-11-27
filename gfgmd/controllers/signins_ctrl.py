@@ -22,7 +22,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 from gfgmd.core.auth import Cookie, drop_expired, for_site, import_cookies, session_expiry, signed_in
 from gfgmd.core.command import Auth, account_check_command
 from gfgmd.core.errors import classify
-from gfgmd.core.jobs import Runner
+from gfgmd.core.runner import Runner
 from gfgmd.core.runner import run_to_completion
 from gfgmd.core.secret_store import SecretError
 from gfgmd.core.sites import SITES, Site, resolve_site
@@ -362,7 +362,7 @@ class SignInsController(QObject):
 
     def _sync(self) -> None:
         accounts = {account["site"]: account for account in self._context.store.accounts()}
-        sites = list(SITES) + list(self._extra.values())
+        sites = [site for site in SITES if site.signs_in] + list(self._extra.values())
         sites += [self._context.site(key) for key in accounts if key not in {s.key for s in sites}]
         rows = []
         for site in sites:
