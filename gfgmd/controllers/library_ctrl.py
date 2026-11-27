@@ -20,8 +20,9 @@ from gfgmd.core.sources import source_from_url
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services.context import AppContext
 from gfgmd.services.recycle import failure_notice, recycle_saved
-from gfgmd.utils.format import format_bytes, format_duration, media_noun
+from gfgmd.utils.format import count_media, format_bytes, format_duration
 from gfgmd.utils.logging import write_log
+from gfgmd.utils.paths import file_url
 
 PAGE = 100
 # The most files the players get as a playlist from the library (newest first).
@@ -43,6 +44,13 @@ def _date(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).strftime("%d %b %Y, %H:%M")
 
 
+def _thumbnail(record: dict[str, Any]) -> str:
+    """The row's picture: a saved picture shows itself (its file:// address), anything else its thumbnail."""
+    if record["kind"] == "photo":
+        return file_url(str(record["filepath"]))
+    return str(record["thumbnail"] or "")
+
+
 def _row(record: dict[str, Any], site_label: str, group_key: str = "", number: int = 0) -> dict[str, Any]:
     """One file's row; `group_key` is set (with its place, `number`) for a file shown inside its group."""
     path = record["filepath"]
@@ -55,23 +63,24 @@ def _row(record: dict[str, Any], site_label: str, group_key: str = "", number: i
         "dateText": _date(record["finished"]),
         "durationText": format_duration(record["duration"]) if record["duration"] else "",
         "qualityText": f"{record['height']}p" if record["height"] else "",
-        "url": record["url"], "missing": not os.path.exists(path), "thumbnail": record["thumbnail"],
+        "url": record["url"], "missing": not os.path.exists(path), "thumbnail": _thumbnail(record),
         "format": format_label(path), "number": number, "inGroup": bool(group_key),
     }
 
 
 def _group_row(key: str, records: list[dict[str, Any]], site_label: str, expanded: bool) -> dict[str, Any]:
-    """A playlist or channel folder's row: its name, how many songs and videos, and its newest cover."""
+    """A playlist's, channel's, or post's folder row: its name, how many songs, videos, and pictures,
+    and its newest cover (a picture's own)."""
     newest = max(records, key=lambda record: record["finished"])
-    songs = sum(1 for record in records if record["kind"] == "audio")
-    videos = len(records) - songs
-    counts = [f"{n} {media_noun(kind, n)}" for n, kind in ((songs, "audio"), (videos, "video")) if n]
+    kinds = {kind: sum(1 for record in records if record["kind"] == kind) for kind in ("audio", "video", "photo")}
+    counts = [count_media(number, kind) for kind, number in kinds.items() if number]
+    only = [kind for kind, number in kinds.items() if number]
     return {
         **_BLANK,
         "rowKey": f"g:{key}", "rowType": "group", "groupKey": key,
         "title": next((str(record["group_title"]) for record in records if record["group_title"]), "Playlist"),
-        "site": site_label, "kind": "audio" if songs and not videos else "video",
-        "path": str(Path(newest["filepath"]).parent), "thumbnail": newest["thumbnail"],
+        "site": site_label, "kind": only[0] if len(only) == 1 else "video",
+        "path": str(Path(newest["filepath"]).parent), "thumbnail": _thumbnail(newest),
         "dateText": _date(newest["finished"]), "countText": " and ".join(counts), "fileCount": len(records),
         "expanded": expanded,
     }

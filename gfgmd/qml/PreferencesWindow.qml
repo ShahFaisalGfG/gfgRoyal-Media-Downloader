@@ -269,6 +269,21 @@ AppWindow {
                             }
                         }
                         SettingRow {
+                            label: "Pictures folder"
+                            hint: prefsController.photoFolder
+                            RowLayout {
+                                spacing: Theme.spaceSm
+                                AppButton { text: "Change"; iconName: "folder"; onClicked: { folderDialog.key = "downloads.photo_folder"; folderDialog.open() } }
+                                AppButton { kind: "ghost"; iconName: "folderOpen"; toolTipText: "Open the folder"; onClicked: appController.openPath(prefsController.photoFolder) }
+                            }
+                        }
+                        SettingRow {
+                            label: "Save the pictures in posts"
+                            hint: "A video download of an Instagram, X, Reddit, or other post also saves the post's pictures, "
+                                + "and a post with pictures only saves them. Links to picture sites (pixiv, Imgur, Flickr, and more) always save pictures."
+                            AppSwitch { checked: prefsWin.v("downloads.save_photos"); accessibleName: "Save the pictures in posts"; onToggled: prefsWin.save("downloads.save_photos", checked) }
+                        }
+                        SettingRow {
                             label: "Smart Mode"
                             hint: "On: Download downloads at once with the choices on the Video and Audio pages. "
                                 + "Off: Download opens Download options first."
@@ -290,6 +305,11 @@ AppWindow {
                             label: "Record live streams from the start"
                             hint: "Download options starts with this for a stream that is live now, where the site allows it."
                             AppSwitch { checked: prefsWin.v("downloads.live_from_start"); accessibleName: "Record live streams from the start"; onToggled: prefsWin.save("downloads.live_from_start", checked) }
+                        }
+                        SettingRow {
+                            label: "Cut parts at the exact times"
+                            hint: "When you download part of a video or song, it is converted again to start and end on the times you typed (slower). Off, it starts at the nearest keyframe, up to a few seconds early."
+                            AppSwitch { checked: prefsWin.v("formats.exact_cut"); accessibleName: "Cut parts at the exact times"; onToggled: prefsWin.save("formats.exact_cut", checked) }
                         }
                         SettingRow {
                             label: "File names"
@@ -491,6 +511,11 @@ AppWindow {
                                     text.split(",").map(code => code.trim()).filter(code => code.length > 0))
                             }
                         }
+                        SettingRow {
+                            label: "One file per chapter"
+                            hint: "A video with chapters is saved as one file per chapter, named after it, in a folder named after the video."
+                            AppSwitch { checked: prefsWin.v("formats.split_chapters"); accessibleName: "One file per chapter"; onToggled: prefsWin.save("formats.split_chapters", checked) }
+                        }
                     }
                     Card {
                         Layout.fillWidth: true
@@ -581,6 +606,11 @@ AppWindow {
                             hint: "When a song has no captions, asks LRCLIB, a free online lyrics service, using the title, "
                                 + "artist, album, and length. Only lyrics that match the song's length are used."
                             AppSwitch { checked: prefsWin.v("formats.lyrics_online"); accessibleName: "Look up lyrics online"; onToggled: prefsWin.save("formats.lyrics_online", checked) }
+                        }
+                        SettingRow {
+                            label: "One song per chapter"
+                            hint: "A video with chapters (an album, a mix) is saved as one song per chapter, numbered and named after it, in a folder named after the video."
+                            AppSwitch { checked: prefsWin.v("formats.audio_split_chapters"); accessibleName: "One song per chapter"; onToggled: prefsWin.save("formats.audio_split_chapters", checked) }
                         }
                     }
                     Card {
@@ -766,7 +796,7 @@ AppWindow {
                         Layout.leftMargin: Theme.spaceLg
                         Layout.rightMargin: Theme.spaceLg
                         title: "Tools"
-                        description: "The app downloads and converts with three free tools: yt-dlp, FFmpeg, and Deno. It keeps its own copies up to date, since sites change often."
+                        description: "The app downloads and converts with free tools: yt-dlp, FFmpeg, and Deno for every download, gallery-dl for pictures, and spotDL for Spotify playlists. It keeps its own copies up to date, since sites change often."
                         iconName: "repair"
 
                         SettingRow {
@@ -787,7 +817,7 @@ AppWindow {
                             AppSwitch { checked: prefsWin.v("tools.auto_update"); accessibleName: "Update the tools automatically"; onToggled: prefsWin.save("tools.auto_update", checked) }
                         }
                         Repeater {
-                            model: prefsWin.v("tools.source") === "custom" ? [["yt-dlp", "tools.ytdlp_path"], ["FFmpeg", "tools.ffmpeg_path"], ["Deno", "tools.deno_path"]] : []
+                            model: prefsWin.v("tools.source") === "custom" ? [["yt-dlp", "tools.ytdlp_path"], ["FFmpeg", "tools.ffmpeg_path"], ["Deno", "tools.deno_path"], ["gallery-dl", "tools.gallery_dl_path"], ["spotDL", "tools.spotdl_path"]] : []
                             delegate: SettingRow {
                                 id: customRow
                                 required property var modelData
@@ -860,6 +890,17 @@ AppWindow {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontCaption
                             color: Theme.textMuted
+                            wrapMode: Text.WordWrap
+                        }
+                        // An extra program (gallery-dl, spotDL) the app runs without, and what it adds.
+                        Text {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            visible: text.length > 0 && toolsController.ready && !toolsController.busy
+                            text: toolsController.extrasNote
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                            color: Theme.warning
                             wrapMode: Text.WordWrap
                         }
                     }
@@ -997,9 +1038,10 @@ AppWindow {
 
     FolderDialog {
         id: folderDialog
-        // The setting the chosen folder is saved to: the video or the audio folder.
+        // The setting the chosen folder is saved to: the video, audio, or pictures folder.
         property string key: "downloads.folder"
-        title: folderDialog.key === "downloads.audio_folder" ? "Choose the audio folder" : "Choose the video folder"
+        title: folderDialog.key === "downloads.audio_folder" ? "Choose the audio folder"
+             : folderDialog.key === "downloads.photo_folder" ? "Choose the pictures folder" : "Choose the video folder"
         onAccepted: {
             var path = appController.localPath(selectedFolder.toString())
             if (path.length > 0) prefsWin.save(folderDialog.key, path)

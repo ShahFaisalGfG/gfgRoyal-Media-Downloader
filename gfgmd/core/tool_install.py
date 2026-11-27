@@ -1,10 +1,12 @@
-"""Download, verify, and install the managed copies of yt-dlp, FFmpeg, and Deno.
+"""Download, verify, and install the managed copies of yt-dlp, FFmpeg, Deno, gallery-dl, and spotDL.
 
-Each package comes from its official GitHub releases and must match the SHA-256 its project
-publishes next to it. Downloads use HTTPS only and may be redirected only to GitHub's own hosts;
-they resume after an interruption and stop at a size limit. A package is unpacked into a staging
-folder, checked for paths that would escape it, smoke-tested, and only then made current by
-rewriting the manifest atomically. The previous version stays on disk for one rollback.
+Each package comes from its project's official releases (GitHub, or Codeberg for gallery-dl) and must
+match the SHA-256 the project publishes: a checksum list beside the release's files, or the hash
+GitHub records for each file. Downloads use HTTPS only and may be redirected only to those hosts;
+they resume after an interruption and stop at a size limit. A package is unpacked (or, for a single
+program file, copied) into a staging folder, checked for paths that would escape it, smoke-tested,
+and only then made current by rewriting the manifest atomically. The previous version stays on disk
+for one rollback.
 """
 
 from __future__ import annotations
@@ -30,11 +32,14 @@ from urllib.parse import urlsplit
 from gfgmd.core import web
 from gfgmd.core.tools import MANIFEST, read_manifest, tool_version
 
-ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
-                 "github-releases.githubusercontent.com", "codeload.github.com")
+ALLOWED_HOSTS = ("github.com", "api.github.com", "objects.githubusercontent.com",
+                 "release-assets.githubusercontent.com", "github-releases.githubusercontent.com",
+                 "codeload.github.com", "codeberg.org")
 MAX_PACKAGE_BYTES = 400 * 1024 * 1024
 MAX_UNPACKED_BYTES = 1024 * 1024 * 1024
 MAX_CHECKSUM_BYTES = 256 * 1024
+# A release's description of itself (its files, their links and hashes) from the forge's API.
+MAX_RELEASE_BYTES = 2 * 1024 * 1024
 TIMEOUT_S = 30
 _CHUNK = 256 * 1024
 _HEX64 = re.compile(r"\b([0-9a-fA-F]{64})\b")
@@ -74,16 +79,22 @@ class ToolInstallCancelled(ToolInstallError):
 class Package:
     """One downloadable package and the programs it provides."""
 
-    tool: str  # yt-dlp, ffmpeg, deno
+    tool: str  # yt-dlp, ffmpeg, deno, gallery-dl, spotdl
     label: str
-    base_url: str  # .../releases/latest/download/
+    base_url: str  # .../releases/latest/download/; "" when `release_api` names the release instead
     # The release's checksum list, from which the asset is picked by the `assets` patterns (best first);
-    # when "", the single asset `asset_name` has its own "<asset>.sha256sum" file.
+    # when "", the single asset `asset_name` has its own "<asset>.sha256sum" file, or, with
+    # `release_api`, the hash GitHub records for the asset is used.
     checksums: str
     assets: tuple[str, ...]
     programs: dict[str, str]  # program name -> file name inside the package
     approx_mb: int
     asset_name: str = ""
+    # The forge's "latest release" API (GitHub's or Codeberg's), which lists the release's files with
+    # their download links (and, on GitHub, their SHA-256), for projects without a latest-download link.
+    release_api: str = ""
+    # The asset is the program itself (one .exe), copied in place of unpacking a zip.
+    bare_exe: bool = False
 
 
 def _arch() -> str:
@@ -91,7 +102,8 @@ def _arch() -> str:
 
 
 def packages(channel: str = "stable") -> list[Package]:
-    """The packages for this PC: yt-dlp (stable or nightly), FFmpeg, and Deno."""
+    """The packages for this PC: yt-dlp (stable or nightly), FFmpeg, and Deno, which every download
+    needs, then gallery-dl and spotDL, which some links use."""
     arm = _arch() == "arm64"
     ytdlp_repo = "yt-dlp/yt-dlp-nightly-builds" if channel == "nightly" else "yt-dlp/yt-dlp"
     return [
@@ -106,11 +118,20 @@ def packages(channel: str = "stable") -> list[Package]:
         Package("deno", "Deno", "https://github.com/denoland/deno/releases/latest/download/", "", (),
                 {"deno": "deno.exe"}, 45,
                 asset_name="deno-aarch64-pc-windows-msvc.zip" if arm else "deno-x86_64-pc-windows-msvc.zip"),
+        # gallery-dl publishes its Windows builds and their checksums on Codeberg (its GitHub releases
+        # carry no files). The x64 build runs on ARM64 Windows through emulation.
+        Package("gallery-dl", "gallery-dl", "", "SHA256SUMS", (r"gallery-dl\.exe",),
+                {"gallery-dl": "gallery-dl.exe"}, 22,
+                release_api="https://codeberg.org/api/v1/repos/mikf/gallery-dl/releases/latest", bare_exe=True),
+        # spotDL's release lists no checksum file; GitHub records each file's SHA-256 instead.
+        Package("spotdl", "spotDL", "", "", (r"spotdl-[0-9.]+-win32\.exe",), {"spotdl": "spotdl.exe"}, 47,
+                release_api="https://api.github.com/repos/spotDL/spotify-downloader/releases/latest",
+                bare_exe=True),
     ]
 
 
-class _GitHubOnly(urllib.request.HTTPRedirectHandler):
-    """Follows redirects only to GitHub's hosts, remembering each one (the release tag is in the first)."""
+class _AllowedHostsOnly(urllib.request.HTTPRedirectHandler):
+    """Follows redirects only to the release hosts, remembering each one (the release tag is in the first)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -123,18 +144,19 @@ class _GitHubOnly(urllib.request.HTTPRedirectHandler):
 
 
 def check_url(url: str) -> None:
-    """Allow only HTTPS URLs on GitHub's hosts."""
+    """Allow only HTTPS URLs on the release hosts (GitHub's, and Codeberg for gallery-dl)."""
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
     if parts.scheme != "https" or host not in ALLOWED_HOSTS:
-        raise ToolVerifyError(f"Refused to download from {host or url}: only GitHub over HTTPS is allowed")
+        raise ToolVerifyError(f"Refused to download from {host or url}: only GitHub and Codeberg over HTTPS "
+                              "are allowed")
 
 
 def open_url(url: str, headers: dict[str, str] | None = None) -> Any:
-    """Open a GitHub URL, following redirects only to GitHub's hosts."""
+    """Open a release URL, following redirects only to the release hosts."""
     check_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    redirects = _GitHubOnly()
+    redirects = _AllowedHostsOnly()
     response = web.open_url(request, TIMEOUT_S, redirects=redirects)  # through the app's proxy
     response.redirect_chain = redirects.chain
     return response
@@ -154,7 +176,8 @@ def read_text(url: str, opener: Opener = open_url, limit: int = MAX_CHECKSUM_BYT
     except urllib.error.HTTPError as error:
         raise ToolDownloadError(f"{url} answered HTTP {error.code}") from error
     except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as error:
-        raise ToolDownloadError(f"Couldn't reach GitHub: {getattr(error, 'reason', error)}") from error
+        host = urlsplit(url).hostname or url
+        raise ToolDownloadError(f"Couldn't reach {host}: {getattr(error, 'reason', error)}") from error
     if len(data) > limit:
         raise ToolVerifyError(f"{url} is unexpectedly large")
     return data.decode("utf-8", errors="replace"), final
@@ -184,10 +207,18 @@ class Resolved:
     asset: str
     sha256: str
     tag: str
+    url: str = ""  # the asset's own download link; "" means the package's base URL plus the asset
+
+    @property
+    def download_url(self) -> str:
+        """Where the asset downloads from."""
+        return self.url or self.package.base_url + self.asset
 
 
 def resolve(package: Package, opener: Opener = open_url) -> Resolved:
     """Find the asset to download and the hash it must have."""
+    if package.release_api:
+        return _resolve_release(package, opener)
     if package.checksums:
         text, final = read_text(package.base_url + package.checksums, opener)
         sums = parse_checksums(text)
@@ -201,11 +232,42 @@ def resolve(package: Package, opener: Opener = open_url) -> Resolved:
     return Resolved(package, asset, match.group(1).lower(), release_tag(final))
 
 
-def _pick(package: Package, sums: dict[str, str]) -> str:
-    """The first asset in the checksum list that matches the package's patterns, best pattern first."""
+def _resolve_release(package: Package, opener: Opener) -> Resolved:
+    """Find the asset from the forge's release API: its link, its tag, and the hash from the release's
+    checksum list, or from the SHA-256 GitHub records for the asset."""
+    text, _ = read_text(package.release_api, opener, MAX_RELEASE_BYTES)
+    try:
+        release = json.loads(text)
+    except ValueError as error:
+        raise ToolVerifyError(f"{package.label}'s release information can't be read") from error
+    listed = release.get("assets") if isinstance(release, dict) else None
+    files = {item["name"]: item for item in listed or []
+             if isinstance(item, dict) and isinstance(item.get("name"), str)}
+    asset = _pick(package, files)
+    url = files[asset].get("browser_download_url")
+    if not isinstance(url, str):
+        raise ToolVerifyError(f"{package.label}'s release gives no link for {asset}")
+    check_url(url)
+    if package.checksums:
+        listing = files.get(package.checksums, {}).get("browser_download_url")
+        if not isinstance(listing, str):
+            raise ToolVerifyError(f"{package.label}'s release has no {package.checksums}")
+        check_url(listing)
+        sha256 = parse_checksums(read_text(listing, opener)[0]).get(asset, "")
+    else:
+        digest = str(files[asset].get("digest") or "")
+        sha256 = digest.removeprefix("sha256:") if digest.startswith("sha256:") else ""
+    if not _HEX64.fullmatch(sha256):
+        raise ToolVerifyError(f"{package.label}'s release publishes no SHA-256 for {asset}")
+    return Resolved(package, asset, sha256.lower(), str(release.get("tag_name") or ""), url)
+
+
+def _pick(package: Package, files: dict[str, Any]) -> str:
+    """The first file name (from a checksum list or a release) that matches the package's patterns,
+    best pattern first."""
     for pattern in package.assets:
         regex = re.compile(pattern)
-        for name in sorted(sums):
+        for name in sorted(files):
             if regex.fullmatch(name):
                 return name
     raise ToolVerifyError(f"{package.label}'s release has no Windows build this app recognizes")
@@ -310,15 +372,20 @@ def install(package: Package, tools_root: Path, progress: Progress | None = None
     progress("Looking for the newest version", 0, 0)
     resolved = resolve(package, opener)
     downloads = tools_root / ".downloads"
-    archive = download(package.base_url + resolved.asset, downloads / resolved.asset, resolved.sha256, progress,
+    archive = download(resolved.download_url, downloads / resolved.asset, resolved.sha256, progress,
                        cancel, opener)
     progress("Unpacking", 0, 0)
     version = resolved.tag or resolved.sha256[:12]
     folder_name = f"{_slug(version)}-{resolved.sha256[:8]}"
     staging = tools_root / ".staging" / f"{package.tool}-{folder_name}"
     shutil.rmtree(staging, ignore_errors=True)
-    wanted = set(package.programs.values()) if package.tool == "ffmpeg" else None
-    safe_extract(archive, staging, wanted)
+    if package.bare_exe:
+        # The download is the program: it takes the name the app runs it by.
+        staging.mkdir(parents=True)
+        shutil.copyfile(archive, staging / next(iter(package.programs.values())))
+    else:
+        wanted = set(package.programs.values()) if package.tool == "ffmpeg" else None
+        safe_extract(archive, staging, wanted)
     programs: dict[str, Path] = {}
     for name, file_name in package.programs.items():
         found = sorted(staging.rglob(file_name), key=lambda path: len(path.parts))
@@ -327,8 +394,12 @@ def install(package: Package, tools_root: Path, progress: Progress | None = None
             raise ToolVerifyError(f"{package.label}'s package has no {file_name}")
         programs[name] = found[0]
     progress("Checking that it works", 0, 0)
+    # The version each program reports here goes into the manifest, so Preferences shows it without
+    # starting the program again (gallery-dl and spotDL unpack themselves on every start).
+    reported: dict[str, str] = {}
     for name, path in programs.items():
-        if not tool_version(name, str(path)):
+        reported[name] = tool_version(name, str(path))
+        if not reported[name]:
             shutil.rmtree(staging, ignore_errors=True)
             raise ToolStartError(f"{path.name} from {package.label} didn't run on this PC", package.label)
     final = tools_root / package.tool / folder_name
@@ -338,7 +409,7 @@ def install(package: Package, tools_root: Path, progress: Progress | None = None
     entries = {}
     for name, path in programs.items():
         relative = (final / path.relative_to(staging)).relative_to(tools_root).as_posix()
-        entries[name] = {"path": relative, "version": tool_version(name, str(tools_root / relative)) or version,
+        entries[name] = {"path": relative, "version": reported[name],
                          "sha256": resolved.sha256, "asset": resolved.asset, "tag": resolved.tag,
                          "channel": channel if package.tool == "yt-dlp" else ""}
     update_manifest(tools_root, entries)
@@ -398,10 +469,9 @@ def remove_unused(tools_root: Path) -> None:
                 parts = Path(item["path"]).parts
                 if len(parts) >= 2:
                     keep.add((tools_root / parts[0] / parts[1]).resolve())
-    for tool in ("yt-dlp", "ffmpeg", "deno"):
-        folder = tools_root / tool
-        if not folder.is_dir():
-            continue
+    for folder in tools_root.iterdir() if tools_root.is_dir() else ():
+        if not folder.is_dir() or folder.name.startswith("."):
+            continue  # .downloads and .staging are handled on their own
         for version_dir in folder.iterdir():
             if version_dir.is_dir() and version_dir.resolve() not in keep:
                 shutil.rmtree(version_dir, ignore_errors=True)
@@ -409,7 +479,7 @@ def remove_unused(tools_root: Path) -> None:
 
 
 def latest_tag(package: Package, opener: Opener = open_url) -> tuple[str, str]:
-    """The newest release's tag and asset hash, read from the small checksum file only."""
+    """The newest release's tag and asset hash, read from the small checksum file (or release API) only."""
     resolved = resolve(package, opener)
     return resolved.tag, resolved.sha256
 

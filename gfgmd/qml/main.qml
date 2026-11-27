@@ -420,8 +420,8 @@ AppWindow {
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                text: "Downloading uses the free programs yt-dlp, FFmpeg, and Deno, each under its own license. "
-                    + "Download only videos you own or have permission to save."
+                text: "Downloading uses the free programs yt-dlp, FFmpeg, Deno, gallery-dl, and spotDL, each under its own license. "
+                    + "Download only what you own or have permission to save."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted
@@ -472,5 +472,10 @@ AppWindow {
     PlayerWindow {
         id: videoPlayer
         transientParent: null  // a window of its own: it can sit on another screen or stay on top
+    }
+
+    PhotoViewerWindow {
+        id: photoViewer
+        transientParent: null  // a window of its own, as the video player is
     }
 }

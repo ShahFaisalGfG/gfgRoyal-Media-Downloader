@@ -19,6 +19,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 from gfgmd.core.archive import append_archive, archive_path, read_archive_ids
 from gfgmd.core.command import EXIT_BREAK_ON_EXISTING, Auth, check_command, folder_name, run_marker
 from gfgmd.core.errors import CATEGORIES, classify
+from gfgmd.core.gallery import photos_only
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import ProgressTracker
 from gfgmd.core.runner import run_to_completion
@@ -129,6 +130,8 @@ class SubscriptionsController(QObject):
             return str(error)
         if not source.is_collection:
             return "Subscribe to a channel or a playlist, not a single video."
+        if source.site == "spotify" or photos_only(source, url):
+            return "Subscriptions follow video channels and playlists; Spotify playlists and picture sites can't be followed."
         if self._subscribed(url):
             return "You're already subscribed to this."
         return ""
@@ -158,7 +161,7 @@ class SubscriptionsController(QObject):
             return False
         if self._subscribed(url):
             return False
-        if not source.is_collection:
+        if not source.is_collection or source.site == "spotify" or photos_only(source, url):
             return False
         kind = "audio" if options.get("kind") == "audio" else "video"
         picked = DownloadOptions.from_dict({**base_options(load_settings(), kind).to_dict(), **options})

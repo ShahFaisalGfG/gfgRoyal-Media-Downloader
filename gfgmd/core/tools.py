@@ -1,4 +1,6 @@
-"""Find yt-dlp, FFmpeg, ffprobe, and Deno: the app's managed copies, PATH, or custom locations."""
+"""Find yt-dlp, FFmpeg, ffprobe, Deno, gallery-dl, and spotDL: the app's managed copies, PATH, or
+custom locations. The first four are required; gallery-dl (pictures) and spotDL (Spotify lists) are
+used when present, and downloads that don't need them run without them."""
 
 from __future__ import annotations
 
@@ -12,9 +14,14 @@ from typing import Any, Mapping
 
 from gfgmd.core.platform import hidden_window_flags
 
-TOOL_NAMES = ("yt-dlp", "ffmpeg", "ffprobe", "deno")
+# Every download needs these.
+REQUIRED_TOOLS = ("yt-dlp", "ffmpeg", "ffprobe", "deno")
+# Used for some links only: gallery-dl saves pictures, spotDL reads Spotify lists.
+EXTRA_TOOLS = ("gallery-dl", "spotdl")
+TOOL_NAMES = REQUIRED_TOOLS + EXTRA_TOOLS
 MANIFEST = "manifest.json"
-_VERSION_ARGS = {"yt-dlp": ["--version"], "ffmpeg": ["-version"], "ffprobe": ["-version"], "deno": ["--version"]}
+_VERSION_ARGS = {"yt-dlp": ["--version"], "ffmpeg": ["-version"], "ffprobe": ["-version"], "deno": ["--version"],
+                 "gallery-dl": ["--version"], "spotdl": ["--version"]}
 
 
 class ToolsMissing(RuntimeError):
@@ -27,12 +34,14 @@ class ToolsMissing(RuntimeError):
 
 @dataclass(frozen=True)
 class ToolSet:
-    """Absolute paths to the four programs a download needs."""
+    """Absolute paths to the four programs every download needs, and to the extras ("" when absent)."""
 
     ytdlp: str
     ffmpeg: str
     ffprobe: str
     deno: str
+    gallery_dl: str = ""
+    spotdl: str = ""
 
     @property
     def ffmpeg_dir(self) -> str:
@@ -41,7 +50,8 @@ class ToolSet:
 
     def as_dict(self) -> dict[str, str]:
         """The paths by tool name."""
-        return {"yt-dlp": self.ytdlp, "ffmpeg": self.ffmpeg, "ffprobe": self.ffprobe, "deno": self.deno}
+        return {"yt-dlp": self.ytdlp, "ffmpeg": self.ffmpeg, "ffprobe": self.ffprobe, "deno": self.deno,
+                "gallery-dl": self.gallery_dl, "spotdl": self.spotdl}
 
 
 def read_manifest(tools_root: Path) -> dict[str, Any]:
@@ -93,8 +103,20 @@ def resolve_tools(source: str = "managed", tools_root: Path | None = None,
                   custom: Mapping[str, str] | None = None) -> ToolSet:
     """Pick each program from the chosen source; managed copies fall back to PATH.
 
-    Raises ToolsMissing naming every program that could not be found.
+    Raises ToolsMissing naming every required program that could not be found; a missing extra is "".
     """
+    chosen = find_tools(source, tools_root, custom)
+    missing = [name for name in REQUIRED_TOOLS if name not in chosen]
+    if missing:
+        raise ToolsMissing(missing)
+    return ToolSet(chosen["yt-dlp"], chosen["ffmpeg"], chosen["ffprobe"], chosen["deno"],
+                   gallery_dl=chosen.get("gallery-dl", ""), spotdl=chosen.get("spotdl", ""))
+
+
+def find_tools(source: str = "managed", tools_root: Path | None = None,
+               custom: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Every program found from the chosen source, by name; managed copies fall back to PATH, and a
+    program that can't be found is left out."""
     chosen: dict[str, str] = {}
     if source == "custom":
         for name in TOOL_NAMES:
@@ -107,10 +129,7 @@ def resolve_tools(source: str = "managed", tools_root: Path | None = None,
     for name in TOOL_NAMES:
         if name not in chosen and name in on_path:
             chosen[name] = on_path[name]
-    missing = [name for name in TOOL_NAMES if name not in chosen]
-    if missing:
-        raise ToolsMissing(missing)
-    return ToolSet(chosen["yt-dlp"], chosen["ffmpeg"], chosen["ffprobe"], chosen["deno"])
+    return chosen
 
 
 def tool_version(name: str, path: str, timeout: float = 30) -> str:

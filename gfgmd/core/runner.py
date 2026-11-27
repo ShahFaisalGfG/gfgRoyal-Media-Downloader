@@ -16,6 +16,8 @@ MAX_LINE_BYTES = 1024 * 1024
 _READ_SIZE = 64 * 1024
 
 LineHandler = Callable[[str, str], object]  # (stream name "out" or "err", line); result ignored
+# How a program is run: run_to_completion, or a stand-in a test gives (command, on_line, stop) -> (code, killed).
+Runner = Callable[..., tuple[int, bool]]
 
 
 def child_environment(extra: Mapping[str, str] | None = None) -> dict[str, str]:

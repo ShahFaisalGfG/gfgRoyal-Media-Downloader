@@ -3,17 +3,20 @@ import QtQuick
 
 // A media thumbnail from the disk cache, with an icon for its kind until (or unless) it loads.
 // Songs show a square cover in the middle, as music players show artwork, and videos fill the
-// frame; a badge in the corner names the kind ("video", "audio", "live", or "playlist") and, given
-// `label`, the format ("MP3", "MP4"), so they tell apart at a glance in any list.
+// frame; a badge in the corner names the kind ("video", "audio", "photo", "live", or "playlist")
+// and, given `label`, the format ("MP3", "JPG"), so they tell apart at a glance in any list. A
+// saved picture is its own thumbnail: `source` is then its file:// address, shown as it is.
 Rectangle {
     id: thumb
 
     property string source: ""
     property string kind: "video"
     property string label: ""
+    // The kind badge; a grid of one kind (a post's pictures) leaves it off.
+    property bool badge: true
     readonly property bool _audio: thumb.kind === "audio"
     readonly property string _kindIcon: thumb._audio ? "audio" : thumb.kind === "live" ? "live"
-                                      : thumb.kind === "playlist" ? "list" : "video"
+                                      : thumb.kind === "playlist" ? "list" : thumb.kind === "photo" ? "photo" : "video"
 
     implicitWidth: 96
     implicitHeight: 54
@@ -37,7 +40,8 @@ Rectangle {
         width: thumb._audio ? thumb.height - 2 : thumb.width - 2
         height: thumb.height - 2
         // revision re-runs this binding when a fetched thumbnail arrives in the cache.
-        source: thumb.source ? thumbnails.localFor(thumb.source, thumbnails.revision) : ""
+        source: thumb.source.startsWith("file:") ? thumb.source
+              : thumb.source ? thumbnails.localFor(thumb.source, thumbnails.revision) : ""
         // A song's cover is the thumbnail's middle square, as its file's cover is. Portrait video
         // thumbnails (Shorts, TikToks, Reels) fit whole between bars instead of being cut to a strip.
         fillMode: !thumb._audio && image.implicitHeight > image.implicitWidth ? Image.PreserveAspectFit
@@ -50,6 +54,7 @@ Rectangle {
 
     // The kind (and format) badge; dark in both themes, since it sits on a picture.
     Rectangle {
+        visible: thumb.badge
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 3

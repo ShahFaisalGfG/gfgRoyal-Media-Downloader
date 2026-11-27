@@ -26,13 +26,13 @@ from gfgmd.config.defaults import FormatDefaults
 from gfgmd.core.captions import parse_file, sidecars, to_lrc
 from gfgmd.core.command import ARTIST_SUFFIX, ARTIST_TITLE, MUSIC_TITLE_NOISE, SQUARE_CROP
 from gfgmd.core.errors import CATEGORIES, Failure, folder_failure
-from gfgmd.core.jobs import JobResult, Runner
+from gfgmd.core.jobs import JobResult
 from gfgmd.core.lyrics import Fetch, add_lyrics
 from gfgmd.core.naming import finalize_file
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.platform import hidden_window_flags, hide_folder
 from gfgmd.core.progress import Snapshot
-from gfgmd.core.runner import run_to_completion
+from gfgmd.core.runner import Runner, run_to_completion
 from gfgmd.core.tools import ToolSet
 
 # ffmpeg's encoder for each audio format the app offers (yt-dlp's --audio-format names).

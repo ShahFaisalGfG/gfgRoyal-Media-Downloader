@@ -3,12 +3,17 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// First run (or after a tool goes missing): get yt-dlp, FFmpeg, and Deno with one click, or use
-// copies already on PATH. Shown above the queue until every program is found.
+// First run (or after a tool goes missing): get yt-dlp, FFmpeg, and Deno, with gallery-dl and spotDL,
+// in one click, or use copies already on PATH. Shown above the queue until every required program is
+// found. After that it offers gallery-dl and spotDL while either is missing (an update from a version
+// without them, or a first-run download that failed), until Not now; downloads work without them.
 Rectangle {
     id: card
 
     signal chooseLocations()
+
+    // Only the extras are missing: the app is ready, so the card offers them and can be put off.
+    readonly property bool extrasOnly: toolsController.ready
 
     implicitHeight: column.implicitHeight + 2 * Theme.spaceLg
     radius: Theme.radiusLarge
@@ -28,7 +33,8 @@ Rectangle {
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                text: toolsController.busy ? "Getting the download tools..." : "Get the download tools"
+                text: toolsController.busy ? "Getting the download tools..."
+                    : card.extrasOnly ? toolsController.extrasTitle : "Get the download tools"
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSubtitle
                 font.weight: Font.DemiBold
@@ -38,9 +44,10 @@ Rectangle {
         Text {
             textFormat: Text.PlainText
             Layout.fillWidth: true
-            text: "The app needs a few free download tools (" + toolsController.downloadSize + "). They come "
-                + "from their official sources, are checked for safety, and stay up to date on their own."
-                + (toolsController.partlyMissing ? " Some of them are missing or damaged." : "")
+            text: card.extrasOnly ? toolsController.extrasOffer
+                : "The app needs a few free download tools (" + toolsController.downloadSize + "). They come "
+                  + "from their official sources, are checked for safety, and stay up to date on their own."
+                  + (toolsController.partlyMissing ? " Some of them are missing or damaged." : "")
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             color: Theme.textMuted
@@ -82,17 +89,24 @@ Rectangle {
                 onClicked: toolsController.cancel()
             }
             AppButton {
-                visible: toolsController.foundOnPath && !toolsController.busy
+                visible: !card.extrasOnly && toolsController.foundOnPath && !toolsController.busy
                 text: "Use the installed tools"
                 iconName: "check"
                 onClicked: prefsController.saveSettings({"tools.source": "path"})
             }
             AppButton {
-                visible: !toolsController.busy
+                visible: !card.extrasOnly && !toolsController.busy
                 kind: "ghost"
                 text: "Choose locations"
                 iconName: "folder"
                 onClicked: card.chooseLocations()
+            }
+            AppButton {
+                visible: card.extrasOnly && !toolsController.busy
+                kind: "ghost"
+                text: "Not now"
+                toolTipText: "Preferences > Tools can get them later"
+                onClicked: toolsController.extrasLater()
             }
         }
     }

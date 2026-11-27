@@ -2,13 +2,15 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "MediaTime.js" as MediaTime
 
 // Download options: a link's details and the choices for downloading it, starting from the Video
 // or Audio defaults in Preferences. The everyday choices come first (quality and file type, or the
 // audio format and quality; subtitles; dubbed tracks; lyrics); compatibility, where subtitles go,
 // what goes inside the file, the cover's shape, and SponsorBlock fold away under Advanced. A video
 // inside a playlist chooses between itself and the playlist; a playlist or channel lists its videos
-// as they are read. Several links share one set of choices.
+// as they are read. A picture link shows its first pictures instead of the choices, and a post that
+// can hold pictures offers to save them too. Several links share one set of choices.
 Rectangle {
     id: panel
 
@@ -24,7 +26,8 @@ Rectangle {
     // Advanced stays open or closed for the session.
     property bool advancedOpen: false
 
-    readonly property bool audio: panel.kind === "audio"
+    // A Spotify link's songs are audio whatever the Video | Audio switch says.
+    readonly property bool audio: panel.kind === "audio" || analyzeController.songsOnly
     readonly property bool lossless: prefsController.losslessAudio.indexOf(audioBox.currentValue) >= 0
     // A list's videos (or several links) differ, so their choices can't name one video's tracks.
     readonly property bool many: analyzeController.isPlaylist || analyzeController.linkCount > 0
@@ -35,6 +38,15 @@ Rectangle {
     // Lyrics captions in the song's own language first, then the subtitle languages from Preferences.
     readonly property string lyricLangs: (analyzeController.language ? analyzeController.language + ".*," : "")
         + panel._pref("formats.subtitle_langs")
+    // One video that isn't live can be downloaded in part; a typed time that can't be read is -1.
+    readonly property bool canPart: !panel.many && analyzeController.duration > 0 && !analyzeController.songsOnly
+        && analyzeController.liveStatus !== "is_live" && analyzeController.liveStatus !== "is_upcoming"
+    readonly property real partFrom: partStart.text.trim().length > 0 ? MediaTime.parse(partStart.text) : 0
+    readonly property real partTo: partEnd.text.trim().length > 0 ? MediaTime.parse(partEnd.text) : analyzeController.duration
+    readonly property bool partSet: panel.canPart && (partStart.text.trim().length > 0 || partEnd.text.trim().length > 0)
+    readonly property string partError: !panel.partSet ? ""
+        : panel.partFrom < 0 || panel.partTo < 0 ? "Type times such as 1:30, or 1:02:30 with hours."
+        : panel.partTo <= panel.partFrom ? "The part has to end after it starts." : ""
 
     signal closed()
     // The link was added to the queue with these choices.
@@ -59,12 +71,17 @@ Rectangle {
         autoSubs.checked = panel._pref("formats.auto_subtitles")
         sponsorBox.value = panel._pref("formats.sponsorblock")
         fromStart.checked = panel._pref("downloads.live_from_start")
+        exactCut.checked = panel._pref("formats.exact_cut")
+        savePhotos.checked = panel._pref("downloads.save_photos")
+        partStart.text = ""
+        partEnd.text = ""
         panel._resetEmbeds()
         panel._subtitlesEdited = false
         panel._resetSubtitles()
     }
-    // Video and audio each have their own "Save in the file" defaults.
+    // Video and audio each have their own "Save in the file" and chapter defaults.
     function _resetEmbeds() {
+        splitSwitch.checked = panel._pref(panel.audio ? "formats.audio_split_chapters" : "formats.split_chapters")
         embedThumb.checked = panel._pref(panel.audio ? "formats.audio_embed_cover" : "formats.embed_thumbnail")
         embedMeta.checked = panel._pref(panel.audio ? "formats.audio_embed_metadata" : "formats.embed_metadata")
         embedChapters.checked = panel._pref(panel.audio ? "formats.audio_embed_chapters" : "formats.embed_chapters")
@@ -115,7 +132,7 @@ Rectangle {
         var automatic = panel.many ? autoSubs.checked
             : codes.some(code => tracks.some(track => track.code === code && track.kind !== "creator"))
         return {
-            "kind": panel.kind,
+            "kind": audio ? "audio" : "video",
             "max_height": heightBox.currentValue,
             // Several audio tracks need MP4 or MKV; a WebM choice becomes MKV.
             "container": extra.length > 0 && containerBox.currentValue === "webm" ? "mkv" : containerBox.currentValue,
@@ -137,12 +154,30 @@ Rectangle {
             "sponsorblock": analyzeController.siteKey === "youtube" || analyzeController.linkCount > 0
                 ? sponsorBox.currentValue : "off",
             "live_from_start": analyzeController.liveStatus === "is_live" && fromStart.checked,
+            "section_start": panel.partSet ? partStart.text.trim() : "",
+            "section_end": panel.partSet ? partEnd.text.trim() : "",
+            "exact_cut": exactCut.checked,
+            "split_chapters": chaptersRow.visible && !panel.partSet && splitSwitch.checked,
+            "save_photos": savePhotos.checked,
         }
+    }
+
+    // A chapter's times as the Part fields take them.
+    function pickChapter(index) {
+        var chapter = analyzeController.chapters[index]
+        if (!chapter) {
+            partStart.text = ""
+            partEnd.text = ""
+            return
+        }
+        partStart.text = MediaTime.format(chapter.start * 1000)
+        partEnd.text = MediaTime.format(chapter.end * 1000)
     }
 
     // What Advanced holds, in a few words, while it is folded.
     function _advancedSummary() {
         var parts = []
+        if (panel.partSet) parts.push(exactCut.checked ? "exact cut" : "cut at keyframes")
         if (!panel.audio) {
             parts.push(codecBox.currentText.split(" (")[0])
             if (panel.hasSubtitles) parts.push("subtitles " + placementBox.currentText.toLowerCase())
@@ -225,7 +260,7 @@ Rectangle {
                     visible: analyzeController.linkCount === 0
                     source: analyzeController.thumbnail
                     // Follows the Video | Audio switch: audio previews the song's square cover.
-                    kind: panel.audio ? "audio"
+                    kind: analyzeController.photos ? "photo" : panel.audio ? "audio"
                         : analyzeController.liveStatus === "is_live" || analyzeController.liveStatus === "is_upcoming"
                         ? "live" : "video"
                 }
@@ -308,10 +343,46 @@ Rectangle {
                 }
             }
 
+            // A picture link: its first pictures. They all save as they are, so there is nothing to choose.
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: analyzeController.photos
+                spacing: Theme.spaceSm
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spaceSm
+                    Repeater {
+                        model: analyzeController.pictures
+                        delegate: Thumb {
+                            required property var modelData
+                            width: 96
+                            height: 72
+                            source: modelData.preview
+                            kind: "photo"
+                            badge: false
+                            Accessible.role: Accessible.Graphic
+                            Accessible.name: modelData.name
+                        }
+                    }
+                }
+                Text {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    text: "They save into " + prefsController.photoFolder
+                        + ", in a folder named after the post when there are several. Pictures saved before are skipped."
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textMuted
+                    wrapMode: Text.WordWrap
+                }
+            }
+
             // Everyday choices
             GridLayout {
+                id: everyday
                 Layout.fillWidth: true
-                visible: analyzeController.hasResult
+                visible: analyzeController.hasResult && !analyzeController.photos
                 columns: width > 760 ? 2 : 1
                 // Equal columns: sized by their content, the rows (which stack their labels when narrow)
                 // and the column widths would keep resizing each other.
@@ -463,12 +534,112 @@ Rectangle {
                         toolTipText: "Record from the beginning of the stream (where the site allows) instead of from now"
                     }
                 }
+                // Only part of the video: from and to (empty means the start and the end), or a chapter.
+                FormRow {
+                    Layout.fillWidth: true
+                    Layout.columnSpan: everyday.columns
+                    visible: panel.canPart
+                    label: "Part"
+                    labelWidth: 110
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.spaceXs
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spaceSm
+                            StyledComboBox {
+                                id: chapterBox
+                                Layout.preferredWidth: 220
+                                visible: analyzeController.chapters.length > 0
+                                model: [{"label": "The whole video", "code": -1}].concat(analyzeController.chapters.map(
+                                    (chapter, index) => ({"label": MediaTime.format(chapter.start * 1000) + "  " + chapter.title,
+                                                          "code": index})))
+                                accessibleName: "Chapter to download"
+                                onActivated: panel.pickChapter(currentValue)
+                            }
+                            StyledTextField {
+                                id: partStart
+                                Layout.preferredWidth: 96
+                                placeholderText: "0:00"
+                                accessibleName: "Part from"
+                                errorText: panel.partFrom < 0 ? " " : ""
+                            }
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "to"
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontBody
+                                color: Theme.textMuted
+                                Accessible.ignored: true
+                            }
+                            StyledTextField {
+                                id: partEnd
+                                Layout.preferredWidth: 96
+                                placeholderText: MediaTime.format(analyzeController.duration * 1000)
+                                accessibleName: "Part until"
+                                errorText: panel.partTo < 0 ? " " : ""
+                            }
+                            AppButton {
+                                kind: "ghost"
+                                compact: true
+                                visible: panel.partSet
+                                text: "Whole video"
+                                onClicked: {
+                                    partStart.text = ""
+                                    partEnd.text = ""
+                                    chapterBox.currentIndex = 0
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            visible: panel.partError.length > 0
+                            text: panel.partError
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                            color: Theme.danger
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+                // One file per chapter: for a video with chapters, or a list, where each video uses its own.
+                FormRow {
+                    id: chaptersRow
+                    Layout.fillWidth: true
+                    visible: analyzeController.liveStatus !== "is_live" && analyzeController.liveStatus !== "is_upcoming"
+                        && !analyzeController.songsOnly && (panel.many || analyzeController.chapters.length > 0)
+                    label: "Chapters"
+                    hint: panel.audio ? "One song per chapter" : "One file per chapter"
+                    labelWidth: 110
+                    AppSwitch {
+                        id: splitSwitch
+                        enabled: !panel.partSet
+                        accessibleName: panel.audio ? "Save one song per chapter" : "Save one file per chapter"
+                        toolTipText: panel.partSet ? "Not with a part of the video"
+                            : "Saves each chapter on its own, named after it, in a folder named after the video"
+                    }
+                }
+                // A post on Instagram, X, Reddit, ...: its pictures save after its videos.
+                FormRow {
+                    Layout.fillWidth: true
+                    visible: analyzeController.postPictures && !panel.audio
+                    label: "Pictures"
+                    hint: "Also save the post's pictures"
+                    labelWidth: 110
+                    AppSwitch {
+                        id: savePhotos
+                        accessibleName: "Also save the post's pictures"
+                        toolTipText: "Into " + prefsController.photoFolder
+                    }
+                }
             }
 
             // Advanced choices, folded away with a summary of what they are set to.
             Disclosure {
                 Layout.fillWidth: true
-                visible: analyzeController.hasResult
+                visible: analyzeController.hasResult && !analyzeController.photos
                 expanded: panel.advancedOpen
                 onExpandedChanged: panel.advancedOpen = expanded
                 summary: panel._advancedSummary()
@@ -480,6 +651,17 @@ Rectangle {
                     columnSpacing: Theme.spaceXl
                     rowSpacing: Theme.spaceSm
 
+                    FormRow {
+                        Layout.fillWidth: true
+                        visible: panel.partSet
+                        label: "Exact cut"
+                        labelWidth: 110
+                        AppSwitch {
+                            id: exactCut
+                            accessibleName: "Cut the part at the exact times"
+                            toolTipText: "Converts the part again to start and end on the exact times (slower). Off, it starts at the nearest keyframe, up to a few seconds early."
+                        }
+                    }
                     FormRow {
                         Layout.fillWidth: true
                         visible: !panel.audio
@@ -574,6 +756,20 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: analyzeController.liveStatus === "is_upcoming"
                 text: "The stream hasn't started yet. It waits in Downloads and starts recording when the stream begins."
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textMuted
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                visible: text.length > 0
+                text: analyzeController.songsOnly
+                    ? "The songs come from YouTube, matched to Spotify's titles, artists, and lengths, and are tagged with Spotify's details. "
+                      + analyzeController.listNote
+                    : ""
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted

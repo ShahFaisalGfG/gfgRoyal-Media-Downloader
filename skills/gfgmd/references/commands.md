@@ -5,7 +5,7 @@ gfgmd URL [options]
 gfgmd skill {install,uninstall,path,show} [options]
 ```
 
-`URL` is a link to a video, Short, playlist, channel, profile, or post on YouTube or any other site yt-dlp supports. A link typed without `https://` gets it added.
+`URL` is a link to a video, Short, playlist, channel, profile, or post on YouTube or any other site yt-dlp supports, a post or album on a picture site, a direct link to a picture, or a Spotify playlist, album, or song. A link typed without `https://` gets it added.
 
 ## General
 
@@ -13,7 +13,7 @@ gfgmd skill {install,uninstall,path,show} [options]
 |---|---|---|
 | `--json` | | One JSON object per line on stdout (see json-events.md) |
 | `-r`, `--resolution HEIGHT` | `1080` | Highest resolution on the shorter side; `0` for the best |
-| `--output-dir FOLDER` | `Videos\gfgRoyal Media Downloader`, or `Music\gfgRoyal Media Downloader` with `--audio` | Where to save (made if it doesn't exist) |
+| `--output-dir FOLDER` | `Videos\gfgRoyal Media Downloader`, `Music\gfgRoyal Media Downloader` with `--audio`, or `Pictures\gfgRoyal Media Downloader` for pictures | Where to save (made if it doesn't exist); a post's pictures go there too |
 | `--max-attempts N` | `0` | Attempts before giving up on temporary failures; `0` keeps trying |
 | `--retry-delay SECONDS` | `10` | First wait between attempts; it doubles up to five minutes |
 | `-c`, `--concurrent-fragments N` | `8` | Parts of a video downloaded at once, 1 to 16 |
@@ -42,6 +42,8 @@ gfgmd skill {install,uninstall,path,show} [options]
 | `--sub-format srt\|vtt` | `srt` | File type of separate subtitle files |
 | `--embed` | | Put the thumbnail, details, and chapters inside the video |
 | `--sponsorblock mark\|remove` | | Mark or cut the sponsor parts SponsorBlock lists (YouTube) |
+| `--split-chapters` | | One file per chapter of a video that has chapters (an album becomes one song each), numbered and tagged, in a folder named after the video |
+| `--no-photos` | | Save only a post's videos, not its pictures too (see Pictures) |
 | `--filename-style STYLE` | `title-quality` | `title-quality`, `title`, `date-title`, or `index-title` |
 
 ## Network
@@ -58,9 +60,34 @@ gfgmd skill {install,uninstall,path,show} [options]
 |---|---|
 | `--whole-playlist` | For a link to a video inside a playlist (`watch?v=...&list=...`), download the whole playlist; without it only that video downloads |
 | `--items SPEC` | Which playlist or channel videos, by number, such as `1:5,8`; with a link to a video inside a playlist it means the playlist |
+| `--section START-END` | Only this part of the video, such as `1:30-4:05`; `2:00-` runs to the end. The file name carries the times |
+| `--exact-cut` | Cut `--section` at the exact times, converting the part again (slower); without it the part starts at the nearest keyframe |
 | `--live-from-start` | Record a live stream from its beginning |
 | `--wait-for-video` | Wait for a scheduled stream or premiere to begin |
 | `--strict` | Exit with status 1 when any video couldn't be downloaded (private, removed, ...) |
+
+## Pictures
+
+- A post on Instagram, X, Reddit, Pinterest, TikTok, Facebook, Tumblr, or Bluesky saves its videos, then its pictures (with gallery-dl). A post with pictures only saves them. `--no-photos` keeps to the videos; `--audio` saves no pictures.
+- A link to a picture site (pixiv, DeviantArt, Imgur, ArtStation, Flickr) or straight to a picture file saves pictures, whatever `--audio` asks.
+- Pictures go to `Pictures\gfgRoyal Media Downloader` (or `--output-dir`). A post with one picture puts it straight in; several get a folder named after the site and the post ("Instagram DLtSAJ3t3Ia"). Pictures saved before are skipped.
+- gallery-dl is one of the download tools the app installs. Without it, a post's videos still save and the command says the pictures need it.
+
+## Spotify
+
+- A Spotify playlist, album, or song link downloads its songs as audio (as with `--audio`, in MP3 unless `--audio` names a format): each is found on YouTube by its title, artists, and length, and saved as "Artist - Title" with Spotify's title, artists, album, track number, and cover. An album or playlist gets a folder of its own.
+- `--items` picks songs by their place in the list. A song with no good match on YouTube is listed as skipped ("No matching song was found on YouTube").
+- Spotify's page lists a playlist's first 100 songs; a longer one is read whole by spotDL (a download tool the app installs), which can take a few minutes. Artist and podcast links aren't supported.
+
+## The search command
+
+| Command | What it does |
+|---|---|
+| `gfgmd search WORDS` | Search YouTube and list the videos found, each with its link, channel, length, and views |
+| `gfgmd search WORDS --music` | Search YouTube Music's songs instead; each link downloads with `--audio` |
+| `gfgmd search WORDS --limit N` | How many results, up to 50 (default 20) |
+
+With `--json`, each result is a `result` event (`position`, `id`, `title`, `url`, `channel`, `duration`, `views`, `thumbnail`), then `done` with `found`.
 
 ## The skill command
 
@@ -85,6 +112,15 @@ gfgmd "https://music.youtube.com/playlist?list=PLAYLIST_ID" --audio --json
 gfgmd "https://vimeo.com/123456" --subs "en.*" --embed-subs --limit-rate 2M --json
 gfgmd "https://youtu.be/VIDEO_ID" --audio-langs "es,pt-BR" --container mkv --json
 gfgmd "https://www.youtube.com/watch?v=VIDEO_ID" --live-from-start --json
+gfgmd "https://youtu.be/VIDEO_ID" --audio --section 1:30-4:05 --json
+gfgmd "https://youtu.be/VIDEO_ID" --audio --split-chapters --json
 gfgmd "https://youtu.be/VIDEO_ID" --cookies-from-browser firefox --json
+gfgmd "https://www.instagram.com/p/POST_ID/" --cookies-from-browser firefox --json
+gfgmd "https://x.com/USER/status/POST_ID" --no-photos --json
+gfgmd "https://imgur.com/a/ALBUM_ID" --output-dir "D:\Pictures" --json
+gfgmd "https://open.spotify.com/album/ALBUM_ID" --audio flac --json
+gfgmd "https://open.spotify.com/playlist/PLAYLIST_ID" --items 1:10 --json
+gfgmd search "lofi hip hop" --json
+gfgmd search "pasoori ali sethi" --music --limit 5 --json
 gfgmd skill install --dir "C:\Users\me\my-skills" --json
 ```

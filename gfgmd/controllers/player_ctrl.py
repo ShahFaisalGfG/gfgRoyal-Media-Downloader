@@ -2,8 +2,8 @@
 #
 # Qt Multimedia does the playing in QML (the video window's and the audio bar's MediaPlayer, with
 # the FFmpeg backend PySide6 ships, which decodes on the GPU when it can). This controller decides
-# what they play: a video in the player window, or a list of audio files in the bar, with shuffle and
-# repeat. It finds what goes with each file (subtitle and lyric files beside it, its cover, its title
+# what they play: a video in the player window, a list of audio files in the bar, with shuffle and
+# repeat, or pictures in the photo viewer. It finds what goes with each file (subtitle and lyric files beside it, its cover, its title
 # and artist from the library), remembers where playback stopped, and keeps volume, speed, and the
 # video window's size in the preferences.
 
@@ -16,16 +16,17 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Property, QLocale, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QLocale, QObject, Signal, Slot
 
 from gfgmd.core.captions import COVER_EXTENSIONS, Cue, cue_at, line_at, parse_file, sidecars
-from gfgmd.core.naming import AUDIO_EXTENSIONS
+from gfgmd.core.naming import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS
 from gfgmd.core.platform import hidden_window_flags
 from gfgmd.core.tools import ToolsMissing
 from gfgmd.models.list_model import DictListModel
 from gfgmd.services.context import AppContext
 from gfgmd.services.tasks import TaskRunner
 from gfgmd.utils.languages import language_name
+from gfgmd.utils.paths import file_url
 from gfgmd.utils.settings import load_settings, save_settings
 from gfgmd.utils.logging import write_log
 
@@ -44,9 +45,13 @@ def is_audio(path: str) -> bool:
     return Path(path).suffix.lower().lstrip(".") in AUDIO_EXTENSIONS
 
 
-def file_url(path: str) -> str:
-    """A file:// URL QML can load."""
-    return QUrl.fromLocalFile(path).toString() if path else ""
+def is_image(path: str) -> bool:
+    """True for pictures, which the photo viewer shows (by extension)."""
+    return Path(path).suffix.lower().lstrip(".") in IMAGE_EXTENSIONS
+
+
+# Pictures that may move: AnimatedImage plays them (Image would show their first frame).
+_ANIMATED = {"gif", "webp"}
 
 
 def caption_label(tag: str) -> str:
@@ -65,16 +70,19 @@ def _open_failure(error: Exception) -> str:
 
 
 class PlayerController(QObject):
-    """The video window's and the audio bar's playlists, sidecars, covers, and preferences."""
+    """The video window's and the audio bar's playlists, sidecars, covers, and preferences, and the
+    photo viewer's pictures."""
 
     videoChanged = Signal()
+    photoChanged = Signal()
     audioChanged = Signal()
     lyricsChanged = Signal()
     coverChanged = Signal()
     prefsChanged = Signal()
-    # QML shows the video window, or starts the audio bar's player.
+    # QML shows the video window or the photo viewer, or starts the audio bar's player.
     videoRequested = Signal()
     audioRequested = Signal()
+    photoRequested = Signal()
     # The tray's Play/Pause.
     togglePlayRequested = Signal()
     notice = Signal(str)
@@ -95,12 +103,14 @@ class PlayerController(QObject):
         self._lyrics: list[Cue] = []
         self._cover = ""
         self._audio_playing = False
+        self._photos: list[str] = []
+        self._photo_index = -1
 
     # ── Shared ────────────────────────────────────────────────────────────
 
     @Slot(str)
     def play(self, path: str) -> None:
-        """Play one downloaded file: audio in the bar, video in the player window."""
+        """Play one downloaded file: audio in the bar, video in the player window, a picture in the viewer."""
         self.playFrom(path, [])
 
     @Slot(str, list)
@@ -115,8 +125,11 @@ class PlayerController(QObject):
         if is_audio(path):
             songs = [entry for entry in listed if is_audio(entry)]
             self.playAudio(songs, songs.index(path))
+        elif is_image(path):
+            pictures = [entry for entry in listed if is_image(entry)]
+            self.viewPhotos(pictures, pictures.index(path))
         else:
-            self.playVideo(path, [entry for entry in listed if not is_audio(entry)])
+            self.playVideo(path, [entry for entry in listed if not is_audio(entry) and not is_image(entry)])
 
     @Slot(str, result=bool)
     def isAudio(self, path: str) -> bool:
@@ -174,7 +187,8 @@ class PlayerController(QObject):
 
         Qt's player keeps a stopped file open until its source is cleared: the video window closes
         when it shows one of them, and the audio bar drops them from its list (closing when the song
-        playing is one). Their resume positions are forgotten too.
+        playing is one). The photo viewer drops them too, showing the next picture, and closes when
+        none is left. Their resume positions are forgotten too.
         """
         wanted = {_same_file(path) for path in paths if path}
         if not wanted:
@@ -194,6 +208,8 @@ class PlayerController(QObject):
                 self._position = kept.index(current)
                 self._sync_queue()
                 self.audioChanged.emit()
+        if any(_same_file(path) in wanted for path in self._photos):
+            self._drop_photos(wanted)
         for path in dict.fromkeys([*paths, *held]):
             self._context.store.clear_position(path)
 
@@ -533,6 +549,97 @@ class PlayerController(QObject):
     def lyricStart(self, line: int) -> float:
         """Where a lyric line starts, in milliseconds (for click to seek)."""
         return self._lyrics[line].start * 1000.0 if 0 <= line < len(self._lyrics) else 0.0
+
+    # ── Photos ────────────────────────────────────────────────────────────
+
+    @Slot(list, int)
+    def viewPhotos(self, paths: list[str], start: int) -> None:
+        """Show pictures in the photo viewer, starting at index `start`; the rest are Previous and Next."""
+        self._photos = [str(path) for path in paths if is_image(str(path))]
+        if not self._photos:
+            return
+        self._photo_index = min(max(start, 0), len(self._photos) - 1)
+        self.photoChanged.emit()
+        self.photoRequested.emit()
+
+    @Slot(int)
+    def showPhoto(self, index: int) -> None:
+        """Show the list's picture at `index` (the filmstrip, Home and End)."""
+        if 0 <= index < len(self._photos) and index != self._photo_index:
+            self._photo_index = index
+            self.photoChanged.emit()
+
+    @Slot(int, bool)
+    def stepPhoto(self, step: int, wrap: bool) -> None:
+        """The previous (-1) or next (+1) picture; `wrap` goes round from the last to the first (slideshow)."""
+        if not self._photos:
+            return
+        index = self._photo_index + step
+        if wrap:
+            index %= len(self._photos)
+        self.showPhoto(index)
+
+    @Slot()
+    def closePhoto(self) -> None:
+        """The viewer closed: forget its pictures, so nothing points at the files any more."""
+        if self._photos:
+            self._photos, self._photo_index = [], -1
+            self.photoChanged.emit()
+
+    def _drop_photos(self, wanted: set[str]) -> None:
+        """Take files about to go off the viewer's list; it shows the picture after them, or closes."""
+        current = self._photo()
+        kept = [path for path in self._photos if _same_file(path) not in wanted]
+        if not kept:
+            self.closePhoto()
+            return
+        if _same_file(current) in wanted:
+            # The next picture still listed takes the place of the one going (else the last one).
+            after = [path for path in self._photos[self._photo_index:] if _same_file(path) not in wanted]
+            current = after[0] if after else kept[-1]
+        self._photos, self._photo_index = kept, kept.index(current)
+        self.photoChanged.emit()
+
+    def _photo(self) -> str:
+        """The path of the picture shown, "" when the viewer is closed."""
+        return self._photos[self._photo_index] if 0 <= self._photo_index < len(self._photos) else ""
+
+    @Property(str, notify=photoChanged)
+    def photoPath(self) -> str:
+        return self._photo()
+
+    @Property(str, notify=photoChanged)
+    def photoUrl(self) -> str:
+        return file_url(self._photo())
+
+    @Property(str, notify=photoChanged)
+    def photoTitle(self) -> str:
+        return self._title_of(self._photo())
+
+    @Property(bool, notify=photoChanged)
+    def photoAnimated(self) -> bool:
+        """True for a GIF or WebP, which may move (AnimatedImage shows it)."""
+        return Path(self._photo()).suffix.lower().lstrip(".") in _ANIMATED
+
+    @Property(int, notify=photoChanged)
+    def photoHistoryId(self) -> int:
+        """The picture's library record (for Delete), 0 when the library doesn't list it."""
+        path = self._photo()
+        record = self._context.store.history_for_path(path) if path else None
+        return int(record["id"]) if record else 0
+
+    @Property(int, notify=photoChanged)
+    def photoIndex(self) -> int:
+        return self._photo_index
+
+    @Property(int, notify=photoChanged)
+    def photoCount(self) -> int:
+        return len(self._photos)
+
+    @Property(list, notify=photoChanged)
+    def photoUrls(self) -> list[str]:
+        """Every picture of the list as a file:// address, for the filmstrip."""
+        return [file_url(path) for path in self._photos]
 
     # ── Helpers ───────────────────────────────────────────────────────────
 

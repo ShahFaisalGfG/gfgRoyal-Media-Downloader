@@ -7,6 +7,7 @@ from the link's first path part: https://fake.test/<scenario>.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -30,14 +31,17 @@ def option(args: list[str], name: str) -> list[str]:
 def render(template: str, info: dict) -> str:
     """Fill the output-template fields this app uses (alternatives, defaults, replacements)."""
     def field(match: re.Match[str]) -> str:
-        expression = match.group(1)
+        expression, spec = match.group(1), match.group(2)
         expression, _, default = expression.partition("|")
         expression, _, replacement = expression.partition("&")
         for name in expression.split(","):
             name = name.split(">")[0].strip()
             value = info.get(name)
             if value not in (None, ""):
-                return replacement.format(value) if replacement else str(value)
+                if replacement:
+                    return replacement.format(value)
+                # A number with a width, as "%(section_number)03d" asks for.
+                return ("%" + spec) % value if spec.endswith("d") and isinstance(value, int) else str(value)
         return default
     return _FIELD.sub(field, template).replace("%%", "%")
 
@@ -54,7 +58,8 @@ class Fake:
     def __init__(self, args: list[str], state: Path) -> None:
         self.args = args
         self.state = state
-        self.root = Path(next(value for value in option(args, "--paths") if not value.startswith("temp:")))
+        # Reading a link or searching saves nothing, so those commands name no download folder.
+        self.root = Path(next((value for value in option(args, "--paths") if not value.startswith("temp:")), "."))
         self.temp = next((Path(value[5:]) for value in option(args, "--paths") if value.startswith("temp:")), None)
         self.archive = Path(option(args, "--download-archive")[0]) if option(args, "--download-archive") else None
         self.template = (option(args, "--output") or ["%(title)s [%(id)s].%(ext)s"])[0]
@@ -109,6 +114,16 @@ class Fake:
         target = self.root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"video")
+        chapter_template = next((value[len("chapter:"):] for value in option(self.args, "--output")
+                                 if value.startswith("chapter:")), "")
+        if "--split-chapters" in self.args and chapter_template:
+            # yt-dlp writes each chapter's file before it moves the whole one, and prints nothing for them.
+            for number, chapter in enumerate(data.get("chapters") or [], start=1):
+                # yt-dlp makes the title safe for a file name, as below; the tags keep the real one.
+                safe = re.sub(r'[\\/:*?"<>|]', "_", chapter["title"])
+                part = self.root / render(chapter_template, {**data, "section_number": number, "section_title": safe})
+                part.parent.mkdir(parents=True, exist_ok=True)
+                part.write_bytes(b"chapter")
         if self.temp is not None:
             # yt-dlp writes the file under the temp folder, moves it out, and leaves the folder it made there.
             (self.temp / relative).parent.mkdir(parents=True, exist_ok=True)
@@ -117,7 +132,8 @@ class Fake:
             with self.archive.open("a", encoding="utf-8") as handle:
                 handle.write(f"youtube {video_id}\n")
         line = json.dumps({"id": video_id, "title": title, "filepath": str(target), "height": height,
-                           "extractor_key": "Youtube", "playlist_index": data.get("playlist_index")})
+                           "extractor_key": "Youtube", "playlist_index": data.get("playlist_index"),
+                           "chapters": data.get("chapters")})
         if self.journal is not None:
             self.journal.parent.mkdir(parents=True, exist_ok=True)
             with self.journal.open("a", encoding="utf-8") as handle:
@@ -184,8 +200,13 @@ def main() -> int:
         return 2
     url = args[args.index("--") + 1]
     scenario = urlparse(url).path.strip("/").split("/")[0]
+    # A search, by its target: YouTube's "ytsearchN:words" or YouTube Music's search page.
+    if url.startswith("ytsearch5:"):
+        scenario = "spotify-search"
+    elif url.startswith("ytsearch") or url.startswith("https://music.youtube.com/search"):
+        scenario = "search" if "fail" not in url else "search-fail"
     # Reading a link and checking a subscription are recognized by their options, whatever the link.
-    if "--dump-single-json" in args and scenario not in ("private", "auth"):
+    elif "--dump-single-json" in args and scenario not in ("private", "auth", "pictures"):
         scenario = "video-details" if "--no-playlist" in args else "dump"
     elif "--lazy-playlist" in args:
         # A subscription check keeps an archive; reading a list's videos for Download options doesn't.
@@ -196,9 +217,46 @@ def main() -> int:
     fake = Fake(args, state)
     attempt = fake.attempt(scenario)
 
+    if scenario == "chapters":
+        fake.video("aaaaaaaaaaa", "Album Live", {"chapters": [
+            {"title": "Intro", "start_time": 0.0, "end_time": 30.0},
+            {"title": "First Song", "start_time": 30.0, "end_time": 210.0},
+            {"title": "Encore: Last/Song", "start_time": 210.0, "end_time": 400.0}]})
+        return 0
+
     if scenario == "ok":
         fake.video("aaaaaaaaaaa", "Clip")
         return 0
+    if scenario == "spotify-search":
+        # A Spotify list's songs searched at once ("ytsearch5:Artist - Title" each): for each, the
+        # official video (20 s longer), YouTube's own "Topic" copy (200 s), and a live version. A
+        # search for "Nowhere" finds nothing that fits.
+        for target in args[args.index("--") + 1:]:
+            query = target.split(":", 1)[1]
+            if "Nowhere" in query:
+                continue
+            artist = query.split(" - ")[0]
+            key = hashlib.sha256(query.encode("utf-8")).hexdigest()[:10]
+            for suffix, title, channel, duration in (("v", f"{query} (Official Video)", artist, 220),
+                                                     ("a", f"{query}", f"{artist} - Topic", 200),
+                                                     ("l", f"{query} (Live)", artist, 201)):
+                out(MARKER + "entry " + json.dumps({"id": key + suffix, "title": title, "channel": channel,
+                                                    "duration": duration, "playlist_id": query, "_type": "url"}))
+        return 0
+    if scenario == "watch":
+        # YouTube's own links (https://www.youtube.com/watch?v=<id>), as a Spotify list downloads its songs.
+        for link in args[args.index("--") + 1:]:
+            video_id = link.split("v=", 1)[1]
+            fake.video(video_id, f"Upload {video_id}")
+        return 0
+    # A post with a video and a picture (its pictures are fake_gallerydl.py's), and a post with
+    # pictures only, which yt-dlp can't save.
+    if scenario == "mixed":
+        fake.video("1000000001", "Mixed Post")
+        return 0
+    if scenario == "pictures":
+        err("ERROR: [twitter] 1000000002: No video could be found in this tweet")
+        return 1
     if scenario == "forged":
         # A site's title printed by yt-dlp, holding lines that pose as the app's: one with the plain
         # marker, one naming a file outside the download folder. Then a real video.
@@ -371,6 +429,21 @@ def main() -> int:
         out("[youtube:tab] PLfake: Downloading webpage")
         out(json.dumps(info))
         return 0
+    if scenario == "search":
+        # Three results, one of them listed twice (as YouTube's pages repeat a video now and then).
+        for video_id, title, views in (("sssssssss01", "First hit", 1_200_000), ("sssssssss02", "Second hit", 950),
+                                       ("sssssssss01", "First hit", 1_200_000), ("sssssssss03", "Live now", 0)):
+            out(MARKER + "entry " + json.dumps({
+                "id": video_id, "title": title, "duration": 245 if views else None, "view_count": views or None,
+                # YouTube Music's song results name no channel; YouTube's own search does.
+                "channel": None if url.startswith("https://music.") else "Some Channel", "_type": "url",
+                "live_status": "is_live" if not views else "not_live",
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "thumbnails": [{"url": f"https://i.ytimg.com/vi/{video_id}/hq720.jpg", "width": 720}]}))
+        return 0
+    if scenario == "search-fail":
+        err("ERROR: [youtube:search] Unable to download API page: HTTP Error 503: Service Unavailable")
+        return 1
     if scenario == "list":
         # Reading a list for Download options: each video as it arrives, then the list's details.
         out("[youtube:tab] PLfake: Downloading webpage")

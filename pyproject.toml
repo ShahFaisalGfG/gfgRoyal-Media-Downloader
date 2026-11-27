@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gfgmd"
-version = "1.0.0"
+version = "1.2.0"
 description = "gfgRoyal Media Downloader: download videos, playlists, channels, and live streams from YouTube and other sites"
 authors = [{ name = "Shah Faisal", email = "shahfaisalgfg@gmail.com" }]
 readme = "README.md"
@@ -37,6 +37,8 @@ gfgmd = [
     "assets/icons/*.png",
     "assets/icons/*.ico",
     "qml/*.qml",
+    "qml/GfgmdStyle/*.qml",
+    "qml/GfgmdStyle/qmldir",
     "qml/components/*.qml",
     "qml/components/*.js",
     "qml/components/qmldir",

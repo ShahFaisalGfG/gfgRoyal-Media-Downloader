@@ -27,10 +27,12 @@ LinkField 1.0 LinkField.qml
 ListSelection 1.0 ListSelection.qml
 NowPlaying 1.0 NowPlaying.qml
 OptionsPanel 1.0 OptionsPanel.qml
+OverlayButton 1.0 OverlayButton.qml
 PlaylistQuestion 1.0 PlaylistQuestion.qml
 ResizeHandles 1.0 ResizeHandles.qml
 RunBar 1.0 RunBar.qml
 SeekBar 1.0 SeekBar.qml
+SearchResults 1.0 SearchResults.qml
 SegmentedChoice 1.0 SegmentedChoice.qml
 SelectionBar 1.0 SelectionBar.qml
 SelectMark 1.0 SelectMark.qml

@@ -3,6 +3,7 @@
 import json
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,6 +40,28 @@ def fake_runner(prefix: list[str]):
 def fixed_quality():
     with patch.object(naming, "video_quality", return_value=720):
         yield
+
+
+def test_a_video_split_into_chapters_saves_one_named_and_tagged_file_each(fake_ytdlp: list[str],
+                                                                          tmp_path: Path) -> None:
+    """The chapters land in a folder named after the video, numbered and titled; the whole file goes."""
+    spec = replace(make_spec(tmp_path, "chapters"), options=DownloadOptions(split_chapters=True))
+    seen: list[tuple[str, str]] = []
+    tagged: list[tuple[str, dict]] = []
+    with patch("gfgmd.core.jobs.retag", side_effect=lambda path, tags, *rest: tagged.append((path.name, tags)) or True):
+        result = JobExecutor(spec, lambda: TOOLS, on_file=lambda info, path: seen.append((info["title"], path.name)),
+                             runner=fake_runner(fake_ytdlp)).run()
+    root = spec.paths.root
+    assert result.state == "done" and len(result.files) == 3
+    assert sorted(path.name for path in (root / "Album Live").iterdir()) == [
+        "01 Intro (720p).mp4", "02 First Song (720p).mp4", "03 Encore_ Last_Song (720p).mp4"]
+    # The file name is made safe; the song's title and the tags keep the chapter's own words.
+    assert [title for title, _ in seen] == ["Intro", "First Song", "Encore: Last/Song"]
+    assert tagged[1] == ("02 First Song (720p).mp4", {"title": "First Song", "track": "2/3", "album": "Album Live"})
+    assert tagged[2][1]["title"] == "Encore: Last/Song"
+    # Neither the whole file nor the staging folder is left behind.
+    assert [path.name for path in root.iterdir() if not path.name.startswith(".")] == ["Album Live"]
+    assert not list(root.glob(".chapters-*"))
 
 
 def test_lines_posing_as_the_apps_are_ignored(fake_ytdlp: list[str], tmp_path: Path) -> None:

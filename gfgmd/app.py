@@ -85,6 +85,7 @@ class _Startup:
             from gfgmd.controllers.player_ctrl import PlayerController
             from gfgmd.controllers.prefs_ctrl import PrefsController
             from gfgmd.controllers.queue_ctrl import QueueController
+            from gfgmd.controllers.search_ctrl import SearchController
             from gfgmd.controllers.signins_ctrl import SignInsController
             from gfgmd.controllers.subscriptions_ctrl import SubscriptionsController
             from gfgmd.controllers.tools_ctrl import ToolsController
@@ -105,6 +106,7 @@ class _Startup:
             queue_ctrl = QueueController(context, manager, notifier, lyrics_fetch=fetch_json,
                                          release_player=player_ctrl.release_files, quick_fetch=oembed_fetch)
             analyze_ctrl = AnalyzeController(context, queue_ctrl, quick_fetch=oembed_fetch)
+            search_ctrl = SearchController(context, quick_fetch=oembed_fetch)
             library_ctrl = LibraryController(context, release_files=queue_ctrl.release_files)
             subs_ctrl = SubscriptionsController(context, queue_ctrl, notifier)
             signins_ctrl = SignInsController(context)
@@ -135,7 +137,7 @@ class _Startup:
             ctx = engine.rootContext()
             controllers = {
                 "appController": app_ctrl, "prefsController": prefs_ctrl, "queueController": queue_ctrl,
-                "analyzeController": analyze_ctrl, "libraryController": library_ctrl,
+                "analyzeController": analyze_ctrl, "searchController": search_ctrl, "libraryController": library_ctrl,
                 "subscriptionsController": subs_ctrl, "signInsController": signins_ctrl,
                 "toolsController": tools_ctrl, "updateController": update_ctrl, "thumbnails": thumbnails,
                 "playerController": player_ctrl,
@@ -320,8 +322,9 @@ class _Startup:
 
     def shutdown(self) -> None:
         """Stop downloads (they resume next time), background work, and the tray before exit."""
-        for name in ("queueController", "analyzeController", "subscriptionsController", "signInsController",
-                     "toolsController", "prefsController", "updateController", "thumbnails", "playerController"):
+        for name in ("queueController", "analyzeController", "searchController", "subscriptionsController",
+                     "signInsController", "toolsController", "prefsController", "updateController", "thumbnails",
+                     "playerController"):
             controller = self._controllers.get(name)
             if controller is not None:
                 controller.shutdown()

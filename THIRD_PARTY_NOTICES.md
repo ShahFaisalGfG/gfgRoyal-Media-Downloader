@@ -18,8 +18,8 @@ pure Python and `ctypes`: it ships no native module of its own.
 
 ## Programs downloaded separately, not bundled
 
-The app downloads these programs from their official GitHub releases when you first use it (or uses
-copies you installed yourself). They are separate programs under their own licences; the app runs
+The app downloads these programs from their official releases (GitHub, and Codeberg for gallery-dl)
+when you first use it (or uses copies you installed yourself). They are separate programs under their own licences; the app runs
 them and never includes or modifies them.
 
 | Program | Licence | Source |
@@ -27,6 +27,8 @@ them and never includes or modifies them.
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | The Unlicense (public domain) | <https://github.com/yt-dlp/yt-dlp/releases> |
 | [FFmpeg](https://ffmpeg.org/) and ffprobe, yt-dlp's builds | GPL-3.0-or-later (these builds include GPL components) | <https://github.com/yt-dlp/FFmpeg-Builds/releases>, source at <https://ffmpeg.org/download.html> |
 | [Deno](https://deno.com/) | MIT | <https://github.com/denoland/deno/releases> |
+| [gallery-dl](https://github.com/mikf/gallery-dl) | GPL-2.0-only | <https://codeberg.org/mikf/gallery-dl/releases> |
+| [spotDL](https://github.com/spotDL/spotify-downloader) | MIT | <https://github.com/spotDL/spotify-downloader/releases> |
 
 ## Qt and PySide6 (LGPL-3.0)
 

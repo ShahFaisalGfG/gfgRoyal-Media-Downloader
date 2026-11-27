@@ -2,8 +2,10 @@
 import QtQuick
 import QtQuick.Layouts
 
-// A playlist's or channel's files in the Library, as one row: its newest cover, its name, how many
-// songs and videos, and Play all. Its button opens it into its files, listed under it in order;
+import "MediaKind.js" as MediaKind
+
+// A playlist's, channel's, or post's files in the Library, as one row: its newest cover, its name,
+// how many songs, videos, and pictures, and Play all (View all for pictures). Its button opens it into its files, listed under it in order;
 // picking it picks all of them.
 Rectangle {
     id: group
@@ -89,8 +91,7 @@ Rectangle {
         AppButton {
             kind: "ghost"
             compact: true
-            text: group.fileCount + (group.kind === "audio" ? (group.fileCount === 1 ? " song" : " songs")
-                                                             : (group.fileCount === 1 ? " video" : " videos"))
+            text: MediaKind.count(group.fileCount, group.kind)
             iconName: group.expanded ? "chevronDown" : "chevronRight"
             Accessible.name: (group.expanded ? "Hide " : "Show ") + group.title
             onClicked: group.expandToggled(group.groupKey, !group.expanded)
@@ -98,8 +99,8 @@ Rectangle {
         AppButton {
             kind: "ghost"
             compact: true
-            iconName: "play"
-            toolTipText: "Play all, in order (Enter)"
+            iconName: group.kind === "photo" ? "photo" : "play"
+            toolTipText: group.kind === "photo" ? "View all, in order (Enter)" : "Play all, in order (Enter)"
             onClicked: group.playAllRequested(group.groupKey)
         }
         AppButton {

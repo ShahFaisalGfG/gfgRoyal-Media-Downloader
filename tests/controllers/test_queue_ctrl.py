@@ -22,7 +22,7 @@ from gfgmd.services.notifier import Notifier
 from gfgmd.services.tool_manager import ToolManager
 from gfgmd.utils.settings import get_default_settings, load_settings, save_settings
 
-TOOLS = ToolSet("FAKE-YT-DLP", "ffmpeg", "ffprobe", "deno")
+TOOLS = ToolSet("FAKE-YT-DLP", "ffmpeg", "ffprobe", "deno", gallery_dl="FAKE-GALLERY-DL")
 
 
 @pytest.fixture
@@ -32,6 +32,7 @@ def context(tmp_path: Path, monkeypatch) -> AppContext:
     settings = get_default_settings()
     settings["downloads"]["folder"] = str(tmp_path / "Downloads")
     settings["downloads"]["audio_folder"] = str(tmp_path / "Music")
+    settings["downloads"]["photo_folder"] = str(tmp_path / "Pictures")
     settings["notifications"]["enabled"] = False
     save_settings(settings)
     yield context
@@ -52,10 +53,12 @@ def fake_ffmpeg(command, on_line, stop):
 
 
 @pytest.fixture
-def queue(qapp, context, fake_ytdlp):
+def queue(qapp, context, fake_ytdlp, fake_gallerydl):
     def runner(command, on_line, stop):
         if command[0] == TOOLS.ffmpeg:
             return fake_ffmpeg(command, on_line, stop)
+        if command[0] == TOOLS.gallery_dl:
+            return run_to_completion(fake_gallerydl + command[1:], on_line, stop)
         return run_to_completion(fake_ytdlp + command[1:], on_line, stop)
     notifier = Notifier(lambda: None, lambda path: None)
     notifier.attach(None)
@@ -802,3 +805,104 @@ def test_smart_mode_uses_the_video_or_audio_defaults(qapp, queue, context):
     video, audio = (json.loads(job["options_json"]) for job in context.store.jobs())
     assert (video["kind"], video["max_height"], video["embed_thumbnail"]) == ("video", 720, True)
     assert (audio["kind"], audio["embed_thumbnail"]) == ("audio", False)
+
+
+def _history(context: AppContext) -> list[tuple[str, str]]:
+    """(kind, file name) of each library record, sorted."""
+    return sorted((record["kind"], Path(record["filepath"]).name) for record in context.store.history())
+
+
+def test_a_picture_site_link_saves_its_pictures(qapp, queue, context, tmp_path):
+    """A picture site's link saves pictures whatever was chosen, in the pictures folder."""
+    assert queue.addLinks("https://imgur.com/a/album1", "audio") == 1
+    assert wait_for(qapp, lambda: states(context) == ["done"])
+    job = context.store.jobs()[0]
+    assert json.loads(job["options_json"])["kind"] == "photo" and job["output_root"] == str(tmp_path / "Pictures")
+    assert job["message"] == "3 pictures saved"
+    assert wait_for(qapp, lambda: len(context.store.history()) == 3)
+    assert _history(context) == [("photo", "album 01.jpg"), ("photo", "album 02.png"), ("photo", "album 03.gif")]
+    folder = tmp_path / "Pictures" / "Imgur album1"
+    assert sorted(path.name for path in folder.iterdir()) == ["album 01.jpg", "album 02.png", "album 03.gif"]
+    assert queue.model.get(0)["kind"] == "photo"
+    # Saved before: the archive skips them all.
+    queue.addLinks("https://imgur.com/a/album1", "video")
+    assert wait_for(qapp, lambda: states(context) == ["done", "done"])
+    assert context.store.jobs()[1]["message"] == "All 3 were downloaded before"
+
+
+def test_a_direct_picture_link_keeps_its_name(qapp, queue, context, tmp_path):
+    assert queue.addLinks("https://fake.test/sunset.jpg", "video") == 1
+    assert wait_for(qapp, lambda: states(context) == ["done"])
+    assert (tmp_path / "Pictures" / "sunset.jpg").read_bytes() == b"direct"
+    assert wait_for(qapp, lambda: _history(context) == [("photo", "sunset.jpg")])
+
+
+def test_a_post_saves_its_videos_then_its_pictures(qapp, queue, context, tmp_path, fake_gallerydl):
+    assert queue.addLinks("https://x.com/mixed/status/1", "video") == 1
+    assert wait_for(qapp, lambda: states(context) == ["done"])
+    assert context.store.jobs()[0]["message"] == "1 video and 1 picture saved"
+    assert wait_for(qapp, lambda: len(context.store.history()) == 2)
+    assert _history(context) == [("photo", "mixed 01.jpg"), ("video", "Mixed Post (720p).mp4")]
+    # The pictures pass leaves the post's videos to yt-dlp, and its one picture needs no folder.
+    argv = json.loads((Path(fake_gallerydl[-1]) / "gallery-argv.json").read_text(encoding="utf-8"))
+    assert "--filter" in argv and "extractor.twitter.videos=false" in argv
+    assert (tmp_path / "Pictures" / "mixed 01.jpg").is_file() and not (tmp_path / "Pictures" / "X (Twitter) 1").exists()
+    picture = next(record for record in context.store.history() if record["kind"] == "photo")
+    assert picture["output_root"] == str(tmp_path / "Pictures")
+
+
+def test_a_post_with_pictures_only_is_done_with_them(qapp, queue, context, tmp_path):
+    """yt-dlp finds no video in it; the pictures pass saves the post's pictures in its own folder."""
+    assert queue.addLinks("https://x.com/pictures/status/2", "video") == 1
+    assert wait_for(qapp, lambda: states(context) == ["done"])
+    job = context.store.jobs()[0]
+    assert job["message"] == "4 pictures saved" and job["error_key"] == ""
+    folder = tmp_path / "Pictures" / "X (Twitter) 2"
+    assert sorted(path.name for path in folder.iterdir()) == ["post 01.jpg", "post 02.jpg", "post 03.webp",
+                                                              "post 04.jpg"]
+
+
+def test_saving_pictures_can_be_turned_off(qapp, queue, context):
+    settings = load_settings()
+    settings["downloads"]["save_photos"] = False
+    save_settings(settings)
+    queue.addLinks("https://x.com/pictures/status/2", "video")
+    assert wait_for(qapp, lambda: states(context) == ["failed"])
+    assert context.store.jobs()[0]["message"] == "This post has only pictures, no video."
+
+
+def test_a_spotify_album_downloads_its_songs_from_youtube(qapp, queue, context, tmp_path):
+    """Queued as songs whatever was chosen; each found song is saved, named, and listed under the album."""
+    from tests.core.test_spotify import ALBUM_ID, album_page
+    from gfgmd.controllers import queue_ctrl
+
+    class Offline(queue_ctrl.SpotifyExecutor):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, page=lambda url: album_page("Song One", "Nowhere", "Song Three"),
+                             cover=lambda url: b"\xff\xd8\xff", **kwargs)
+    with patch.object(queue_ctrl, "SpotifyExecutor", Offline):
+        assert queue.addLinks(f"https://open.spotify.com/album/{ALBUM_ID}?si=share", "video") == 1
+        assert wait_for(qapp, lambda: states(context) in (["done"], ["failed"]))
+    job = context.store.jobs()[0]
+    assert json.loads(job["options_json"])["kind"] == "audio" and job["output_root"] == str(tmp_path / "Music")
+    assert job["state"] == "done" and job["message"] == "2 songs saved, 1 couldn't be downloaded"
+    assert job["title"] == "Fake Album"
+    assert wait_for(qapp, lambda: len(context.store.history()) == 2)
+    assert sorted(Path(record["filepath"]).name for record in context.store.history()) == [
+        "Fake Artist - Song One.mp4", "Fake Artist - Song Three.mp4"]
+    items = {item["title"]: item["state"] for item in context.store.job_items(job["id"])}
+    assert items == {"Fake Artist - Song One": "done", "Fake Artist - Nowhere": "skipped",
+                     "Fake Artist - Song Three": "done"}
+
+
+
+def test_download_again_saves_a_picture_again(qapp, queue, context, tmp_path):
+    """Download again on a library picture saves it once more, past the pictures archive."""
+    queue.addLinks("https://imgur.com/a/album1", "video")
+    assert wait_for(qapp, lambda: states(context) == ["done"])
+    queue.download_again("https://imgur.com/a/album1", "photo", "jpg")
+    assert wait_for(qapp, lambda: states(context) == ["done", "done"])
+    again = context.store.jobs()[1]
+    options = json.loads(again["options_json"])
+    assert (options["kind"], options["ignore_archive"]) == ("photo", True)
+    assert again["message"] == "3 pictures saved"

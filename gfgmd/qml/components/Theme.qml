@@ -180,6 +180,12 @@ QtObject {
         forward: "\uEB9D",
         lyrics: "\uE8E4",
         pin: "\uE718",
-        unpin: "\uE77A"
+        unpin: "\uE77A",
+        photo: "\uE91B",
+        rotate: "\uE7AD",
+        zoomIn: "\uE8A3",
+        zoomOut: "\uE71F",
+        fitPage: "\uE9A6",
+        slideshow: "\uE786"
     })
 }

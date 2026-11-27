@@ -1,7 +1,8 @@
 # analyze_ctrl.py - read a link's details for Download options and queue it with chosen options
 #
 # Each link read is a _Read: YouTube's quick title and thumbnail (oEmbed, about a second), then
-# yt-dlp's details (several seconds). A playlist's or channel's videos arrive page by page. Reading
+# yt-dlp's details (several seconds), or gallery-dl's list of pictures for a picture link and for a
+# post with pictures only. A playlist's or channel's videos arrive page by page. Reading
 # starts when a link is pasted (prefetch), and finished reads are kept for a while, so opening
 # Download options is often instant. The panel shows one read at a time; a read that finishes after
 # another link was opened only fills the cache.
@@ -23,11 +24,14 @@ from gfgmd.core.analyze import Analysis, AnalyzeError, Entry, analyze, analyze_l
 from gfgmd.core.archive import archive_path, read_archive_ids
 from gfgmd.core.command import Auth
 from gfgmd.core.errors import Failure
+from gfgmd.core.gallery import LIST_LIMIT, GallerySpec, list_pictures, photos_only
 from gfgmd.core.options import DownloadOptions
 from gfgmd.core.progress import is_container
 from gfgmd.core.quick_info import QuickInfo, quick_info
 from gfgmd.core.schedule import live_launch_time
 from gfgmd.core.secret_store import SecretError
+from gfgmd.core.sites import site_by_key
+from gfgmd.core.spotify import EMBED_LIMIT, SpotifyError, read_page, to_analysis
 from gfgmd.core.sources import Source, canonical_url, single_video, source_from_url, video_link
 from gfgmd.controllers.queue_ctrl import QueueController, base_options, with_network
 from gfgmd.models.entry_model import EntryModel
@@ -221,6 +225,42 @@ class AnalyzeController(QObject):
         return current.result.kind == "playlist" if current.result is not None else current.streams and not current.error
 
     @Property(bool, notify=changed)
+    def songsOnly(self) -> bool:
+        """True for a Spotify link: its songs come from YouTube as audio, whatever Video | Audio says."""
+        return self._current is not None and self._current.source.site == "spotify"
+
+    @Property(str, notify=changed)
+    def listNote(self) -> str:
+        """A word on what the list shows: a Spotify playlist past the 100 songs its page lists."""
+        result = self._result
+        if self.songsOnly and result is not None and result.kind == "playlist" and len(result.entries) >= EMBED_LIMIT:
+            return (f"Spotify's page lists the first {EMBED_LIMIT} songs. With all of them ticked, the download "
+                    "reads the whole playlist with spotDL first, which can take a few minutes.")
+        return ""
+
+    @Property(bool, notify=changed)
+    def photos(self) -> bool:
+        """True when the link saves pictures: a picture site's, a direct picture, or a post with pictures only."""
+        return self._result is not None and self._result.kind == "photo"
+
+    @Property(list, notify=changed)
+    def pictures(self) -> list[dict[str, Any]]:
+        """The pictures listed for a picture link ({name, preview}), the first LIST_LIMIT at most."""
+        result = self._result
+        if result is None or result.kind != "photo":
+            return []
+        return [{"name": entry.title, "preview": entry.thumbnail} for entry in result.entries]
+
+    @Property(bool, notify=changed)
+    def postPictures(self) -> bool:
+        """True for a post on a site whose posts can hold pictures too (Instagram, X, ...): Download
+        options offers to save them along with its videos."""
+        current = self._current
+        site = site_by_key(current.source.site) if current is not None else None
+        return (current is not None and current.source.kind == "post" and site is not None and site.photos
+                and not self.photos)
+
+    @Property(bool, notify=changed)
     def selectable(self) -> bool:
         current = self._current
         if current is None:
@@ -251,6 +291,9 @@ class AnalyzeController(QObject):
         if result is None:
             return f"{count_media(self._shown, self._media_kind())} so far" if current.streams and self._shown else ""
         parts = []
+        if result.kind == "photo":
+            count = len(result.entries)
+            return f"{LIST_LIMIT} or more pictures" if count >= LIST_LIMIT else count_media(count, "photo")
         if result.kind == "playlist":
             parts.append(count_media(len(result.entries), self._media_kind()))
         elif result.duration:
@@ -262,7 +305,9 @@ class AnalyzeController(QObject):
         return "  ·  ".join(parts)
 
     def _media_kind(self) -> str:
-        """"audio" for a link to music (YouTube Music, SoundCloud, Bandcamp), whose lists hold songs."""
+        """"audio" for a link to music (YouTube Music, SoundCloud, Bandcamp, Spotify), whose lists hold songs."""
+        if self._current is not None and self._current.source.site == "spotify":
+            return "audio"
         host = (urlsplit(self._current.url if self._current else "").hostname or "").lower()
         music = host.startswith("music.") or any(host == site or host.endswith("." + site) for site in _MUSIC_SITES)
         return "audio" if music else "video"
@@ -293,6 +338,20 @@ class AnalyzeController(QObject):
     def language(self) -> str:
         """The video's own language code ("" when the site doesn't say)."""
         return self._result.language if self._result else ""
+
+    @Property(float, notify=changed)
+    def duration(self) -> float:
+        """The video's length in seconds (0 for a list, or when the site doesn't say)."""
+        result = self._result
+        return result.duration if result is not None and result.kind == "video" else 0.0
+
+    @Property(list, notify=changed)
+    def chapters(self) -> list[dict[str, Any]]:
+        """The video's chapters ({title, start, end} in seconds), for picking a part or splitting by them."""
+        result = self._result
+        if result is None or result.kind != "video":
+            return []
+        return [{"title": chapter.title, "start": chapter.start, "end": chapter.end} for chapter in result.chapters]
 
     # ── Reading ───────────────────────────────────────────────────────────
 
@@ -395,8 +454,9 @@ class AnalyzeController(QObject):
 
     def _work(self, read: _Read, tools: Any, options: DownloadOptions) -> tuple[Analysis | None, Failure | None]:
         """On the pool: run yt-dlp with the site's sign-in, after reading which entries are archived.
+        A picture link is read by gallery-dl instead, and so is a post that yt-dlp finds no video in.
 
-        A link yt-dlp can't read comes back as its Failure, so the panel can offer the fix it needs
+        A link that can't be read comes back as its Failure, so the panel can offer the fix it needs
         (Sign in, Update yt-dlp) rather than only its message.
         """
         context = self._context
@@ -411,8 +471,17 @@ class AnalyzeController(QObject):
             except (SecretError, OSError, TimeoutError):
                 checkout = None
         read.archived = read_archive_ids(archive_path(context.download_root(options.kind), read.source, options.profile))
+        pictures = GallerySpec(read.url, read.source, context.download_root("photo"), context.cache_dir / "gallery-dl",
+                               auth, options)
         try:
-            if read.streams:
+            if read.source.site == "spotify":
+                try:
+                    result = to_analysis(read_page(read.url))
+                except SpotifyError as error:
+                    return None, error.failure
+            elif photos_only(read.source, read.url):
+                result = list_pictures(pictures, tools, stop=read.stop)
+            elif read.streams:
                 result = analyze_list(read.url, tools, context.cache_dir, auth, options, stop=read.stop,
                                       on_entry=lambda data: self._listed(read, data),
                                       on_line=lambda line: self._progress_line(read, line))
@@ -421,7 +490,13 @@ class AnalyzeController(QObject):
                                  single=not read.source.is_collection, stop=read.stop,
                                  on_line=lambda line: self._progress_line(read, line))
         except AnalyzeError as error:
-            return None, error.failure
+            site = site_by_key(read.source.site)
+            if error.failure.category.key != "no_video" or site is None or not site.photos:
+                return None, error.failure
+            try:
+                result = list_pictures(pictures, tools, stop=read.stop)  # a post with pictures only
+            except AnalyzeError as again:
+                return None, again.failure
         finally:
             if checkout is not None and account is not None:
                 context.vault.checkin(account["id"], checkout)
@@ -579,6 +654,8 @@ class AnalyzeController(QObject):
             return False
         result = current.result
         chosen = dict(options)
+        if result.kind == "photo":
+            chosen["kind"] = "photo"  # every picture the link holds; the list showed the first ones
         items: list[dict[str, Any]] = []
         if result.kind == "playlist" and result.selectable:
             selected = self._entries.selected()
@@ -589,6 +666,10 @@ class AnalyzeController(QObject):
                 chosen["items"] = items_spec(entry.index for entry in selected)
             items = [{"id": e.id, "title": e.title, "index": e.index, "duration": e.duration, "url": e.url,
                       "thumbnail": e.thumbnail} for e in selected]
+        if current.source.site == "spotify":
+            # The songs are listed as each is found on YouTube; the picked ones travel as their positions.
+            chosen["kind"] = "audio"
+            items = []
         not_before = 0.0
         if result.live_status == "is_upcoming":
             chosen["wait_for_video"] = True

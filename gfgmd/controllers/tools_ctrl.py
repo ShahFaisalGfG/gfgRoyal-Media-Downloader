@@ -1,4 +1,4 @@
-# tools_ctrl.py - yt-dlp, FFmpeg, and Deno for QML: first-run setup, versions, updates, rollback
+# tools_ctrl.py - the download tools for QML: first-run setup, versions, updates, rollback
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from gfgmd.core.tool_install import (
     ToolVerifyError,
     packages,
 )
-from gfgmd.core.tools import TOOL_NAMES, path_tools
+from gfgmd.core.tools import EXTRA_TOOLS, REQUIRED_TOOLS, TOOL_NAMES, path_tools
 from gfgmd.services.tasks import TaskRunner
 from gfgmd.services.tool_manager import ToolManager
 from gfgmd.utils.format import format_bytes
@@ -32,7 +32,12 @@ FIRST_CHECK_MS = 90_000
 DAILY_MS = 24 * 3600 * 1000
 METERED_RETRY_MS = 30 * 60 * 1000
 # ffprobe comes with FFmpeg, so the window names it FFmpeg too.
-_LABELS = {"yt-dlp": "yt-dlp", "ffmpeg": "FFmpeg", "ffprobe": "FFmpeg", "deno": "Deno"}
+_LABELS = {"yt-dlp": "yt-dlp", "ffmpeg": "FFmpeg", "ffprobe": "FFmpeg", "deno": "Deno",
+           "gallery-dl": "gallery-dl", "spotdl": "spotDL"}
+# What each extra program adds, for the note when it is missing or failed to install, and the word
+# the Downloads card's title uses for it ("Get the picture and Spotify tools").
+_EXTRA_USES = {"gallery-dl": "saving pictures from posts", "spotdl": "reading long Spotify playlists"}
+_EXTRA_TOPICS = {"gallery-dl": "picture", "spotdl": "Spotify"}
 
 # What the window says; the details go to the log.
 INSTALL_OFFLINE = "Couldn't download the tools. Check your internet connection and try again."
@@ -51,6 +56,7 @@ class _InstallResult:
     installed: list[str] = field(default_factory=list)
     failure: str = ""
     stopped: bool = False  # the user cancelled before anything changed
+    extras_failed: list[str] = field(default_factory=list)  # extras asked for that didn't install
 
 
 class ToolsController(QObject):
@@ -66,7 +72,11 @@ class ToolsController(QObject):
         self._manager = manager
         self._runner = TaskRunner(1, self)
         self._rows: list[dict[str, Any]] = []
-        self._missing = manager.missing()
+        self._missing: list[str] = []
+        self._missing_extras: list[str] = []
+        self._managed = True
+        self._read_state()
+        self._extras_later = False  # Not now on the Downloads card, until the app starts again
         self._updates: list[str] = []
         self._busy = False
         self._stage = ""
@@ -90,8 +100,30 @@ class ToolsController(QObject):
 
     @Property(bool, notify=changed)
     def partlyMissing(self) -> bool:
-        """True when some programs are found but not all (one was removed or damaged since setup)."""
-        return bool(self._missing) and len(self._missing) < len(TOOL_NAMES)
+        """True when some required programs are found but not all (one was removed or damaged since setup)."""
+        return bool(self._missing) and len(self._missing) < len(REQUIRED_TOOLS)
+
+    @Property(str, notify=changed)
+    def extrasNote(self) -> str:
+        """What the missing extra programs mean, for Preferences > Tools ("" when none is missing)."""
+        return extras_text(self._missing_extras)
+
+    @Property(bool, notify=changed)
+    def offerExtras(self) -> bool:
+        """True when Downloads offers the missing extras: the required programs are found, the app keeps
+        its own copies (other sources are set up in Preferences > Tools), and Not now wasn't clicked."""
+        return (not self._missing and bool(self._missing_extras) and self._managed and not self._extras_later
+                and sys.platform == "win32")
+
+    @Property(str, notify=changed)
+    def extrasTitle(self) -> str:
+        """The Downloads card's title for the missing extras ("" when none is missing)."""
+        return extras_offer(self._missing_extras, self._wanted_mb())[0]
+
+    @Property(str, notify=changed)
+    def extrasOffer(self) -> str:
+        """The Downloads card's words about the missing extras ("" when none is missing)."""
+        return extras_offer(self._missing_extras, self._wanted_mb())[1]
 
     @Property(bool, notify=changed)
     def canInstall(self) -> bool:
@@ -100,13 +132,13 @@ class ToolsController(QObject):
 
     @Property(bool, notify=changed)
     def foundOnPath(self) -> bool:
-        """True when every program is already on PATH (installed with winget, for example)."""
-        return all(name in path_tools() for name in TOOL_NAMES)
+        """True when every required program is already on PATH (installed with winget, for example)."""
+        return all(name in path_tools() for name in REQUIRED_TOOLS)
 
     @Property(str, notify=changed)
     def downloadSize(self) -> str:
-        """About how much the first-run download is."""
-        return f"about {sum(package.approx_mb for package in packages()):,} MB"
+        """About how much Download tools fetches."""
+        return f"about {self._wanted_mb():,} MB"
 
     @Property(list, notify=changed)
     def rows(self) -> list[dict[str, Any]]:
@@ -137,9 +169,24 @@ class ToolsController(QObject):
     @Slot()
     def refresh(self) -> None:
         """Find each program and read its version in the background."""
-        self._missing = self._manager.missing()
+        self._read_state()
         self._runner.start(self._manager.status, on_done=self._set_rows)
         self.changed.emit()
+
+    def _read_state(self) -> None:
+        """Which programs can't be found, and whether the app keeps its own copies."""
+        self._missing = self._manager.missing()
+        self._missing_extras = self._manager.missing_extras()
+        self._managed = load_settings().get("tools", {}).get("source", "managed") == "managed"
+
+    def _wanted(self) -> list[str]:
+        """What Download tools installs: the missing programs, extras included (all of them on first run)."""
+        return self._missing + self._missing_extras or list(TOOL_NAMES)
+
+    def _wanted_mb(self) -> int:
+        """About how many MB Download tools fetches (ffprobe comes with FFmpeg)."""
+        wanted = {"ffmpeg" if name == "ffprobe" else name for name in self._wanted()}
+        return sum(package.approx_mb for package in packages() if package.tool in wanted)
 
     def _set_rows(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
@@ -147,12 +194,20 @@ class ToolsController(QObject):
 
     @Slot()
     def installMissing(self) -> None:
-        """Download the programs that are missing (all three on first run)."""
-        self._install(self._manager.missing() or list(TOOL_NAMES))
+        """Download the programs that are missing, extras included (all of them on first run)."""
+        self._read_state()
+        self._install(self._wanted())
+
+    @Slot()
+    def extrasLater(self) -> None:
+        """Not now: Downloads stops offering the extras until the app starts again; Preferences > Tools
+        still says they're missing and gets them with Update tools."""
+        self._extras_later = True
+        self.changed.emit()
 
     @Slot()
     def updateAll(self) -> None:
-        """Install the newest yt-dlp, FFmpeg, and Deno."""
+        """Install the newest release of every program the app keeps."""
         self._install(list(TOOL_NAMES))
 
     @Slot(str)
@@ -174,7 +229,9 @@ class ToolsController(QObject):
     def _run_install(self, names: list[str], cancel: threading.Event) -> _InstallResult:
         """On the pool: install, turning an expected failure into what the window says (details to the log)."""
         try:
-            return _InstallResult(self._manager.install(names, self._report, cancel))
+            installed = self._manager.install(names, self._report, cancel)
+            asked = dict.fromkeys(name for name in names if name in EXTRA_TOOLS)
+            return _InstallResult(installed, extras_failed=[name for name in asked if name not in installed])
         except ToolInstallCancelled:
             return _InstallResult(failure=INSTALL_STOPPED, stopped=True)
         except ToolInstallError as error:
@@ -195,7 +252,10 @@ class ToolsController(QObject):
         if result.failure:
             self._install_failed(result.failure)
             return
-        self._finish("The download tools are ready.")
+        failed = extras_text(result.extras_failed, failed=True)
+        self._finish("The download tools are ready." + (" " + failed if failed else ""))
+        if failed:
+            self.notice.emit(failed)
         self._updates = [name for name in self._updates if name not in result.installed]
         self.toolsReady.emit()
 
@@ -289,6 +349,34 @@ class ToolsController(QObject):
         self._cancel.set()
         self._daily.stop()
         self._runner.shutdown(3000)
+
+
+def extras_text(names: list[str], failed: bool = False) -> str:
+    """What missing extras mean, as Preferences > Tools and a notice say it ("" for none). The app is
+    ready without them, so its button there reads Update tools (which installs them too)."""
+    if not names:
+        return ""
+    parts = [f"{_LABELS.get(name, name)} ({_EXTRA_USES.get(name, 'some links')})" for name in names]
+    listed = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    if failed:
+        return f"{listed} couldn't be installed. Click Update tools in Preferences > Tools to try again."
+    one = len(parts) == 1
+    return f"{listed} {'is' if one else 'are'} not installed. Click Update tools to get {'it' if one else 'them'}."
+
+
+def extras_offer(names: list[str], size_mb: int) -> tuple[str, str]:
+    """The Downloads card's title and words for missing extras (empty for none): what each one is for,
+    and that other downloads work without them."""
+    if not names:
+        return "", ""
+    one = len(names) == 1
+    title = f"Get the {' and '.join(_EXTRA_TOPICS.get(name, name) for name in names)} tool{'' if one else 's'}"
+    needs = ", and ".join(f"{_EXTRA_USES.get(name, 'some links')} needs {_LABELS.get(name, name)}" for name in names)
+    source = ("It comes from its official source, is checked for safety, and stays up to date on its own. "
+              "Other downloads work without it.") if one else (
+              "They come from their official sources, are checked for safety, and stay up to date on their own. "
+              "Other downloads work without them.")
+    return title, f"{needs[0].upper()}{needs[1:]} (about {size_mb:,} MB). {source}"
 
 
 def _install_text(error: ToolInstallError) -> str:
